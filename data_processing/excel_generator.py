@@ -2,11 +2,13 @@ import openpyxl
 import requests
 from datetime import datetime, timedelta
 from openpyxl.styles import Font, Alignment
+
+from data_processing.what_if_table import update_what_if_table
 from utils.evaluate_cell import evaluate_cell
-from utils.evaluate_formula import evaluate_formula, get_cell_value
 import os
 import logging
 import re
+import what_if_table
 
 # Setup logging
 logging.basicConfig(filename='excel_generator.log', level=logging.DEBUG)
@@ -43,8 +45,8 @@ def generate_spreadsheet_from_template(template_path, output_path, api_url):
         # Fetch data from API
         data = fetch_data_from_api(api_url)
 
-        # Use the 6th item in the data list (index 5)
-        property_data = data[5]
+        # Extract property data
+        property_data = data[35]
 
         # Calculate opened actual (opened work orders - canceled work orders)
         opened_actual = property_data['NewWorkOrders_Current'] - property_data['CancelledWorkOrder_Current']
@@ -68,7 +70,7 @@ def generate_spreadsheet_from_template(template_path, output_path, api_url):
 
         for cell, value in cells_to_update.items():
             sheet[cell] = value
-            sheet[cell].font = aptos_font
+            sheet[cell].font = aptos_font # Apply Aptos Narrow Bold font
 
             # if cell in ['D4', 'M8']:  # Assuming these cells might need text wrapping
             #     sheet[cell].alignment = Alignment(wrap_text=True)
@@ -80,12 +82,22 @@ def generate_spreadsheet_from_template(template_path, output_path, api_url):
 
         # Update L12 with the new B24 value
         current_l12_text = sheet['L12'].value
-        new_l12_text = re.sub(r'\d+(\.\d+)?', str(b24_value), current_l12_text)
+        new_l12_text = re.sub(r'\d+(\.\d+)?', str(round(b24_value, 1)), current_l12_text)
         sheet['L12'] = new_l12_text
         sheet['L12'].font = aptos_font
         sheet['L12'].alignment = Alignment(wrap_text=True)
 
         logging.info(f"Updated L12 text: {new_l12_text}")
+
+        # Calculate metrics
+        metrics = what_if_table.calculate_metrics(property_data, sheet, opened_actual)
+
+        # Update what-if table
+        update_what_if_table(sheet, break_even_value=metrics['break_even_value'], current_output_value=metrics['current_output_value'])
+
+
+
+
 
         # Ensure the output directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
