@@ -1,38 +1,23 @@
 import openpyxl
-import requests
 from datetime import datetime, timedelta
 from openpyxl.styles import Font, Alignment
-
-from data_processing.what_if_table import update_what_if_table
+from what_if_table import update_what_if_table
 from utils.evaluate_cell import evaluate_cell
+from property_search import PropertySearch
+from typing import List, Dict
 import os
 import logging
 import re
 import what_if_table
+from datetime import datetime
+import os
+
 
 # Setup logging
 logging.basicConfig(filename='excel_generator.log', level=logging.DEBUG)
 
-def fetch_data_from_api(api_url):
-    logging.info(f"Fetching data from API: {api_url}")
-    try:
-        response = requests.get(api_url)
-        response.raise_for_status()  # This will raise an HTTPError for bad responses
-        logging.info("Data fetched successfully from API.")
-        return response.json()['data']
-    except requests.exceptions.HTTPError as http_err:
-        if response.status_code == 403:
-            logging.error(f"403 Forbidden error when accessing the API. This might be due to authentication issues or lack of permissions.")
-            logging.error(f"Response content: {response.text}")
-            raise Exception(f"403 Forbidden: Unable to access the API. Please check your authentication and permissions.")
-        else:
-            logging.error(f"HTTP error occurred: {http_err}")
-            raise Exception(f"HTTP error occurred: {http_err}")
-    except requests.exceptions.RequestException as err:
-        logging.error(f"An error occurred while fetching data from API: {err}")
-        raise Exception(f"Error fetching data from API: {err}")
-
-def generate_spreadsheet_from_template(template_path, output_path, api_url):
+def generate_spreadsheet_from_template(template_path, output_path, api_url, property_data=None):
+    from utils.fetch_data import fetch_data_from_api
     logging.info(f"Loading template from: {template_path}")
     # Load the template
     workbook = openpyxl.load_workbook(template_path)
@@ -43,18 +28,37 @@ def generate_spreadsheet_from_template(template_path, output_path, api_url):
 
     try:
         # Fetch data from API
-        data = fetch_data_from_api(api_url)
-
-        # Extract property data
-        property_data = data[35]
+        if property_data is None:
+            data = fetch_data_from_api(api_url)
+            # Extract property data
+            property_data = data[32]
 
         # Calculate opened actual (opened work orders - canceled work orders)
         opened_actual = property_data['NewWorkOrders_Current'] - property_data['CancelledWorkOrder_Current']
 
-        # Calculate date range
-        end_date = datetime.strptime(property_data['LatestPostDate'], '%a, %d %b %Y %H:%M:%S GMT')
-        start_date = end_date - timedelta(days=30)  # Assuming a 30-day period
-        date_range = f"{start_date.strftime('%m/%d/%y')} - {end_date.strftime('%m/%d/%y')}"
+        # Handle date parsing based on input format
+        try:
+            if isinstance(property_data['LatestPostDate'], str):
+                # Try parsing the standard API format first
+                try:
+                    end_date = datetime.strptime(property_data['LatestPostDate'], '%a, %d %b %Y %H:%M:%S GMT')
+                except ValueError:
+                    # If that fails, try parsing ISO format
+                    end_date = datetime.fromisoformat(property_data['LatestPostDate'].replace('Z', '+00:00'))
+            elif isinstance(property_data['LatestPostDate'], datetime):
+                end_date = property_data['LatestPostDate']
+            else:
+                raise ValueError(f"Unsupported date format: {type(property_data['LatestPostDate'])}")
+
+            start_date = end_date - timedelta(days=30)
+            date_range = f"{start_date.strftime('%m/%d/%y')} - {end_date.strftime('%m/%d/%y')}"
+
+        except Exception as e:
+            logging.error(f"Error parsing date: {str(e)}")
+            # Fallback to current date if date parsing fails
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)
+            date_range = f"{start_date.strftime('%m/%d/%y')} - {end_date.strftime('%m/%d/%y')}"
 
         # Update cells with API data
         cells_to_update = {
@@ -93,7 +97,8 @@ def generate_spreadsheet_from_template(template_path, output_path, api_url):
         metrics = what_if_table.calculate_metrics(property_data, sheet, opened_actual)
 
         # Update what-if table
-        update_what_if_table(sheet, break_even_value=metrics['break_even_value'], current_output_value=metrics['current_output_value'])
+        update_what_if_table(sheet, break_even_value=metrics['break_even_value'],
+                                    current_output_value=metrics['current_output_value'])
 
 
 
@@ -110,6 +115,66 @@ def generate_spreadsheet_from_template(template_path, output_path, api_url):
         logging.error(f"An error occurred while generating the spreadsheet: {str(e)}")
         raise
 
+def generate_multi_property_report(template_path: str,
+                                   selected_properties: List[int],
+                                   cache_data: List[Dict],
+                                   api_url: str) -> str:
+    """
+    Generate a multi-sheet Excel report for selected properties using existing excel_generator functionality.
+
+    Args:
+        template_path: Path to the Excel template
+        selected_properties: List of property keys to include in report
+        cache_data: Cached property data
+        api_url: API URL for data fetching
+
+    Returns:
+        Path to the generated report
+    """
+    try:
+        # Create searcher instance
+        searcher = PropertySearch(cache_data)
+
+        # Get matching properties
+        properties = searcher.search_properties(property_keys=selected_properties)
+
+        # Create timestamp for unique folder name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_output_dir = f'output/multi_property_report_{timestamp}'
+        os.makedirs(base_output_dir, exist_ok=True)
+
+        # Generate report for each property
+        generated_files = []
+        for prop in properties:
+            # Filter API data for this property
+            filtered_api_data = [p for p in cache_data if p['PropertyKey'] == prop.property_key]
+
+            if not filtered_api_data:
+                logging.warning(f"No data found for property {prop.property_key}")
+                continue
+
+            # Create property-specific output path
+            property_output_path = os.path.join(
+                base_output_dir,
+                f"{prop.property_name.replace(' ', '_')[:31]}.xlsx"
+            )
+
+            # Use existing generate_spreadsheet_from_template function
+            # but with filtered data for this property
+            generate_spreadsheet_from_template(
+                template_path=template_path,
+                output_path=property_output_path,
+                api_url=api_url,
+                property_data=filtered_api_data[0]  # Pass the specific property data
+            )
+
+            generated_files.append(property_output_path)
+
+        return base_output_dir
+
+    except Exception as e:
+        logging.error(f"Error generating multi-property report: {str(e)}", exc_info=True)
+        raise
 # Usage
 template_path = '/Users/brandonhightower/PycharmProjects/AION-make-ready/break_even_template.xlsx'
 output_path = 'output/filled_work_order_report.xlsx'
