@@ -4,6 +4,7 @@ from openpyxl.styles import Font, Alignment
 from what_if_table import update_what_if_table
 from utils.evaluate_cell import evaluate_cell
 from property_search import PropertySearch
+from models.models import Property
 from typing import List, Dict
 import os
 import logging
@@ -115,29 +116,17 @@ def generate_spreadsheet_from_template(template_path, output_path, api_url, prop
         logging.error(f"An error occurred while generating the spreadsheet: {str(e)}")
         raise
 
-def generate_multi_property_report(template_path: str,
-                                   selected_properties: List[int],
-                                   cache_data: List[Dict],
-                                   api_url: str) -> str:
+
+def generate_multi_property_report(
+        template_path: str,
+        properties: List[Property],
+        api_url: str
+) -> str:
     """
-    Generate a multi-sheet Excel report for selected properties using existing excel_generator functionality.
-
-    Args:
-        template_path: Path to the Excel template
-        selected_properties: List of property keys to include in report
-        cache_data: Cached property data
-        api_url: API URL for data fetching
-
-    Returns:
-        Path to the generated report
+    Generate a multi-sheet Excel report for selected properties.
+    Now accepts Property models directly instead of raw data.
     """
     try:
-        # Create searcher instance
-        searcher = PropertySearch(cache_data)
-
-        # Get matching properties
-        properties = searcher.search_properties(property_keys=selected_properties)
-
         # Create timestamp for unique folder name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_output_dir = f'output/multi_property_report_{timestamp}'
@@ -145,36 +134,43 @@ def generate_multi_property_report(template_path: str,
 
         # Generate report for each property
         generated_files = []
-        for prop in properties:
-            # Filter API data for this property
-            filtered_api_data = [p for p in cache_data if p['PropertyKey'] == prop.property_key]
-
-            if not filtered_api_data:
-                logging.warning(f"No data found for property {prop.property_key}")
-                continue
-
+        for property in properties:
             # Create property-specific output path
             property_output_path = os.path.join(
                 base_output_dir,
-                f"{prop.property_name.replace(' ', '_')[:31]}.xlsx"
+                f"{property.property_name.replace(' ', '_')[:31]}.xlsx"
             )
 
-            # Use existing generate_spreadsheet_from_template function
-            # but with filtered data for this property
+            # Convert Property model back to dict format expected by generate_spreadsheet_from_template
+            property_data = {
+                'PropertyKey': property.property_key,
+                'PropertyName': property.property_name,
+                'TotalUnitCount': property.total_unit_count,
+                'LatestPostDate': property.latest_post_date,
+                'OpenWorkOrder_Current': property.metrics.open_work_orders,
+                'NewWorkOrders_Current': property.metrics.new_work_orders,
+                'CompletedWorkOrder_Current': property.metrics.completed_work_orders,
+                'CancelledWorkOrder_Current': property.metrics.cancelled_work_orders,
+                'PendingWorkOrders': property.metrics.pending_work_orders,
+                'PercentageCompletedThisPeriod': property.metrics.percentage_completed
+            }
+
+            # Generate spreadsheet
             generate_spreadsheet_from_template(
                 template_path=template_path,
                 output_path=property_output_path,
                 api_url=api_url,
-                property_data=filtered_api_data[0]  # Pass the specific property data
+                property_data=property_data
             )
 
             generated_files.append(property_output_path)
 
         return base_output_dir
-
     except Exception as e:
         logging.error(f"Error generating multi-property report: {str(e)}", exc_info=True)
         raise
+
+
 # Usage
 template_path = '/Users/brandonhightower/PycharmProjects/AION-make-ready/break_even_template.xlsx'
 output_path = 'output/filled_work_order_report.xlsx'

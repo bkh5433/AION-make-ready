@@ -1,13 +1,17 @@
 from flask import Flask, jsonify, request
 from datetime import datetime, timedelta
 import logging
+from models.models import *
+
 from functools import wraps
 from typing import Dict, List, Optional, Union
+from pydantic import ValidationError
+from property_search import PropertySearch
 
 app = Flask(__name__)
 
 # Setup logging
-logging.basicConfig(filename='api.log', level=logging.INFO)
+logging.basicConfig(filename='api.log', level=logging.DEBUG)
 
 # In-memory cache with type hints
 cache: Dict[str, Optional[Union[List[Dict], datetime]]] = {
@@ -71,86 +75,77 @@ def search_properties():
     Search properties by name.
     Query parameter:
     - q: Search term for property name (optional)
-
-    Example: /api/properties/search?q=Park
-    If no search term provided, returns all properties
     """
-    from property_search import PropertySearch
     search_term = request.args.get('q', None)
 
     # Ensure cache is up to date
-    if cache['data'] is None or (isinstance(cache['last_updated'], datetime) and
-                                 datetime.now() - cache['last_updated'] > timedelta(hours=12)):
+    if cache['data'] is None or (
+            isinstance(cache['last_updated'], datetime) and
+            datetime.now() - cache['last_updated'] > timedelta(hours=12)
+    ):
         update_cache()
 
-    # Create searcher instance and perform search
+    # Use PropertySearch class
     searcher = PropertySearch(cache['data'])
-    results = searcher.search_properties(search_term=search_term)
+    result = searcher.get_search_result(
+        search_term=search_term,
+        last_updated=cache['last_updated']
+    )
 
-    return jsonify({
-        "status": "success",
-        "count": len(results),
-        "data": [{
-            "property_key": result.property_key,
-            "name": result.property_name,
-            "lastUpdated": result.latest_post_date
-        } for result in results]
-    })
+    return jsonify(result.model_dump())
 
 
 @app.route('/api/reports/generate', methods=['POST'])
 @catch_exceptions
 def generate_report():
-    """
-    Generate Excel report for selected properties.
-    Expected JSON body:
-    {
-        "properties": [123, 456, 789]  # List of property keys
-    }
-    """
-    from data_processing.excel_generator import generate_multi_property_report
+    """Generate Excel report for selected properties."""
     try:
-        data = request.get_json()
-
-        if not data or 'properties' not in data:
-            return jsonify({
-                "status": "error",
-                "message": "Missing required field 'properties' in request body"
-            }), 400
-
-        if not isinstance(data['properties'], list) or not data['properties']:
-            return jsonify({
-                "status": "error",
-                "message": "Properties must be a non-empty list of property keys"
-            }), 400
+        from data_processing import excel_generator as dp
+        # Validate request using our model
+        request_data = request.get_json()
+        report_request = ReportGenerationRequest(**request_data)
 
         # Ensure cache is up to date
-        if cache['data'] is None or (isinstance(cache['last_updated'], datetime) and
-                                     datetime.now() - cache['last_updated'] > timedelta(hours=12)):
+        if cache['data'] is None or (
+                isinstance(cache['last_updated'], datetime) and
+                datetime.now() - cache['last_updated'] > timedelta(hours=12)
+        ):
             update_cache()
 
+        # Use PropertySearch class
+        searcher = PropertySearch(cache['data'])
+        properties = searcher.search_properties(property_keys=report_request.properties)
+
         # Generate reports
-        output_dir = generate_multi_property_report(
+        output_dir = dp.generate_multi_property_report(
             template_path='break_even_template.xlsx',
-            selected_properties=data['properties'],
-            cache_data=cache['data'],
+            properties=properties,  # Pass Property models instead of just IDs
             api_url='http://127.0.0.1:5000/api/data'
         )
 
-        return jsonify({
-            "status": "success",
-            "message": "Reports generated successfully",
-            "output": {
+        response = ReportGenerationResponse(
+            success=True,
+            message="Reports generated successfully",
+            output={
                 "directory": output_dir,
-                "propertyCount": len(data['properties'])
-            }
-        })
+                "propertyCount": len(properties)
+            },
+            timestamp=datetime.now()
+        )
 
-    except Exception as e:
-        logging.error(f"Error generating reports: {str(e)}", exc_info=True)
+        return jsonify(response.model_dump())
+
+    except ValidationError as e:
+        logging.error(f"Validation error: {str(e)}")
         return jsonify({
             "status": "error",
             "message": str(e)
+        }), 400
+    except Exception as e:
+        logging.error(f"Error generating report: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": "An error occurred while generating the report"
         }), 500
 
 
