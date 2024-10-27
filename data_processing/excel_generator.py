@@ -3,6 +3,7 @@ from typing import Dict, List, Union, Any
 from datetime import datetime, timedelta
 import os
 import openpyxl
+from click import wrap_text
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.worksheet.worksheet import Worksheet
 from pydantic import BaseModel, Field, ConfigDict, field_validator, validator, computed_field, model_validator
@@ -220,21 +221,36 @@ class ExcelGeneratorService:
             end_date = self._parse_date(property_data['LatestPostDate'])
             date_range = self.format_date_range(end_date)
 
+            # Update initial metrics cells
+            self.update_cell('M9', opened_actual)  # Current output
+
+            # Get break-even value from B24
+            break_even_value = self.sheet['B24'].value
+            if isinstance(break_even_value, str) and break_even_value.startswith('='):
+                from what_if_table import FormulaEvaluator
+                evaluator = FormulaEvaluator()
+                break_even_value = evaluator.evaluate_formula(break_even_value, self.sheet)
+            break_even_value = round(float(break_even_value or 0), 1)
+            l12_text = f"Required daily work order output *In addition to Break even ({break_even_value} per-workday)*"
+
             # Update cells with validated data
             updates = {
                 'B22': property_data['TotalUnitCount'],
-                'M9': opened_actual,
+                # 'M9': opened_actual,
                 'N9': property_data['CompletedWorkOrder_Current'],
                 'O9': property_data['PendingWorkOrders'],
                 'L8': property_data['PropertyName'],
                 'D4': date_range,
                 'M8': date_range,
-                'A1': f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                'A1': f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                'L12': l12_text
             }
 
             logger.debug(f"Updating cells with values: {updates}")
             for cell_ref, value in updates.items():
-                self.update_cell(cell_ref, value, wrap_text=cell_ref in ['D4', 'M8'])
+                # self.update_cell(cell_ref, value, wrap_text=cell_ref in ['D4', 'M8'])
+                # wrap_text = cell_ref == 'L12'
+                self.update_cell(cell_ref, value)
 
             # Update what-if table after cell updates
             update_what_if_table(
@@ -381,10 +397,10 @@ if __name__ == "__main__":
         "PropertyName": "Test Property",
         "TotalUnitCount": 100,
         "LatestPostDate": "Wed, 23 Oct 2024 00:00:00 GMT",
-        "NewWorkOrders_Current": 10,
-        "CompletedWorkOrder_Current": 8,
-        "CancelledWorkOrder_Current": 1,
-        "PendingWorkOrders": 1
+        "NewWorkOrders_Current": 399,
+        "CompletedWorkOrder_Current": 200,
+        "CancelledWorkOrder_Current": 50,
+        "PendingWorkOrders": 58
     }
 
     try:

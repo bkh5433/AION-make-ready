@@ -81,26 +81,59 @@ class WhatIfTableGenerator:
 
     def __init__(self, worksheet: Worksheet):
         self.sheet = worksheet
-        self.start_row = 11  # Starting row for the what-if table
+        self.start_row = 12  # Starting row for the what-if table
+        self.header_row = 10
         self.daily_col = 'F'
         self.monthly_col = 'G'
         self.label_col = 'H'
         self.days_per_month = 21.7  # Standard working days per month
         self.formula_evaluator = FormulaEvaluator()
 
+    def _get_border(self, position='middle') -> Border:
+        """
+        Get border style based on position in table.
+        position can be: 'top', 'bottom', 'middle'
+        """
+        thin = Side(style='thin')
+        thick = Side(style='medium')  # Using medium for outer borders
+
+        if position == 'top':
+            return Border(top=thick, bottom=thin, left=thick, right=thick)
+        elif position == 'bottom':
+            return Border(top=thin, bottom=thick, left=thick, right=thick)
+        else:  # middle
+            return Border(top=thin, bottom=thin, left=thick, right=thick)
+
+    def _format_headers(self):
+        """Format the header row of the table"""
+        # Header text
+        headers = {
+            self.daily_col: 'Daily work orders completed',
+            self.monthly_col: 'Work orders completed per-month',
+            # self.label_col: 'Current monthly output'
+        }
+
+        # Style headers
+        header_fill = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")  # Light blue
+        header_font = Font(name='Aptos Narrow Bold', bold=True)
+
+        for col, text in headers.items():
+            cell = self.sheet[f'{col}{self.header_row}']
+            cell.value = text
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = self._get_border('top')
+            cell.alignment = Alignment(horizontal='center', wrap_text=True)
+
     def _create_cell_style(self,
                            bg_color: str,
                            font_color: str = "000000",
-                           bold: bool = False) -> Tuple[PatternFill, Font, Border]:
+                           bold: bool = False,
+                           position='middle') -> Tuple[PatternFill, Font, Border]:
         """Create cell styling components."""
         fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
-        font = Font(name='Aptos Narrow Bold', color=font_color, bold=bold)
-        border = Border(
-            top=Side(style='thin'),
-            bottom=Side(style='thin'),
-            left=Side(style='thin'),
-            right=Side(style='thin')
-        )
+        font = Font(name='Aptos Narrow Body', color=font_color, bold=bold)
+        border = self._get_border(position)
         return fill, font, border
 
     def _highlight_row(self,
@@ -108,16 +141,17 @@ class WhatIfTableGenerator:
                        label: str,
                        bg_color: str,
                        font_color: str = "000000",
-                       bold: bool = False) -> None:
+                       bold: bool = False,
+                       position='middle') -> None:
         """Apply highlighting to a specific row."""
-        fill, font, border = self._create_cell_style(bg_color, font_color, bold)
+        fill, font, border = self._create_cell_style(bg_color, font_color, bold, position)
 
         for col in [self.daily_col, self.monthly_col]:
             cell = self.sheet[f'{col}{row}']
             cell.fill = fill
             cell.font = font
             cell.border = border
-            cell.alignment = Alignment(horizontal='center')
+            cell.alignment = Alignment(horizontal='right')
 
         label_cell = self.sheet[f'{self.label_col}{row}']
         label_cell.value = label
@@ -169,26 +203,42 @@ class WhatIfTableGenerator:
         logger.info(f"Generating what-if table - Current Output: {current_output}, Break Even: {break_even_target}")
 
         try:
+            # Format headers first
+            self._format_headers()
             # Round values for consistent comparison
             current_output = round(current_output, 1)
             break_even_target = round(break_even_target, 1)
 
-            # Initialize first row with current output
-            self.sheet[f'{self.daily_col}{self.start_row}'] = current_output
-            self.sheet[f'{self.monthly_col}{self.start_row}'] = self._calculate_monthly_rate(current_output)
-
-            current_row = self.start_row + 1
+            current_row = self.start_row
             found_current = False
             found_break_even = False
 
-            # Generate table rows
-            for i in range(52):
-                daily_rate = round(i * increment, 1)
-                monthly_rate = self._calculate_monthly_rate(daily_rate)
+            # Generate table rows starting from 1 to 52
+            for i in range(1, 53):  # Changed to start from 1 and go to 52
+                daily_rate = i  # Remove decimal places for regular rows
+                monthly_rate = round(daily_rate * self.days_per_month)  # Round to whole number
 
-                # Write values
-                self.sheet[f'{self.daily_col}{current_row}'] = daily_rate
-                self.sheet[f'{self.monthly_col}{current_row}'] = monthly_rate
+                # Determine if this is the last row
+                is_last_row = i == 52
+                position = 'bottom' if is_last_row else 'middle'
+
+                # Format cells
+                daily_cell = self.sheet[f'{self.daily_col}{current_row}']
+                monthly_cell = self.sheet[f'{self.monthly_col}{current_row}']
+
+                # Set values
+                daily_cell.value = daily_rate
+                monthly_cell.value = monthly_rate
+
+                # Set number format
+                daily_cell.number_format = '0'  # Display as whole number
+                monthly_cell.number_format = '0'  # Display as whole number
+
+                # Basic cell styling
+                for cell in [daily_cell, monthly_cell]:
+                    cell.font = Font(name='Aptos Narrow Body')
+                    cell.alignment = Alignment(horizontal='right')
+                    cell.border = self._get_border(position)
 
                 # Check for current output match
                 if not found_current and daily_rate >= current_output:
@@ -197,8 +247,14 @@ class WhatIfTableGenerator:
                         "<-------- Current output (AVG)",
                         "FFA500",  # Orange
                         "000000",  # Black text
-                        True
+                        True,
+                        position
                     )
+                    # Override number format for current output row to show decimals
+                    daily_cell.value = current_output
+                    monthly_cell.value = self._calculate_monthly_rate(current_output)
+                    daily_cell.number_format = '0.0'
+                    monthly_cell.number_format = '0.0'
                     found_current = True
 
                 # Check for break-even match
@@ -208,8 +264,14 @@ class WhatIfTableGenerator:
                         "<-------- Break even",
                         "0000FF",  # Blue
                         "FFFFFF",  # White text
-                        True
+                        True,
+                        position
                     )
+                    # Override number format for break-even row to show decimals
+                    daily_cell.value = break_even_target
+                    monthly_cell.value = self._calculate_monthly_rate(break_even_target)
+                    daily_cell.number_format = '0.0'
+                    monthly_cell.number_format = '0.0'
                     found_break_even = True
 
                 current_row += 1
