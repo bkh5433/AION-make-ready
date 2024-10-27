@@ -1,17 +1,18 @@
+from pathlib import Path
 from flask import Flask, jsonify, request
 from datetime import datetime, timedelta
-import logging
 from models.models import *
-
 from functools import wraps
 from typing import Dict, List, Optional, Union
 from pydantic import ValidationError
 from property_search import PropertySearch
+from logger_config import LogConfig, log_exceptions
 
 app = Flask(__name__)
 
 # Setup logging
-logging.basicConfig(filename='api.log', level=logging.DEBUG)
+log_config = LogConfig()
+logger = log_config.get_logger('api')
 
 # In-memory cache with type hints
 cache: Dict[str, Optional[Union[List[Dict], datetime]]] = {
@@ -26,7 +27,7 @@ def catch_exceptions(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            logging.error(f"Error occurred: {str(e)}", exc_info=True)
+            logger.error(f"Error occurred: {str(e)}", exc_info=True)
             return jsonify({
                 "status": "error",
                 "message": "An internal error occurred. Please try again later."
@@ -38,22 +39,23 @@ def catch_exceptions(func):
 def update_cache():
     from data_retrieval import sql_queries
     global cache
-    logging.info("Updating cache with new data.")
+    logger.info("Updating cache with new data.")
     cache['data'] = sql_queries.fetch_make_ready_data().to_dict(orient='records')
     cache['last_updated'] = datetime.now()
-    logging.info("Cache updated successfully.")
+    logger.info("Cache updated successfully.")
 
 
 @app.route('/api/data', methods=['GET'])
 @catch_exceptions
+@log_exceptions(logger)
 def get_make_ready_data():
-    logging.info("GET /api/data endpoint accessed.")
+    logger.info("GET /api/data endpoint accessed.")
     if cache['data'] is None or (isinstance(cache['last_updated'], datetime) and
                                  datetime.now() - cache['last_updated'] > timedelta(hours=12)):
-        logging.info("Cache is empty or outdated. Updating cache.")
+        logger.info("Cache is empty or outdated. Updating cache.")
         update_cache()
 
-    logging.info("Returning data from cache.")
+    logger.info("Returning data from cache.")
     return jsonify({
         "status": "success",
         "data": cache['data'],
@@ -64,12 +66,13 @@ def get_make_ready_data():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    logging.info("GET /api/health endpoint accessed.")
+    logger.info("GET /api/health endpoint accessed.")
     return jsonify({"status": "healthy"}), 200
 
 
 @app.route('/api/properties/search', methods=['GET'])
 @catch_exceptions
+@log_exceptions(logger)
 def search_properties():
     """
     Search properties by name.
@@ -97,13 +100,27 @@ def search_properties():
 
 @app.route('/api/reports/generate', methods=['POST'])
 @catch_exceptions
+@log_exceptions(logger)
 def generate_report():
     """Generate Excel report for selected properties."""
     try:
-        from data_processing import excel_generator as dp
-        # Validate request using our model
+        # Validate request data
         request_data = request.get_json()
-        report_request = ReportGenerationRequest(**request_data)
+        if not request_data:
+            logger.error("No request data provided")
+            return jsonify({
+                "success": False,
+                "message": "No request data provided"
+            }), 400
+
+        try:
+            report_request = ReportGenerationRequest(**request_data)
+        except ValidationError as e:
+            logger.error(f"Invalid request format: {str(e)}")
+            return jsonify({
+                "success": False,
+                "message": f"Invalid request format: {str(e)}"
+            }), 400
 
         # Ensure cache is up to date
         if cache['data'] is None or (
@@ -116,49 +133,64 @@ def generate_report():
         searcher = PropertySearch(cache['data'])
         properties = searcher.search_properties(property_keys=report_request.properties)
 
+        if not properties:
+            logger.warning(f"No properties found for keys: {report_request.properties}")
+            return jsonify({
+                "success": False,
+                "message": "No properties found matching the request"
+            }), 404
+
         # Generate reports
-        output_dir = dp.generate_multi_property_report(
-            template_path='break_even_template.xlsx',
-            properties=properties,  # Pass Property models instead of just IDs
+        from data_processing import generate_multi_property_report
+        output_dir = generate_multi_property_report(
+            template_name="break_even_template.xlsx",
+            properties=properties,
             api_url='http://127.0.0.1:5000/api/data'
         )
 
+        # Verify output directory exists
+        output_path = Path(output_dir)
+        if not output_path.exists():
+            logger.error(f"Output directory not created: {output_dir}")
+            return jsonify({
+                "success": False,
+                "message": "Failed to create output directory"
+            }), 500
+
+        # Get list of generated files
+        files = [f.name for f in output_path.glob('*.xlsx')]
+
+        # Create response using corrected model
         response = ReportGenerationResponse(
             success=True,
             message="Reports generated successfully",
-            output={
-                "directory": output_dir,
-                "propertyCount": len(properties)
-            },
-            timestamp=datetime.now()
+            output=ReportOutput(
+                directory=output_dir,
+                propertyCount=len(properties),
+                files=files
+            )
         )
 
         return jsonify(response.model_dump())
 
-    except ValidationError as e:
-        logging.error(f"Validation error: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 400
     except Exception as e:
-        logging.error(f"Error generating report: {str(e)}", exc_info=True)
+        logger.error(f"Error generating report: {str(e)}", exc_info=True)
         return jsonify({
-            "status": "error",
-            "message": "An error occurred while generating the report"
+            "success": False,
+            "message": f"Error generating report: {str(e)}"
         }), 500
 
 
 @app.route('/api/refresh', methods=['POST'])
 @catch_exceptions
+@log_exceptions(logger)
 def refresh_data():
-    logging.info("POST /api/refresh endpoint accessed. Refreshing data.")
+    logger.info("POST /api/refresh endpoint accessed. Refreshing data.")
     update_cache()
-    logging.info("Data refreshed successfully.")
+    logger.info("Data refreshed successfully.")
     return jsonify({"status": "success", "message": "Data refreshed successfully"})
 
 
-
 if __name__ == '__main__':
-    logging.info("Starting application and updating initial cache.")
+    logger.info("Starting application and updating initial cache.")
     app.run(debug=True)

@@ -1,8 +1,12 @@
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 import re
-import logging
+from logger_config import LogConfig
 
-logging.basicConfig(filename='excel_generator.log', level=logging.DEBUG)
+log_config = LogConfig()
+logger = log_config.get_logger('what_if_table')
+
+
+# logging.basicConfig(filename='logs/what_if.log', level=logging.DEBUG)
 
 
 def generate_what_if_table(initial_daily_rate, days_per_month, break_even_target):
@@ -15,7 +19,7 @@ def generate_what_if_table(initial_daily_rate, days_per_month, break_even_target
 
     # If no exact match, set to -1 (which might be causing your current issue)
     if break_even_index == -1:
-        logging.warning(f"No match found for break-even target {break_even_target}.")
+        logger.warning(f"No match found for break-even target {break_even_target}.")
 
     table_data = []
     for i, (daily, monthly) in enumerate(zip(daily_rates, monthly_rates)):
@@ -94,30 +98,31 @@ def calculate_metrics(data, sheet, open_actual):
 
     # Read and evaluate the break-even formula
     break_even_formula = sheet['B24'].value
-    logging.info(f"Evaluating break-even formula: {break_even_formula}")
+    logger.info(f"Evaluating break-even formula: {break_even_formula}")
     if isinstance(break_even_formula, str) and break_even_formula.startswith('='):
         break_even_value = evaluate_simple_formula(break_even_formula, sheet)
     else:
         break_even_value = float(break_even_formula) if break_even_formula is not None else 0
-    logging.info(f"Break-even value: {break_even_value}")
+    logger.info(f"Break-even value: {break_even_value}")
 
     # Read and evaluate the current output formula
     current_output_formula = sheet['B4'].value
-    logging.info(f"Evaluating current output formula: {current_output_formula}")
+    logger.info(f"Evaluating current output formula: {current_output_formula}")
     if isinstance(current_output_formula, str) and current_output_formula.startswith('='):
         current_output_value = evaluate_simple_formula(current_output_formula, sheet)
     else:
         current_output_value = float(current_output_formula) if current_output_formula is not None else 0
-    logging.info(f"Current output value: {current_output_value}")
+    logger.info(f"Current output value: {current_output_value}")
 
     # Calculate initial daily rate
     initial_daily_rate = current_output_value
     days_per_month = 21
 
-    logging.info(f"Generating what-if table with initial daily rate: {initial_daily_rate}, days per month: {days_per_month}, break-even value: {break_even_value}")
+    logger.info(
+        f"Generating what-if table with initial daily rate: {initial_daily_rate}, days per month: {days_per_month}, break-even value: {break_even_value}")
     what_if_table, break_even_row = generate_what_if_table(initial_daily_rate, days_per_month, break_even_value)
 
-    logging.info(f"Generated what-if table with break-even row: {break_even_row}")
+    logger.info(f"Generated what-if table with break-even row: {break_even_row}")
 
     return {
         'what_if_table': what_if_table,

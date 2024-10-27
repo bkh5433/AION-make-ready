@@ -1,14 +1,15 @@
 from typing import List, Optional, Dict, Union
 from datetime import datetime, date
-import logging
+from logger_config import LogConfig
 from models.models import (Property,
                            WorkOrderMetrics,
                            PropertyStatus,
                            PropertySearchResult,
                            BaseResponse)
 
-
-logging.basicConfig(filename='property_search.log', level=logging.INFO)
+# Setup logging
+log_config = LogConfig()
+logger = log_config.get_logger('property_search')
 
 class PropertySearch:
     def __init__(self, cache_data: List[Dict]):
@@ -66,7 +67,7 @@ class PropertySearch:
                 )
                 properties.append(property)
             except Exception as e:
-                logging.error(f"Error converting property data: {str(e)}")
+                logger.error(f"Error converting property data: {str(e)}")
                 continue
 
         return properties

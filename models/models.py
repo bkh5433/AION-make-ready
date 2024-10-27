@@ -73,24 +73,25 @@ class ReportGenerationRequest(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
-    model_config = ConfigDict(validate_assignment=True)
 
-    @field_validator('properties')
-    @classmethod
-    def validate_properties_list(cls, v: List[int]) -> List[int]:
-        if len(v) > 50:
-            raise ValueError("Maximum of 50 properties can be processed at once")
-        return v
+class ReportOutput(BaseModel):
+    """Model for report generation output details"""
+    directory: str  # Changed from int to str
+    propertyCount: int
+    files: Optional[List[str]] = None
 
 
 class ReportGenerationResponse(BaseModel):
     """Model for report generation responses"""
     success: bool
     message: str
-    output: Dict[str, int]
+    output: ReportOutput
     timestamp: datetime = Field(default_factory=datetime.now)
 
-    model_config = ConfigDict(frozen=True)
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 
 class WorkOrderAnalytics(BaseModel):

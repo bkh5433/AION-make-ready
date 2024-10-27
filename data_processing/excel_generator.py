@@ -1,183 +1,329 @@
-import openpyxl
+from pathlib import Path
+from typing import Dict, List, Union, Any
 from datetime import datetime, timedelta
-from openpyxl.styles import Font, Alignment
-from what_if_table import update_what_if_table
-from utils.evaluate_cell import evaluate_cell
-from property_search import PropertySearch
+import os
+import openpyxl
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.worksheet.worksheet import Worksheet
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+
+from logger_config import LogConfig, log_exceptions
+from utils.path_resolver import PathResolver
 from models.models import Property
-from typing import List, Dict
-import os
-import logging
-import re
-import what_if_table
-from datetime import datetime
-import os
+
+# Initialize logging
+log_config = LogConfig()
+logger = log_config.get_logger("excel_generator")
 
 
-# Setup logging
-logging.basicConfig(filename='excel_generator.log', level=logging.DEBUG)
+class SpreadsheetTemplate(BaseModel):
+    """Model for spreadsheet template configuration"""
+    template_name: str = Field(..., description="Path to template file")
+    output_path: Path = Field(..., description="Path where output file will be saved")
+    sheet_name: str = Field(default="Sheet1", description="Name of the worksheet to use")
 
-def generate_spreadsheet_from_template(template_path, output_path, api_url, property_data=None):
-    from utils.fetch_data import fetch_data_from_api
-    logging.info(f"Loading template from: {template_path}")
-    # Load the template
-    workbook = openpyxl.load_workbook(template_path)
-    sheet = workbook.active
-
-    # Define the Aptos Narrow Body font
-    aptos_font = Font(name='Aptos Narrow Bold')
-
-    try:
-        # Fetch data from API
-        if property_data is None:
-            data = fetch_data_from_api(api_url)
-            # Extract property data
-            property_data = data[32]
-
-        # Calculate opened actual (opened work orders - canceled work orders)
-        opened_actual = property_data['NewWorkOrders_Current'] - property_data['CancelledWorkOrder_Current']
-
-        # Handle date parsing based on input format
+    @property
+    def template_path(self) -> Path:
+        """Resolve the template path dynamically"""
         try:
-            if isinstance(property_data['LatestPostDate'], str):
-                # Try parsing the standard API format first
-                try:
-                    end_date = datetime.strptime(property_data['LatestPostDate'], '%a, %d %b %Y %H:%M:%S GMT')
-                except ValueError:
-                    # If that fails, try parsing ISO format
-                    end_date = datetime.fromisoformat(property_data['LatestPostDate'].replace('Z', '+00:00'))
-            elif isinstance(property_data['LatestPostDate'], datetime):
-                end_date = property_data['LatestPostDate']
+            return PathResolver.resolve_template_path(self.template_name)
+        except FileNotFoundError as e:
+            logger.error(f"Failed to resolve template path: {e}")
+            raise
+
+    model_config = ConfigDict(validate_assignment=True)
+
+
+class WorkOrderMetrics(BaseModel):
+    """Model for work order metrics calculations"""
+    daily_rate: float = Field(ge=0)
+    monthly_rate: float = Field(ge=0)
+    break_even_target: float = Field(ge=0)
+    current_output: float = Field(ge=0)
+    days_per_month: int = Field(ge=0, le=31, default=21)
+
+    @field_validator('daily_rate', 'monthly_rate', 'break_even_target', 'current_output')
+    @classmethod
+    def round_values(cls, v: float) -> float:
+        return round(v, 1)
+
+
+class ExcelGeneratorService:
+    """Service for handling Excel generation with improved error handling and logging"""
+
+    def __init__(self, template: SpreadsheetTemplate):
+        """Initialize the Excel generator service"""
+        logger.info(f"Initializing ExcelGeneratorService with template: {template.template_path}")
+        self.template = template
+        self.workbook = None
+        self.sheet = None
+        self._font = Font(name='Aptos Narrow Bold')
+
+    @log_exceptions(logger)
+    def initialize_workbook(self) -> None:
+        """Initialize workbook from template with comprehensive error handling"""
+        logger.info(f"Loading template from: {self.template.template_path}")
+        try:
+            self.workbook = openpyxl.load_workbook(self.template.template_path)
+            if self.template.sheet_name == "Sheet1":
+                self.sheet = self.workbook.active
             else:
-                raise ValueError(f"Unsupported date format: {type(property_data['LatestPostDate'])}")
+                if self.template.sheet_name not in self.workbook.sheetnames:
+                    raise ValueError(f"Sheet '{self.template.sheet_name}' not found in workbook")
+                self.sheet = self.workbook[self.template.sheet_name]
 
-            start_date = end_date - timedelta(days=30)
-            date_range = f"{start_date.strftime('%m/%d/%y')} - {end_date.strftime('%m/%d/%y')}"
-
+            logger.info(f"Successfully loaded workbook with {len(self.workbook.sheetnames)} sheets")
         except Exception as e:
-            logging.error(f"Error parsing date: {str(e)}")
-            # Fallback to current date if date parsing fails
-            end_date = datetime.now()
+            logger.error(f"Failed to initialize workbook", exc_info=True)
+            raise ValueError(f"Failed to initialize workbook: {str(e)}") from e
+
+    @log_exceptions(logger)
+    def update_cell(self, cell_ref: str, value: Any, wrap_text: bool = False) -> None:
+        """Update a cell with proper formatting and error handling"""
+        if not self.sheet:
+            logger.error("Attempted to update cell without initialized workbook")
+            raise ValueError("Workbook not initialized")
+
+        try:
+            logger.debug(f"Updating cell {cell_ref} with value: {value}")
+            cell = self.sheet[cell_ref]
+            cell.value = value
+            cell.font = self._font
+            if wrap_text:
+                cell.alignment = Alignment(wrap_text=True)
+        except KeyError as e:
+            logger.error(f"Invalid cell reference: {cell_ref}")
+            raise KeyError(f"Invalid cell reference: {cell_ref}") from e
+        except Exception as e:
+            logger.error(f"Failed to update cell {cell_ref}", exc_info=True)
+            raise
+
+    @log_exceptions(logger)
+    def format_date_range(self, end_date: datetime) -> str:
+        """Format date range for the report"""
+        try:
             start_date = end_date - timedelta(days=30)
-            date_range = f"{start_date.strftime('%m/%d/%y')} - {end_date.strftime('%m/%d/%y')}"
+            return f"{start_date.strftime('%m/%d/%y')} - {end_date.strftime('%m/%d/%y')}"
+        except Exception as e:
+            logger.error("Failed to format date range", exc_info=True)
+            raise ValueError(f"Failed to format date range: {str(e)}") from e
 
-        # Update cells with API data
-        cells_to_update = {
-            'B22': property_data['TotalUnitCount'],
-            'M9': opened_actual,
-            'N9': property_data['CompletedWorkOrder_Current'],
-            'O9': property_data['PendingWorkOrders'],
-            'L8': property_data['PropertyName'],
-            'D4': date_range,
-            'M8': date_range,
-            'A1': f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        }
+    @log_exceptions(logger)
+    def _parse_date(self, date_value: Union[str, datetime]) -> datetime:
+        """Parse date from various formats with detailed error logging"""
+        logger.debug(f"Parsing date value: {date_value} of type {type(date_value)}")
 
-        for cell, value in cells_to_update.items():
-            sheet[cell] = value
-            sheet[cell].font = aptos_font # Apply Aptos Narrow Bold font
+        if isinstance(date_value, datetime):
+            return date_value
 
-            # if cell in ['D4', 'M8']:  # Assuming these cells might need text wrapping
-            #     sheet[cell].alignment = Alignment(wrap_text=True)
+        try:
+            # Try parsing standard API format
+            return datetime.strptime(date_value, '%a, %d %b %Y %H:%M:%S GMT')
+        except ValueError:
+            logger.debug("Failed to parse GMT format, trying ISO format")
+            try:
+                # Try ISO format
+                return datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+            except ValueError:
+                logger.error(f"Unsupported date format: {date_value}")
+                return datetime.now()
 
-        # Force recalculation of the entire workbook
-        # Manually evaluate B24 formula
-        b24_value = evaluate_cell(sheet, 'B24', cells_to_update)
-        logging.info(f"Evaluated B24 value: {b24_value}")
+    @log_exceptions(logger)
+    def update_metrics(self, metrics: WorkOrderMetrics) -> None:
+        """Update the what-if table with work order metrics"""
+        if not self.sheet:
+            raise ValueError("Workbook not initialized")
 
-        # Update L12 with the new B24 value
-        current_l12_text = sheet['L12'].value
-        new_l12_text = re.sub(r'\d+(\.\d+)?', str(round(b24_value, 1)), current_l12_text)
-        sheet['L12'] = new_l12_text
-        sheet['L12'].font = aptos_font
-        sheet['L12'].alignment = Alignment(wrap_text=True)
+        try:
+            logger.info("Updating work order metrics")
+            self.update_cell('F11', metrics.daily_rate)
+            self.update_cell('G11', metrics.monthly_rate)
 
-        logging.info(f"Updated L12 text: {new_l12_text}")
+            # Update break-even target and formatting
+            break_even_row = self._find_break_even_row(metrics.break_even_target)
+            if break_even_row:
+                self._format_break_even_row(break_even_row)
 
-        # Calculate metrics
-        metrics = what_if_table.calculate_metrics(property_data, sheet, opened_actual)
+            logger.info("Successfully updated metrics and formatting")
+        except Exception as e:
+            logger.error("Failed to update metrics", exc_info=True)
+            raise
 
-        # Update what-if table
-        update_what_if_table(sheet, break_even_value=metrics['break_even_value'],
-                                    current_output_value=metrics['current_output_value'])
+    @log_exceptions(logger)
+    def update_property_data(self, property_data: Dict[str, Any]) -> None:
+        """Update cells with property data and handle all calculations"""
+        logger.info(f"Updating property data for: {property_data.get('PropertyName', 'Unknown')}")
+        try:
+            # Calculate opened actual
+            opened_actual = property_data['NewWorkOrders_Current'] - property_data['CancelledWorkOrder_Current']
+            logger.debug(f"Calculated opened_actual: {opened_actual}")
 
+            # Parse and validate dates
+            end_date = self._parse_date(property_data['LatestPostDate'])
+            date_range = self.format_date_range(end_date)
 
+            # Update cells with validated data
+            updates = {
+                'B22': property_data['TotalUnitCount'],
+                'M9': opened_actual,
+                'N9': property_data['CompletedWorkOrder_Current'],
+                'O9': property_data['PendingWorkOrders'],
+                'L8': property_data['PropertyName'],
+                'D4': date_range,
+                'M8': date_range,
+                'A1': f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            }
 
+            logger.debug(f"Updating cells with values: {updates}")
+            for cell_ref, value in updates.items():
+                self.update_cell(cell_ref, value, wrap_text=cell_ref in ['D4', 'M8'])
 
+            logger.info("Successfully updated all property data")
+        except Exception as e:
+            logger.error("Failed to update property data", exc_info=True)
+            raise
 
-        # Ensure the output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    @log_exceptions(logger)
+    def save(self) -> None:
+        """Save workbook with proper error handling and logging"""
+        if not self.workbook:
+            logger.error("Attempted to save without initialized workbook")
+            raise ValueError("No workbook to save")
 
-        # Save the filled spreadsheet
-        logging.info(f"Saving filled spreadsheet to: {output_path}")
-        workbook.save(output_path)
-        logging.info("Spreadsheet saved successfully.")
-    except Exception as e:
-        logging.error(f"An error occurred while generating the spreadsheet: {str(e)}")
-        raise
+        try:
+            logger.info(f"Saving workbook to: {self.template.output_path}")
+            os.makedirs(os.path.dirname(self.template.output_path), exist_ok=True)
+            self.workbook.save(self.template.output_path)
+            logger.info("Workbook saved successfully")
+        except PermissionError:
+            logger.error("Permission denied while saving workbook", exc_info=True)
+            raise
+        except Exception as e:
+            logger.error("Failed to save workbook", exc_info=True)
+            raise
 
 
 def generate_multi_property_report(
-        template_path: str,
+        template_name: str,
         properties: List[Property],
         api_url: str
 ) -> str:
     """
-    Generate a multi-sheet Excel report for selected properties.
-    Now accepts Property models directly instead of raw data.
+    Generate Excel reports for multiple properties.
+
+    Args:
+        template_name: Name of the template file
+        properties: List of Property objects
+        api_url: API URL for data retrieval
+
+    Returns:
+        str: Path to the output directory containing generated reports
     """
+    logger.info(f"Starting multi-property report generation for {len(properties)} properties")
+
     try:
-        # Create timestamp for unique folder name
+        # Create timestamp-based output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_output_dir = f'output/multi_property_report_{timestamp}'
         os.makedirs(base_output_dir, exist_ok=True)
+        logger.info(f"Created output directory: {base_output_dir}")
 
         # Generate report for each property
         generated_files = []
-        for property in properties:
-            # Create property-specific output path
-            property_output_path = os.path.join(
-                base_output_dir,
-                f"{property.property_name.replace(' ', '_')[:31]}.xlsx"
-            )
+        for property_data in properties:
+            try:
+                # Create safe filename from property name
+                safe_name = "".join(c for c in property_data.property_name if c.isalnum() or c in (' ', '-', '_'))
+                safe_name = safe_name.replace(' ', '_')[:31]  # limit length and replace spaces
+                property_output_path = os.path.join(base_output_dir, f"{safe_name}.xlsx")
 
-            # Convert Property model back to dict format expected by generate_spreadsheet_from_template
-            property_data = {
-                'PropertyKey': property.property_key,
-                'PropertyName': property.property_name,
-                'TotalUnitCount': property.total_unit_count,
-                'LatestPostDate': property.latest_post_date,
-                'OpenWorkOrder_Current': property.metrics.open_work_orders,
-                'NewWorkOrders_Current': property.metrics.new_work_orders,
-                'CompletedWorkOrder_Current': property.metrics.completed_work_orders,
-                'CancelledWorkOrder_Current': property.metrics.cancelled_work_orders,
-                'PendingWorkOrders': property.metrics.pending_work_orders,
-                'PercentageCompletedThisPeriod': property.metrics.percentage_completed
-            }
+                logger.info(f"Generating report for property: {property_data.property_name}")
 
-            # Generate spreadsheet
-            generate_spreadsheet_from_template(
-                template_path=template_path,
-                output_path=property_output_path,
-                api_url=api_url,
-                property_data=property_data
-            )
+                # Convert Property model to dict format
+                property_dict = {
+                    'PropertyKey': property_data.property_key,
+                    'PropertyName': property_data.property_name,
+                    'TotalUnitCount': property_data.total_unit_count,
+                    'LatestPostDate': property_data.latest_post_date,
+                    'OpenWorkOrder_Current': property_data.metrics.open_work_orders if property_data.metrics else 0,
+                    'NewWorkOrders_Current': property_data.metrics.new_work_orders if property_data.metrics else 0,
+                    'CompletedWorkOrder_Current': property_data.metrics.completed_work_orders if property_data.metrics else 0,
+                    'CancelledWorkOrder_Current': property_data.metrics.cancelled_work_orders if property_data.metrics else 0,
+                    'PendingWorkOrders': property_data.metrics.pending_work_orders if property_data.metrics else 0,
+                }
 
-            generated_files.append(property_output_path)
+                # Generate individual report
+                generate_report(
+                    template_name=template_name,
+                    output_path=property_output_path,
+                    property_data=property_dict
+                )
+
+                generated_files.append(property_output_path)
+                logger.info(f"Successfully generated report for {property_data.property_name}")
+
+            except Exception as e:
+                logger.error(f"Failed to generate report for {property_data.property_name}: {str(e)}", exc_info=True)
+                # Continue with next property instead of failing completely
+                continue
+
+        # Verify generated files
+        successful_count = len(generated_files)
+        logger.info(
+            f"Completed report generation. Successfully generated {successful_count} out of {len(properties)} reports")
+
+        if successful_count == 0:
+            raise Exception("Failed to generate any reports successfully")
 
         return base_output_dir
+
     except Exception as e:
-        logging.error(f"Error generating multi-property report: {str(e)}", exc_info=True)
+        logger.error(f"Failed to generate multi-property report: {str(e)}", exc_info=True)
         raise
 
 
-# Usage
-template_path = '/Users/brandonhightower/PycharmProjects/AION-make-ready/break_even_template.xlsx'
-output_path = 'output/filled_work_order_report.xlsx'
-api_url = 'http://127.0.0.1:5000/api/data'  # Adjust this to actual API URL
+def generate_report(template_name: str, output_path: str, property_data: Dict[str, Any]) -> None:
+    """Main function to generate Excel report with comprehensive logging"""
+    logger.info(f"Starting report generation for property: {property_data.get('PropertyName', 'Unknown')}")
 
-try:
-    generate_spreadsheet_from_template(template_path, output_path, api_url)
-except Exception as e:
-    logging.error(f"An error occurred: {str(e)}", exc_info=True)
-    print(f"An error occurred: {str(e)}")
+    try:
+        # Initialize template with template_name instead of template_path
+        template = SpreadsheetTemplate(
+            template_name=template_name,  # Use template_name here
+            output_path=Path(output_path)
+        )
+
+        # Create service and generate report
+        service = ExcelGeneratorService(template)
+        service.initialize_workbook()
+        service.update_property_data(property_data)
+        service.save()
+
+        logger.info("Report generated successfully")
+    except Exception as e:
+        logger.error("Failed to generate report", exc_info=True)
+        raise
+
+
+if __name__ == "__main__":
+    # Example usage with error handling
+    template_path = 'break_even_template.xlsx'
+    output_path = "output/filled_work_order_report.xlsx"
+
+    # Sample property data
+    property_data = {
+        "PropertyKey": 1,
+        "PropertyName": "Test Property",
+        "TotalUnitCount": 100,
+        "LatestPostDate": "Wed, 23 Oct 2024 00:00:00 GMT",
+        "NewWorkOrders_Current": 10,
+        "CompletedWorkOrder_Current": 8,
+        "CancelledWorkOrder_Current": 1,
+        "PendingWorkOrders": 1
+    }
+
+    try:
+        generate_report(template_path, output_path, property_data)
+        logger.info("Example report generated successfully!")
+    except Exception as e:
+        logger.error("Failed to generate example report", exc_info=True)
