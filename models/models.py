@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, validator, model_validator
 from datetime import datetime
 from typing import Optional, List, Dict
 from enum import Enum
@@ -20,7 +20,8 @@ class BaseResponse(BaseModel):
 
 
 class WorkOrderMetrics(BaseModel):
-    """Model for work order metrics data"""
+    """Model for work order metrics with calculations"""
+    # Work order tracking fields
     open_work_orders: int = Field(ge=0)
     new_work_orders: int = Field(ge=0)
     completed_work_orders: int = Field(ge=0)
@@ -28,12 +29,64 @@ class WorkOrderMetrics(BaseModel):
     pending_work_orders: int = Field(ge=0)
     percentage_completed: float = Field(ge=0, le=100)
 
-    model_config = ConfigDict(validate_assignment=True)
+    # Rate calculations with defaults (will be recalculated)
+    days_per_month: int = Field(ge=0, le=31, default=21)
+    daily_rate: float = Field(ge=0, default=0.0)
+    monthly_rate: float = Field(ge=0, default=0.0)
+    break_even_target: float = Field(ge=0, default=0.0)
+    current_output: float = Field(ge=0, default=0.0)
 
-    @field_validator('percentage_completed')
-    @classmethod
-    def round_percentage(cls, v: float) -> float:
+    @model_validator(mode='after')
+    def calculate_rates(self) -> 'WorkOrderMetrics':
+        """Calculate all rates based on completed work orders"""
+        try:
+            if self.days_per_month > 0:
+                # Calculate daily rate from completed work orders
+                self.daily_rate = round(self.completed_work_orders / self.days_per_month, 1)
+
+                # Calculate monthly rate from daily rate
+                self.monthly_rate = round(self.daily_rate * self.days_per_month, 1)
+
+                # Set current output same as daily rate for consistency
+                self.current_output = self.daily_rate
+
+                # Calculate break-even target
+                target_rate = max(self.new_work_orders, self.completed_work_orders) / self.days_per_month
+                self.break_even_target = round(target_rate * 1.1, 1)  # Adding 10% buffer
+        except Exception as e:
+            # If any calculation fails, ensure we have valid defaults
+            self.daily_rate = 0.0
+            self.monthly_rate = 0.0
+            self.current_output = 0.0
+            self.break_even_target = 0.0
+
+        return self
+
+    @validator('percentage_completed', 'daily_rate', 'monthly_rate', 'break_even_target', 'current_output')
+    def round_values(cls, v: float) -> float:
         return round(v, 1)
+
+    def get_metrics_for_table(self) -> dict:
+        """Get metrics formatted for what-if table calculations"""
+        return {
+            'daily_rate': self.daily_rate,
+            'monthly_rate': self.monthly_rate,
+            'break_even_target': self.break_even_target,
+            'current_output': self.current_output,
+            'days_per_month': self.days_per_month
+        }
+
+    def get_all_metrics(self) -> dict:
+        """Get all metrics including work orders and calculations"""
+        return {
+            **self.get_metrics_for_table(),
+            'open_work_orders': self.open_work_orders,
+            'new_work_orders': self.new_work_orders,
+            'completed_work_orders': self.completed_work_orders,
+            'cancelled_work_orders': self.cancelled_work_orders,
+            'pending_work_orders': self.pending_work_orders,
+            'percentage_completed': self.percentage_completed
+        }
 
 
 class Property(BaseModel):

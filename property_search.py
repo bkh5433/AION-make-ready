@@ -42,17 +42,19 @@ class PropertySearch:
                     return datetime.strptime(date_value, '%Y-%m-%d')
 
     def _convert_to_models(self, cache_data: List[Dict]) -> List[Property]:
-        """Convert raw cache data to Property models"""
+        """Convert raw cache data to Property models with computed metrics"""
         properties = []
         for data in cache_data:
             try:
+                # Create metrics with work order data - rates will be auto-calculated
                 metrics = WorkOrderMetrics(
                     open_work_orders=data['OpenWorkOrder_Current'],
                     new_work_orders=data['NewWorkOrders_Current'],
                     completed_work_orders=data['CompletedWorkOrder_Current'],
                     cancelled_work_orders=data['CancelledWorkOrder_Current'],
                     pending_work_orders=data['PendingWorkOrders'],
-                    percentage_completed=data['PercentageCompletedThisPeriod']
+                    percentage_completed=data['PercentageCompletedThisPeriod'],
+                    days_per_month=21  # Default value
                 )
 
                 latest_post_date = self._parse_date(data['LatestPostDate'])

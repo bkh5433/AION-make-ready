@@ -5,7 +5,8 @@ import os
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.worksheet.worksheet import Worksheet
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, validator, computed_field, model_validator
+from what_if_table import update_what_if_table, WhatIfTableGenerator
 
 from logger_config import LogConfig, log_exceptions
 from utils.path_resolver import PathResolver
@@ -35,17 +36,65 @@ class SpreadsheetTemplate(BaseModel):
 
 
 class WorkOrderMetrics(BaseModel):
-    """Model for work order metrics calculations"""
+    """Model for work order metrics with calculations"""
+    # Work order tracking fields
+    open_work_orders: int = Field(ge=0)
+    new_work_orders: int = Field(ge=0)
+    completed_work_orders: int = Field(ge=0)
+    cancelled_work_orders: int = Field(ge=0)
+    pending_work_orders: int = Field(ge=0)
+    percentage_completed: float = Field(ge=0, le=100)
+
+    # Rate calculations
+    days_per_month: int = Field(ge=0, le=31, default=21)
     daily_rate: float = Field(ge=0)
     monthly_rate: float = Field(ge=0)
     break_even_target: float = Field(ge=0)
     current_output: float = Field(ge=0)
-    days_per_month: int = Field(ge=0, le=31, default=21)
 
-    @field_validator('daily_rate', 'monthly_rate', 'break_even_target', 'current_output')
-    @classmethod
+    @model_validator(mode='after')
+    def calculate_rates(self) -> 'WorkOrderMetrics':
+        """Calculate all rates based on completed work orders"""
+        # Calculate daily rate from completed work orders
+        self.daily_rate = round(self.completed_work_orders / self.days_per_month, 1)
+
+        # Calculate monthly rate from daily rate
+        self.monthly_rate = round(self.daily_rate * self.days_per_month, 1)
+
+        # Set current output same as daily rate for consistency
+        self.current_output = self.daily_rate
+
+        # Calculate break-even target
+        target_rate = max(self.new_work_orders, self.completed_work_orders) / self.days_per_month
+        self.break_even_target = round(target_rate * 1.1, 1)  # Adding 10% buffer
+
+        return self
+
+    @field_validator('percentage_completed', 'daily_rate', 'monthly_rate', 'break_even_target', 'current_output')
     def round_values(cls, v: float) -> float:
         return round(v, 1)
+
+    def get_metrics_for_table(self) -> dict:
+        """Get metrics formatted for what-if table calculations"""
+        return {
+            'daily_rate': self.daily_rate,
+            'monthly_rate': self.monthly_rate,
+            'break_even_target': self.break_even_target,
+            'current_output': self.current_output,
+            'days_per_month': self.days_per_month
+        }
+
+    def get_all_metrics(self) -> dict:
+        """Get all metrics including work orders and calculations"""
+        return {
+            **self.get_metrics_for_table(),
+            'open_work_orders': self.open_work_orders,
+            'new_work_orders': self.new_work_orders,
+            'completed_work_orders': self.completed_work_orders,
+            'cancelled_work_orders': self.cancelled_work_orders,
+            'pending_work_orders': self.pending_work_orders,
+            'percentage_completed': self.percentage_completed
+        }
 
 
 class ExcelGeneratorService:
@@ -135,16 +184,25 @@ class ExcelGeneratorService:
             raise ValueError("Workbook not initialized")
 
         try:
-            logger.info("Updating work order metrics")
-            self.update_cell('F11', metrics.daily_rate)
-            self.update_cell('G11', metrics.monthly_rate)
+            logger.info("Updating work order metrics and what-if table")
 
-            # Update break-even target and formatting
-            break_even_row = self._find_break_even_row(metrics.break_even_target)
-            if break_even_row:
-                self._format_break_even_row(break_even_row)
+            # Update initial metrics cells
+            self.update_cell('B6', 21)  # Days per month
+            self.update_cell('M9', metrics.current_output)  # Current output
 
-            logger.info("Successfully updated metrics and formatting")
+            # Update what-if table with necessary data
+            update_what_if_table(
+                sheet=self.sheet,
+                data={
+                    'NewWorkOrders_Current': metrics.new_work_orders,
+                    'CancelledWorkOrder_Current': metrics.cancelled_work_orders,
+                    'CompletedWorkOrder_Current': metrics.completed_work_orders,
+                    'PendingWorkOrders': metrics.pending_work_orders,
+                },
+                open_actual=metrics.new_work_orders - metrics.cancelled_work_orders
+            )
+
+            logger.info("Successfully updated metrics and what-if table")
         except Exception as e:
             logger.error("Failed to update metrics", exc_info=True)
             raise
@@ -177,6 +235,13 @@ class ExcelGeneratorService:
             logger.debug(f"Updating cells with values: {updates}")
             for cell_ref, value in updates.items():
                 self.update_cell(cell_ref, value, wrap_text=cell_ref in ['D4', 'M8'])
+
+            # Update what-if table after cell updates
+            update_what_if_table(
+                sheet=self.sheet,
+                data=property_data,
+                open_actual=opened_actual
+            )
 
             logger.info("Successfully updated all property data")
         except Exception as e:

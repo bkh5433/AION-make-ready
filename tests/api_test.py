@@ -91,27 +91,43 @@ class APITester:
             raise
 
 
-def run_tests():
-    """Run the API test suite with comprehensive logging"""
-    tester = APITester()
+if __name__ == "__main__":
+    def run_tests():
+        """Run the API test suite with comprehensive logging"""
+        tester = APITester()
 
-    try:
-        # Test 1: Get all properties
+        try:
+            all_properties = test_get_all_properties(tester)
+            test_get_all_properties(tester)
+            test_search_specific_properties(tester)
+            test_generate_reports(tester, all_properties)
+            test_search_and_generate_report(tester)
+        except Exception as e:
+            logger.error(f"Test suite failed: {str(e)}", exc_info=True, stack_info=True)
+
+
+    def test_get_all_properties(tester):
+        """Test 1: Get all properties"""
         logger.info("\n=== Test 1: Get all properties ===")
         all_properties = tester.search_properties()
 
         if not all_properties.get('data'):
             logger.warning("No properties found in the system")
-            return
+            return all_properties
+        return all_properties
 
-        # Test 2: Search with specific term
+
+    def test_search_specific_properties(tester):
+        """Test 2: Search with specific term"""
         logger.info("\n=== Test 2: Search for specific properties ===")
         search_results = tester.search_properties("Park")
 
         for prop in search_results.get('data', []):
             logger.info(f"Found: {prop['property_name']} (Key: {prop['property_key']})")
 
-        # Test 3: Generate reports for first two properties
+
+    def test_generate_reports(tester, all_properties):
+        """Test 3: Generate reports for first two properties"""
         logger.info("\n=== Test 3: Generate reports ===")
         if all_properties['data']:
             property_keys = [prop['property_key'] for prop in all_properties['data'][:2]]
@@ -123,9 +139,11 @@ def run_tests():
             else:
                 logger.error(f"Report generation returned unexpected response: {report_result}")
 
-        # Test 4: Search and generate report for specific property
+
+    def test_search_and_generate_report(tester):
+        """Test 4: Search and generate report for specific property"""
         logger.info("\n=== Test 4: Search for a specific property and generate a report ===")
-        specific_search = tester.search_properties("land")
+        specific_search = tester.search_properties("james")
 
         if specific_search.get('data'):
             specific_property = specific_search['data'][0]
@@ -140,9 +158,5 @@ def run_tests():
         else:
             logger.warning("No matching properties found")
 
-    except Exception as e:
-        logger.error(f"Test suite failed: {str(e)}", exc_info=True, stack_info=True)
 
-
-if __name__ == "__main__":
     run_tests()

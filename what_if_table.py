@@ -1,183 +1,389 @@
+from typing import Dict, Tuple, List, Optional, Union, Any
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.worksheet.worksheet import Worksheet
 import re
 from logger_config import LogConfig
+
+# Initialize logging
 
 log_config = LogConfig()
 logger = log_config.get_logger('what_if_table')
 
 
-# logging.basicConfig(filename='logs/what_if.log', level=logging.DEBUG)
+class FormulaEvaluator:
+    """Handles evaluation of Excel formulas"""
+
+    @staticmethod
+    def _get_range_values(sheet, range_str: str) -> list:
+        """Get values from a cell range (e.g., 'A1:A3')."""
+        try:
+            start_cell, end_cell = range_str.split(':')
+            # Extract column letters and row numbers
+            start_col = ''.join(c for c in start_cell if c.isalpha())
+            start_row = int(''.join(c for c in start_cell if c.isdigit()))
+            end_col = ''.join(c for c in end_cell if c.isalpha())
+            end_row = int(''.join(c for c in end_cell if c.isdigit()))
+
+            values = []
+            for row in range(start_row, end_row + 1):
+                # For now, assuming we're only dealing with single column ranges
+                cell_value = sheet[f"{start_col}{row}"].value
+                if cell_value is not None:
+                    values.append(float(cell_value))
+
+            return values
+        except Exception as e:
+            logger.error(f"Error processing range {range_str}: {str(e)}")
+            return []
+
+    @staticmethod
+    def evaluate_formula(formula: str, sheet) -> float:
+        """Evaluate an Excel formula."""
+        try:
+            # Remove the leading '=' if present
+            formula = formula.lstrip('=')
+
+            # Handle Excel AVERAGE function
+            if 'AVERAGE' in formula:
+                # Extract the range from AVERAGE(range)
+                range_start = formula.find('(') + 1
+                range_end = formula.find(')')
+                if range_start > 0 and range_end > range_start:
+                    range_str = formula[range_start:range_end]
+                    values = FormulaEvaluator._get_range_values(sheet, range_str)
+                    if values:
+                        return sum(values) / len(values)
+                    return 0
+
+            # Handle other cell references
+            cell_refs = re.findall(r'[A-Z]+[0-9]+', formula)
+
+            # Replace cell references with their values
+            for cell_ref in cell_refs:
+                cell_value = sheet[cell_ref].value
+                if isinstance(cell_value, str) and cell_value.startswith('='):
+                    cell_value = FormulaEvaluator.evaluate_formula(cell_value, sheet)
+                if cell_value is None:
+                    cell_value = 0
+                formula = formula.replace(cell_ref, str(float(cell_value)))
+
+            # Evaluate the expression
+            result = eval(formula)
+            return float(result)
+
+        except Exception as e:
+            logger.error(f"Error evaluating formula {formula}: {e}")
+            return 0
 
 
-def generate_what_if_table(initial_daily_rate, days_per_month, break_even_target):
-    daily_rates = [round(initial_daily_rate + (i * 0.1), 1) for i in
-                   range(52)]  # 52 daily values with increments of 0.1
-    monthly_rates = [round(daily * days_per_month) for daily in daily_rates]
+class WhatIfTableGenerator:
+    """Handles generation and formatting of the what-if table"""
 
-    # Find the closest match for the break-even target
-    break_even_index = next((i for i, daily in enumerate(daily_rates) if daily >= break_even_target), -1)
+    def __init__(self, worksheet: Worksheet):
+        self.sheet = worksheet
+        self.start_row = 11  # Starting row for the what-if table
+        self.daily_col = 'F'
+        self.monthly_col = 'G'
+        self.label_col = 'H'
+        self.days_per_month = 21.7  # Standard working days per month
+        self.formula_evaluator = FormulaEvaluator()
 
-    # If no exact match, set to -1 (which might be causing your current issue)
-    if break_even_index == -1:
-        logger.warning(f"No match found for break-even target {break_even_target}.")
+    def _create_cell_style(self,
+                           bg_color: str,
+                           font_color: str = "000000",
+                           bold: bool = False) -> Tuple[PatternFill, Font, Border]:
+        """Create cell styling components."""
+        fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+        font = Font(name='Aptos Narrow Bold', color=font_color, bold=bold)
+        border = Border(
+            top=Side(style='thin'),
+            bottom=Side(style='thin'),
+            left=Side(style='thin'),
+            right=Side(style='thin')
+        )
+        return fill, font, border
 
-    table_data = []
-    for i, (daily, monthly) in enumerate(zip(daily_rates, monthly_rates)):
-        row = {
-            'day': i + 1,  # Row counting starts from 1
-            'daily_rate': daily,
-            'monthly_rate': monthly,
-            'is_break_even': i == break_even_index
+    def _highlight_row(self,
+                       row: int,
+                       label: str,
+                       bg_color: str,
+                       font_color: str = "000000",
+                       bold: bool = False) -> None:
+        """Apply highlighting to a specific row."""
+        fill, font, border = self._create_cell_style(bg_color, font_color, bold)
+
+        for col in [self.daily_col, self.monthly_col]:
+            cell = self.sheet[f'{col}{row}']
+            cell.fill = fill
+            cell.font = font
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center')
+
+        label_cell = self.sheet[f'{self.label_col}{row}']
+        label_cell.value = label
+        label_cell.fill = fill
+        label_cell.font = font
+        label_cell.border = border
+        label_cell.alignment = Alignment(horizontal='left')
+
+    def _calculate_monthly_rate(self, daily_rate: float) -> float:
+        """Calculate monthly rate from daily rate."""
+        return round(daily_rate * self.days_per_month, 1)
+
+    def calculate_metrics(self, data: Dict, open_actual: float) -> Dict[str, float]:
+        """Calculate metrics from sheet formulas and data."""
+        logger.info("Calculating metrics from sheet data")
+
+        # Populate necessary cells
+        self.sheet['B6'] = 21
+        self.sheet['M9'] = open_actual
+
+        # Evaluate break-even formula
+        break_even_formula = self.sheet['B24'].value
+        break_even_value = (
+            self.formula_evaluator.evaluate_formula(break_even_formula, self.sheet)
+            if isinstance(break_even_formula, str) and break_even_formula.startswith('=')
+            else float(break_even_formula or 0)
+        )
+
+        # Evaluate current output formula
+        current_output_formula = self.sheet['B4'].value
+        current_output_value = (
+            self.formula_evaluator.evaluate_formula(current_output_formula, self.sheet)
+            if isinstance(current_output_formula, str) and current_output_formula.startswith('=')
+            else float(current_output_formula or 0)
+        )
+
+        logger.info(f"Calculated metrics - Break Even: {break_even_value}, Current Output: {current_output_value}")
+
+        return {
+            'break_even_value': break_even_value,
+            'current_output_value': current_output_value
         }
-        table_data.append(row)
 
-    # Add 1 to break-even index to convert to a 1-based row index
-    return table_data, break_even_index + 1
+    def generate_table(self,
+                       current_output: float,
+                       break_even_target: float,
+                       increment: float = 1.0) -> None:
+        """Generate the what-if table with current output and break-even target."""
+        logger.info(f"Generating what-if table - Current Output: {current_output}, Break Even: {break_even_target}")
 
+        try:
+            # Round values for consistent comparison
+            current_output = round(current_output, 1)
+            break_even_target = round(break_even_target, 1)
 
-def update_what_if_table(sheet, break_even_value, current_output_value):
-    start_row = 11  # Starting at row 11
-    daily_col = 'F'
-    monthly_col = 'G'
-    label_col = 'H'
+            # Initialize first row with current output
+            self.sheet[f'{self.daily_col}{self.start_row}'] = current_output
+            self.sheet[f'{self.monthly_col}{self.start_row}'] = self._calculate_monthly_rate(current_output)
 
-    # Track the closest match for current output
-    closest_output_row = None
-    closest_output_diff = float('inf')  # Start with a large difference to find the closest match
+            current_row = self.start_row + 1
+            found_current = False
+            found_break_even = False
 
-    # Insert the current output into F11 and G11, rounded to nearest 0.1
-    sheet[f'{daily_col}{start_row}'] = round(current_output_value, 1)  # Current output rounded
-    sheet[f'{monthly_col}{start_row}'] = round(current_output_value * 21.7, 1)  # Monthly work orders, rounded
+            # Generate table rows
+            for i in range(52):
+                daily_rate = round(i * increment, 1)
+                monthly_rate = self._calculate_monthly_rate(daily_rate)
 
-    # Track the break-even row
-    break_even_row = None
+                # Write values
+                self.sheet[f'{self.daily_col}{current_row}'] = daily_rate
+                self.sheet[f'{self.monthly_col}{current_row}'] = monthly_rate
 
-    # Start from row 12 for the rest of the rows
-    current_row = start_row + 1
-    for i in range(1, 53):  # Assuming a range of 52 possible work order scenarios
-        daily_value = i
-        monthly_value = daily_value * 22  # Keep precise, no rounding for non-special rows
+                # Check for current output match
+                if not found_current and daily_rate >= current_output:
+                    self._highlight_row(
+                        current_row,
+                        "<-------- Current output (AVG)",
+                        "FFA500",  # Orange
+                        "000000",  # Black text
+                        True
+                    )
+                    found_current = True
 
-        # Insert values into the corresponding columns
-        sheet[f'{daily_col}{current_row}'] = daily_value  # Keep exact daily value
-        sheet[f'{monthly_col}{current_row}'] = monthly_value  # Keep exact monthly value
+                # Check for break-even match
+                if not found_break_even and daily_rate >= break_even_target:
+                    self._highlight_row(
+                        current_row,
+                        "<-------- Break even",
+                        "0000FF",  # Blue
+                        "FFFFFF",  # White text
+                        True
+                    )
+                    found_break_even = True
 
-        # Track the closest value to the current output
-        output_diff = abs(current_output_value - daily_value)
-        if output_diff < closest_output_diff:
-            closest_output_diff = output_diff
-            closest_output_row = current_row
+                current_row += 1
 
-        # Check if this is the break-even row, and round it to nearest 0.1
-        if break_even_row is None and daily_value >= round(break_even_value, 1):
-            break_even_row = current_row
-            # Insert break-even row with rounding to nearest 0.1
-            sheet[f'{daily_col}{current_row}'] = round(break_even_value, 1)
-            sheet[f'{monthly_col}{current_row}'] = round(break_even_value * 21.7, 1)
-            highlight_row(sheet, current_row, "<-------- Break even", "0000FF", font_color="FFFFFF", bold=True)
+            logger.info("What-if table generated successfully")
 
-        current_row += 1
-
-    # Highlight the closest row to the current output (already rounded)
-    if closest_output_row:
-        # Insert current output rounded
-        sheet[f'{daily_col}{closest_output_row}'] = round(current_output_value, 1)
-        sheet[f'{monthly_col}{closest_output_row}'] = round(current_output_value * 21.7, 1)
-        highlight_row(sheet, closest_output_row, "<-------- Current output (AVG)", "FFA500", font_color="000000", bold=True)
-
-    return sheet
-
-
-
-
-def calculate_metrics(data, sheet, open_actual):
-    # Populate necessary cells
-    # sheet['B17'] = data['TotalWorkOrders']
-    sheet['B6'] = 21
-    sheet['M9'] = open_actual
-
-    # Read and evaluate the break-even formula
-    break_even_formula = sheet['B24'].value
-    logger.info(f"Evaluating break-even formula: {break_even_formula}")
-    if isinstance(break_even_formula, str) and break_even_formula.startswith('='):
-        break_even_value = evaluate_simple_formula(break_even_formula, sheet)
-    else:
-        break_even_value = float(break_even_formula) if break_even_formula is not None else 0
-    logger.info(f"Break-even value: {break_even_value}")
-
-    # Read and evaluate the current output formula
-    current_output_formula = sheet['B4'].value
-    logger.info(f"Evaluating current output formula: {current_output_formula}")
-    if isinstance(current_output_formula, str) and current_output_formula.startswith('='):
-        current_output_value = evaluate_simple_formula(current_output_formula, sheet)
-    else:
-        current_output_value = float(current_output_formula) if current_output_formula is not None else 0
-    logger.info(f"Current output value: {current_output_value}")
-
-    # Calculate initial daily rate
-    initial_daily_rate = current_output_value
-    days_per_month = 21
-
-    logger.info(
-        f"Generating what-if table with initial daily rate: {initial_daily_rate}, days per month: {days_per_month}, break-even value: {break_even_value}")
-    what_if_table, break_even_row = generate_what_if_table(initial_daily_rate, days_per_month, break_even_value)
-
-    logger.info(f"Generated what-if table with break-even row: {break_even_row}")
-
-    return {
-        'what_if_table': what_if_table,
-        'break_even_row': break_even_row,
-        'current_output_value': current_output_value,
-        'break_even_value': break_even_value
-    }
+        except Exception as e:
+            logger.error(f"Error generating what-if table: {str(e)}", exc_info=True)
+            raise
 
 
-# Highlight a row with specified formatting
-def highlight_row(sheet, row, label, color, font_color='000000', bold=False):
-    fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
-    font = Font(color=font_color, bold=bold)  # Define font style with color and bold options
+def update_what_if_table(sheet: Worksheet,
+                         data: Dict[str, Any],
+                         open_actual: float) -> None:
+    """
+    Update the what-if table in the worksheet.
 
-    for col in ['F', 'G']:  # Columns F and G contain the daily and monthly work orders
-        cell = sheet[f'{col}{row}']
-        cell.fill = fill
-        cell.font = font
-        # Preserve existing borders if any, otherwise set new borders
-        if not cell.border:
-            cell.border = Border(top=Side(style='thin'), bottom=Side(style='thin'))
-
-    # Label column H with the provided label
-    label_cell = sheet[f'H{row}']
-    label_cell.value = label
-    label_cell.fill = fill
-    label_cell.font = font
-    label_cell.alignment = Alignment(horizontal='left')
-
-
-# Evaluate a simple formula in a cell, handling recursion for references to other cells
-def evaluate_simple_formula(formula, sheet):
-    # Remove the leading '=' if present
-    formula = formula.lstrip('=')
-
-    # Handle Excel AVERAGE function
-    if 'AVERAGE' in formula:
-        formula = re.sub(r'AVERAGE\(([^)]+)\)', r'(\1) / len([\1])', formula)  # Convert AVERAGE() to Python equivalent
-
-    # Use regex to find cell references in the formula
-    cell_refs = re.findall(r'[A-Z]+[0-9]+', formula)
-
-    # Replace cell references with their evaluated values
-    for cell_ref in cell_refs:
-        cell_value = sheet[cell_ref].value
-        if isinstance(cell_value, str) and cell_value.startswith('='):
-            # Recursively evaluate if the cell contains another formula
-            cell_value = evaluate_simple_formula(cell_value, sheet)
-        if cell_value is None:
-            return 0  # Handle missing or empty cells appropriately
-        formula = formula.replace(cell_ref, str(cell_value))
-
-    # Evaluate the resulting expression
+    Args:
+        sheet: Worksheet to update
+        data: Property data dictionary
+        open_actual: Actual open work orders
+    """
     try:
-        return eval(formula)
+        generator = WhatIfTableGenerator(sheet)
+
+        # Calculate metrics first
+        metrics = generator.calculate_metrics(data, open_actual)
+
+        # Generate the table
+        generator.generate_table(
+            current_output=metrics['current_output_value'],
+            break_even_target=metrics['break_even_value']
+        )
+
+        logger.info("What-if table updated successfully")
+
     except Exception as e:
-        print(f"Error evaluating formula {formula}: {e}")
-        return 0  # Handle any evaluation errors
+        logger.error(f"Failed to update what-if table: {str(e)}", exc_info=True)
+        raise
+
+
+if __name__ == "__main__":
+    import openpyxl
+    from openpyxl.worksheet.worksheet import Worksheet
+    from pathlib import Path
+    import os
+    import tempfile
+    import shutil
+
+    test_logger = log_config.get_logger('what_if_table_tests')
+
+
+    def run_tests():
+        test_logger.info("\n=== Running What-If Table Tests ===\n")
+
+        # Create a temporary directory for test files
+        temp_dir = tempfile.mkdtemp()
+        try:
+            # Test FormulaEvaluator
+            def test_formula_evaluator():
+                test_logger.info("Testing FormulaEvaluator...")
+
+                # Create a test workbook
+                wb = openpyxl.Workbook()
+                sheet = wb.active
+
+                # Setup test data
+                sheet['A1'] = 10.0
+                sheet['A2'] = 20.0
+                sheet['A3'] = 30.0
+
+                evaluator = FormulaEvaluator()
+
+                # Test simple formula
+                test_logger.info("Testing simple addition...")
+                result1 = evaluator.evaluate_formula('=A1+A2', sheet)
+                assert result1 == 30, f"Simple formula test failed: expected 30, got {result1}"
+                test_logger.info("✓ Simple addition test passed")
+
+                # Test AVERAGE function
+                test_logger.info("Testing AVERAGE function...")
+                result2 = evaluator.evaluate_formula('=AVERAGE(A1:A3)', sheet)
+                assert abs(result2 - 20.0) < 0.01, f"AVERAGE function test failed: expected 20, got {result2}"
+                test_logger.info("✓ AVERAGE function test passed")
+
+                # Test multiplication
+                test_logger.info("Testing multiplication...")
+                result3 = evaluator.evaluate_formula('=A1*2', sheet)
+                assert result3 == 20, f"Multiplication test failed: expected 20, got {result3}"
+                test_logger.info("✓ Multiplication test passed")
+
+                test_logger.info("✓ All FormulaEvaluator tests passed")
+
+            def test_what_if_table_generator():
+                test_logger.info("\nTesting WhatIfTableGenerator...")
+
+                # Create a test workbook with template-like structure
+                wb = openpyxl.Workbook()
+                sheet = wb.active
+
+                # Setup test data
+                sheet['B4'] = '=M9/21'  # Current output formula
+                sheet['B24'] = 25  # Break-even target
+                sheet['M9'] = 420  # Open work orders
+
+                generator = WhatIfTableGenerator(sheet)
+
+                # Test metrics calculation
+                test_logger.info("Testing metrics calculation...")
+                metrics = generator.calculate_metrics({}, 420)
+                assert 'break_even_value' in metrics, "Break-even value missing from metrics"
+                assert 'current_output_value' in metrics, "Current output value missing from metrics"
+                test_logger.info("✓ Metrics calculation test passed")
+
+                # Test table generation
+                test_logger.info("Testing table generation...")
+                generator.generate_table(
+                    current_output=20,
+                    break_even_target=25
+                )
+
+                # Verify table contents
+                # Check first row (current output)
+                daily_value = sheet['F11'].value
+                monthly_value = sheet['G11'].value
+                assert daily_value == 20, f"Initial daily value incorrect: expected 20, got {daily_value}"
+                assert round(monthly_value, 1) == round(20 * 21.7, 1), f"Initial monthly value incorrect"
+                test_logger.info("✓ Table generation test passed")
+
+                # Save test output for inspection
+                test_output_path = Path(temp_dir) / "test_output.xlsx"
+                wb.save(test_output_path)
+                test_logger.info(f"\nTest output saved to: {test_output_path}")
+
+            def test_complete_workflow():
+                test_logger.info("\nTesting complete workflow...")
+
+                # Create a test workbook
+                wb = openpyxl.Workbook()
+                sheet = wb.active
+
+                # Setup test data
+                test_data = {
+                    'NewWorkOrders_Current': 450,
+                    'CancelledWorkOrder_Current': 30,
+                }
+
+                # Test the main update function
+                try:
+                    update_what_if_table(
+                        sheet=sheet,
+                        data=test_data,
+                        open_actual=420
+                    )
+                    test_logger.info("✓ Complete workflow test passed")
+                except Exception as e:
+                    test_logger.info(f"✗ Complete workflow test failed: {str(e)}")
+                    raise
+
+            # Run all tests
+            try:
+                test_formula_evaluator()
+                test_what_if_table_generator()
+                test_complete_workflow()
+                test_logger.info("\n✓ All tests passed successfully!")
+            except AssertionError as e:
+                test_logger.info(f"\n✗ Test failed: {str(e)}")
+            except Exception as e:
+                test_logger.info(f"\n✗ Unexpected error during testing: {str(e)}")
+
+        finally:
+            # Cleanup temporary directory
+            shutil.rmtree(temp_dir)
+
+
+    # Run the tests
+    run_tests()
