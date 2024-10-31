@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Dict, List, Union, Any
 from datetime import datetime, timedelta
@@ -231,7 +232,7 @@ class ExcelGeneratorService:
                 evaluator = FormulaEvaluator()
                 break_even_value = evaluator.evaluate_formula(break_even_value, self.sheet)
             break_even_value = round(float(break_even_value or 0), 1)
-            l12_text = f"Required daily work order output *In addition to Break even ({break_even_value} per-workday)*"
+            l12_text = f"Required daily work order output *In addition to Break even\n({break_even_value} per-workday)*"
 
             # Update cells with validated data
             updates = {
@@ -342,6 +343,7 @@ def generate_multi_property_report(
 
                 generated_files.append(property_output_path)
                 logger.info(f"Successfully generated report for {property_data.property_name}")
+                time.sleep(0.5)  # Add delay to prevent API rate limiting
 
             except Exception as e:
                 logger.error(f"Failed to generate report for {property_data.property_name}: {str(e)}", exc_info=True)

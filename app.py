@@ -1,5 +1,6 @@
 from pathlib import Path
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from datetime import datetime, timedelta
 from models.models import *
 from functools import wraps
@@ -9,6 +10,13 @@ from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
 
 app = Flask(__name__)
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:5173"],  # Vite's default port
+        "methods": ["GET", "POST", "PUT", "DELETE"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 # Setup logging
 log_config = LogConfig()
