@@ -6,6 +6,7 @@ import {Notification} from './ui/notification';
 // import {ProgressBar} from './ui/ProgressBar';
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
+import FloatingDownloadButton from './FloatingDownloadButton';
 
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
@@ -23,6 +24,7 @@ const PropertyReportGenerator = () => {
     });
     const [downloadManagerState, setDownloadManagerState] = useState({
         isVisible: false,
+        showFloatingButton: false,
         files: []
     });
     const [isFirstLoad, setIsFirstLoad] = useState(true); // New state variable
@@ -229,11 +231,13 @@ const PropertyReportGenerator = () => {
     const showDownloadManager = (files, outputDirectory) => {
         setDownloadManagerState({
             isVisible: true,
+            showFloatingButton: true,
             files: files.map(file => ({
                 name: file,
                 path: `${outputDirectory}/${file}`,
                 downloaded: false,
-                downloading: false
+                downloading: false,
+                failed: false
             }))
         });
     };
@@ -242,6 +246,13 @@ const PropertyReportGenerator = () => {
         setDownloadManagerState(prev => ({
             ...prev,
             isVisible: false
+        }));
+    };
+
+    const handleFloatingButtonClick = () => {
+        setDownloadManagerState(prev => ({
+            ...prev,
+            isVisible: true
         }));
     };
 
@@ -286,14 +297,6 @@ const PropertyReportGenerator = () => {
         }
     };
 
-
-    // Debug render
-    console.log('Rendering with:', {
-        propertiesLength: properties?.length,
-        filteredLength: filteredProperties?.length,
-        isLoading,
-        error
-    });
 
     return (
         <div className={`container mx-auto p-6 space-y-6 ${isDarkMode ? 'dark' : ''}`}>
@@ -474,7 +477,13 @@ const PropertyReportGenerator = () => {
                     </div>
                 </CardContent>
             </Card>
-
+            <button
+                onClick={toggleDarkMode}
+                className="text-gray-500 hover:text-gray-700 focus:outline-none"
+                aria-label="Toggle Dark Mode"
+            >
+                {isDarkMode ? <Sun className="w-6 h-6"/> : <Moon className="w-6 h-6"/>}
+            </button>
             {/* Download Manager */}
             <DownloadManager
                 files={downloadManagerState.files}
@@ -483,13 +492,15 @@ const PropertyReportGenerator = () => {
                 onClose={hideDownloadManager}
             />
 
-            <button
-                onClick={toggleDarkMode}
-                className="text-gray-500 hover:text-gray-700 focus:outline-none"
-                aria-label="Toggle Dark Mode"
-            >
-                {isDarkMode ? <Sun className="w-6 h-6"/> : <Moon className="w-6 h-6"/>}
-            </button>
+            {/* Floating Download Button */}
+            {downloadManagerState.showFloatingButton && !downloadManagerState.isVisible && (
+                <FloatingDownloadButton
+                    filesCount={downloadManagerState.files.length}
+                    completedCount={downloadManagerState.files.filter(f => f.downloaded).length}
+                    onClick={handleFloatingButtonClick}
+                />
+            )}
+
         </div>
     );
 };
