@@ -7,6 +7,8 @@ import {Notification} from './ui/notification';
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
 import FloatingDownloadButton from './FloatingDownloadButton';
+import {ZipDownloader, createTimestampedZipName, formatFileSize} from '../lib/zipUtility';
+import useSessionManager from '../lib/session';
 
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
@@ -17,7 +19,9 @@ const PropertyReportGenerator = () => {
     const [message, setMessage] = useState(null);
     const [error, setError] = useState(null);
     const [notifications, setNotifications] = useState([]);
+    const [downloadProgress, setDownloadProgress] = useState(null);
     const [isDataUpToDate, setIsDataUpToDate] = useState(null); // null, true, or false
+    const {sessionId, updateSessionId} = useSessionManager();
     const [isDarkMode, setIsDarkMode] = useState(() => {
         const savedMode = localStorage.getItem('isDarkMode');
         return savedMode ? JSON.parse(savedMode) : false;
@@ -116,7 +120,6 @@ const PropertyReportGenerator = () => {
                 } catch (error) {
 
                     console.error(`Error fetching properties (Attempt ${attempts}):`, error);
-                    addNotification('error', `Error fetching properties (Attempt ${attempts})`);
                     setError(error.message);
                     setProperties([]);
                     addNotification('error', `${error.message || 'Error fetching properties (Attempt ${attempts})' || 'Unknown error occurred'}`);
@@ -137,15 +140,15 @@ const PropertyReportGenerator = () => {
     }, [searchTerm, isDarkMode]);
 
     // Debug properties before filtering
-    console.log('Properties before filtering:', properties);
+    // console.log('Properties before filtering:', properties);
 
     // Debug logging
-    console.log('Raw properties before filtering:', properties);
+    // console.log('Raw properties before filtering:', properties);
 
     const filteredProperties = Array.isArray(properties)
         ? properties.filter(property => {
             // Debug log each property
-            console.log('Processing property:', property);
+            // console.log('Processing property:', property);
 
             return property &&
                 property.PropertyName &&
@@ -154,7 +157,7 @@ const PropertyReportGenerator = () => {
         : [];
 
     // Debug log filtered results
-    console.log('Filtered properties:', filteredProperties);
+    // console.log('Filtered properties:', filteredProperties);
 
     const togglePropertySelection = (propertyKey) => {
         setSelectedProperties(prev => {
@@ -178,7 +181,17 @@ const PropertyReportGenerator = () => {
             const result = await api.generateReports(selectedProperties);
 
             if (result.success) {
-                setNotifications([]); // Clear any existing notifications
+                // Use the session ID from the server response
+                if (result.sessionId) {
+                    // Update cookie with server's session ID
+                    Cookies.set('session_id', result.sessionId, {
+                        expires: 1,
+                        sameSite: 'Lax',
+                        secure: window.location.protocol === 'https:'
+                    });
+                }
+
+                setNotifications([]);
                 addNotification('success', `Successfully generated ${result.output.propertyCount} reports!`);
                 setSelectedProperties([]);
 
@@ -191,7 +204,7 @@ const PropertyReportGenerator = () => {
             }
         } catch (error) {
             console.error('Error generating reports:', error);
-            addNotification('error', `Failed to generate reports: ${error.message || 'Unknown error occurred'}`);
+            addNotification('error', `Failed to generate reports: ${error.message}`);
         } finally {
             setIsGenerating(false);
         }
@@ -228,35 +241,75 @@ const PropertyReportGenerator = () => {
         };
     };
 
-    const showDownloadManager = (files, outputDirectory) => {
-        setDownloadManagerState({
-            isVisible: true,
-            showFloatingButton: true,
-            files: files.map(file => ({
-                name: file,
-                path: `${outputDirectory}/${file}`,
-                downloaded: false,
-                downloading: false,
-                failed: false
-            }))
-        });
-    };
-
     const hideDownloadManager = () => {
         setDownloadManagerState(prev => ({
             ...prev,
-            isVisible: false
+            isVisible: false,
+            showFloatingButton: true // Keep showFloatingButton true when hiding manager
         }));
     };
 
+// Update showDownloadManager function
+    const showDownloadManager = (files, outputDirectory) => {
+        // Process files to ensure correct paths without duplication
+        const processedFiles = files.map(file => {
+            // Remove any potential duplicate directory prefixes
+            let normalizedPath = file;
+
+            // Remove output directory prefix if it exists
+            if (file.startsWith(outputDirectory + '/')) {
+                normalizedPath = file.substring(outputDirectory.length + 1);
+            }
+
+            // Build the correct file path
+            const fullPath = `${outputDirectory}/${normalizedPath}`;
+
+            // Log for debugging
+            console.log('Processing file:', {
+                original: file,
+                normalized: normalizedPath,
+                fullPath: fullPath
+            });
+
+            return {
+                name: normalizedPath.split('/').pop(), // Get just the filename
+                path: fullPath,
+                downloaded: false,
+                downloading: false,
+                failed: false
+            };
+        });
+
+        console.log('Setting up download manager with files:', processedFiles);
+
+        setDownloadManagerState({
+            isVisible: true,
+            showFloatingButton: true, // Always set to true when files are available
+            files: processedFiles
+        });
+    };
+
+// Update handleFloatingButtonClick function
     const handleFloatingButtonClick = () => {
         setDownloadManagerState(prev => ({
             ...prev,
-            isVisible: true
+            isVisible: true,
+            showFloatingButton: true // Keep showFloatingButton true
         }));
     };
 
     const handleDownload = async (file) => {
+        // Get current session from cookie
+        const currentSessionId = Cookies.get('session_id');
+
+        if (!currentSessionId) {
+            console.error('no valid session ID found');
+            addNotification('error', 'No valid session found. Please try generating the report again.');
+
+            throw new Error('No valid session found.');
+            return;
+        }
+
         // Update file status to downloading
         setDownloadManagerState(prev => ({
             ...prev,
@@ -268,6 +321,10 @@ const PropertyReportGenerator = () => {
         }));
 
         try {
+            // Log the session and file info
+            console.log('Downloading file:', file.path);
+            console.log('Using session ID:', currentSessionId);
+
             await api.downloadReport(file.path);
 
             // Update file status to downloaded
@@ -283,7 +340,7 @@ const PropertyReportGenerator = () => {
             addNotification('success', `Successfully downloaded ${file.name}`);
         } catch (error) {
             console.error('Download error:', error);
-            addNotification('error', `Failed to download ${file.name}`);
+            addNotification('error', `Failed to download ${file.name}: ${error.message}`);
 
             // Reset downloading state on error
             setDownloadManagerState(prev => ({
@@ -294,6 +351,139 @@ const PropertyReportGenerator = () => {
                         : f
                 )
             }));
+        }
+    };
+
+    // Add this function to handle downloading all files
+    const handleDownloadAll = async (files) => {
+        if (files.length > 3) {
+            // Initialize ZipDownloader with callbacks
+            const zipDownloader = new ZipDownloader({
+                api,
+                onProgress: (progress) => {
+                    setDownloadProgress(progress);
+                    if (progress.type === 'start') {
+                        addNotification('info', progress.message);
+                    }
+                },
+                onFileComplete: ({file}) => {
+                    // Update individual file status in download manager
+                    setDownloadManagerState(prev => ({
+                        ...prev,
+                        files: prev.files.map(f =>
+                            f.path === file.path
+                                ? {...f, downloading: false, downloaded: true}
+                                : f
+                        )
+                    }));
+                },
+                onError: ({file, error}) => {
+                    const message = file
+                        ? `Failed to download ${file.name}: ${error}`
+                        : `Download error: ${error}`;
+                    addNotification('error', message);
+
+                    // Reset file status if there was an error
+                    if (file) {
+                        setDownloadManagerState(prev => ({
+                            ...prev,
+                            files: prev.files.map(f =>
+                                f.path === file.path
+                                    ? {...f, downloading: false}
+                                    : f
+                            )
+                        }));
+                    }
+                },
+                onSuccess: ({fileCount, size}) => {
+                    addNotification('success',
+                        `Successfully downloaded ${fileCount} files (${formatFileSize(size)})`
+                    );
+                    setDownloadProgress(null);
+                }
+            });
+
+            try {
+                // Update all files to downloading state
+                setDownloadManagerState(prev => ({
+                    ...prev,
+                    files: prev.files.map(f =>
+                        files.some(df => df.path === f.path)
+                            ? {...f, downloading: true}
+                            : f
+                    )
+                }));
+
+                // Start the zip download
+                const zipName = createTimestampedZipName();
+                await zipDownloader.downloadAsZip(files, zipName);
+
+            } catch (error) {
+                console.error('Failed to download files as ZIP:', error);
+                // Reset all downloading states
+                setDownloadManagerState(prev => ({
+                    ...prev,
+                    files: prev.files.map(f =>
+                        files.some(df => df.path === f.path)
+                            ? {...f, downloading: false}
+                            : f
+                    )
+                }));
+            } finally {
+                setDownloadProgress(null);
+            }
+        } else {
+            // Original sequential download logic for 3 or fewer files
+            addNotification('info', `Starting download of ${files.length} files...`);
+
+            for (const file of files) {
+                try {
+                    if (file.downloaded || file.downloading) continue;
+
+                    setDownloadManagerState(prev => ({
+                        ...prev,
+                        files: prev.files.map(f =>
+                            f.path === file.path
+                                ? {...f, downloading: true}
+                                : f
+                        )
+                    }));
+
+                    await api.downloadReport(file.path);
+
+                    setDownloadManagerState(prev => ({
+                        ...prev,
+                        files: prev.files.map(f =>
+                            f.path === file.path
+                                ? {...f, downloading: false, downloaded: true}
+                                : f
+                        )
+                    }));
+
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                } catch (error) {
+                    console.error(`Error downloading ${file.name}:`, error);
+                    addNotification('error', `Failed to download ${file.name}`);
+
+                    setDownloadManagerState(prev => ({
+                        ...prev,
+                        files: prev.files.map(f =>
+                            f.path === file.path
+                                ? {...f, downloading: false}
+                                : f
+                        )
+                    }));
+                }
+            }
+
+            setDownloadManagerState(prev => {
+                const allDownloaded = prev.files.every(f => f.downloaded);
+                if (allDownloaded) {
+                    addNotification('success', 'All files downloaded successfully!');
+                }
+                return prev;
+            });
         }
     };
 
@@ -485,21 +675,27 @@ const PropertyReportGenerator = () => {
                 {isDarkMode ? <Sun className="w-6 h-6"/> : <Moon className="w-6 h-6"/>}
             </button>
             {/* Download Manager */}
-            <DownloadManager
-                files={downloadManagerState.files}
-                isVisible={downloadManagerState.isVisible}
-                onDownload={handleDownload}
-                onClose={hideDownloadManager}
-            />
-
-            {/* Floating Download Button */}
-            {downloadManagerState.showFloatingButton && !downloadManagerState.isVisible && (
-                <FloatingDownloadButton
-                    filesCount={downloadManagerState.files.length}
-                    completedCount={downloadManagerState.files.filter(f => f.downloaded).length}
-                    onClick={handleFloatingButtonClick}
+            {downloadManagerState.files.length > 0 && (
+                <DownloadManager
+                    files={downloadManagerState.files}
+                    isVisible={downloadManagerState.isVisible}
+                    onDownload={handleDownload}
+                    onDownloadAll={handleDownloadAll}
+                    onClose={hideDownloadManager}
+                    downloadProgress={downloadProgress}  // Add the downloadProgress prop
                 />
             )}
+
+            {/* Floating Download Button */}
+            {downloadManagerState.showFloatingButton &&
+                !downloadManagerState.isVisible &&
+                downloadManagerState.files.length > 0 && (
+                    <FloatingDownloadButton
+                        filesCount={downloadManagerState.files.length}
+                        completedCount={downloadManagerState.files.filter(f => f.downloaded).length}
+                        onClick={handleFloatingButtonClick}
+                    />
+                )}
 
         </div>
     );
