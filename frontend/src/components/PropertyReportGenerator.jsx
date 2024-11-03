@@ -1,9 +1,7 @@
 import React, {useState, useEffect} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from './ui/card';
 import {Search, Download, FileDown, CheckCircle, X, Plus, AlertTriangle, Moon, Sun} from 'lucide-react';
-import {Alert, AlertDescription} from './ui/alert';
-import {Notification} from './ui/notification';
-// import {ProgressBar} from './ui/ProgressBar';
+import {useTheme} from "../lib/theme.jsx";
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
 import FloatingDownloadButton from './FloatingDownloadButton';
@@ -22,10 +20,8 @@ const PropertyReportGenerator = () => {
     const [downloadProgress, setDownloadProgress] = useState(null);
     const [isDataUpToDate, setIsDataUpToDate] = useState(null); // null, true, or false
     const {sessionId, updateSessionId} = useSessionManager();
-    const [isDarkMode, setIsDarkMode] = useState(() => {
-        const savedMode = localStorage.getItem('isDarkMode');
-        return savedMode ? JSON.parse(savedMode) : false;
-    });
+    const {isDarkMode} = useTheme();
+
     const [downloadManagerState, setDownloadManagerState] = useState({
         isVisible: false,
         showFloatingButton: false,
@@ -223,22 +219,6 @@ const PropertyReportGenerator = () => {
 
     const removeNotification = (id) => {
         setNotifications(prev => prev.filter(notification => notification.id !== id));
-    };
-
-    const toggleDarkMode = () => {
-        setIsDarkMode((prevMode) => {
-            const newMode = !prevMode;
-            localStorage.setItem('isDarkMode', JSON.stringify(newMode));
-            return newMode;
-        });
-
-        const ProgressBar = () => {
-            return (
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
-                    <div className="bg-blue-600 h-2.5 rounded-full animate-indeterminate"></div>
-                </div>
-            );
-        };
     };
 
     const hideDownloadManager = () => {
@@ -660,13 +640,6 @@ const PropertyReportGenerator = () => {
                     </div>
                 </CardContent>
             </Card>
-            <button
-                onClick={toggleDarkMode}
-                className="text-gray-500 hover:text-gray-700 focus:outline-none"
-                aria-label="Toggle Dark Mode"
-            >
-                {isDarkMode ? <Sun className="w-6 h-6"/> : <Moon className="w-6 h-6"/>}
-            </button>
             {/* Download Manager */}
             {downloadManagerState.files.length > 0 && (
                 <DownloadManager
@@ -683,11 +656,13 @@ const PropertyReportGenerator = () => {
             {downloadManagerState.showFloatingButton &&
                 !downloadManagerState.isVisible &&
                 downloadManagerState.files.length > 0 && (
+                    <div className="fixed bottom-4 right-4">
                     <FloatingDownloadButton
                         filesCount={downloadManagerState.files.length}
                         completedCount={downloadManagerState.files.filter(f => f.downloaded).length}
                         onClick={handleFloatingButtonClick}
                     />
+                    </div>
                 )}
 
         </div>
