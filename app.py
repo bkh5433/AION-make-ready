@@ -14,7 +14,8 @@ from typing import Dict, List, Optional, Union
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
-from session import with_session, get_session_path, cleanup_session, run_session_cleanup
+from session import with_session, get_session_path, cleanup_session, run_session_cleanup, generate_session_id, \
+    setup_session_directory
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -113,7 +114,7 @@ def search_properties():
         last_updated=cache['last_updated']
     )
 
-    return result.model_dump()
+    return jsonify(result.model_dump())
 
 
 # In app.py
@@ -121,16 +122,20 @@ def search_properties():
 @app.route('/api/reports/generate', methods=['POST'])
 @catch_exceptions
 @log_exceptions(logger)
-@with_session
-def generate_report(session_id: str):
+def generate_report():
     """Generate Excel report for selected properties."""
     try:
+
+        # Generate new session ID
+        session_id = generate_session_id()
+        setup_session_directory(session_id)
+
         # Get user's output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = get_session_path(session_id) / timestamp
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Generated output directory: {output_dir}")
+        logger.info(f"Generated directory for session {session_id}: {output_dir}")
 
         # Validate request data
         request_data = request.get_json()
@@ -186,7 +191,7 @@ def generate_report(session_id: str):
 
             logger.info(f"Generated files: {files}")
 
-            return ReportGenerationResponse(
+            response = ReportGenerationResponse(
                 success=True,
                 message="Reports generated successfully",
                 output=ReportOutput(
@@ -195,6 +200,21 @@ def generate_report(session_id: str):
                     files=files
                 )
             ).model_dump()
+
+            response = jsonify(response)
+            response.set_cookie(
+                'session_id',
+                session_id,
+                max_age=3600,  # 1 hour - shorter since we only need it for downloads
+                httponly=False,
+                samesite='Lax',
+                secure=False,  # Set to True in production
+                path='/'
+            )
+
+            return response
+
+
 
         except Exception as e:
             logger.error(f"Error generating reports: {str(e)}", exc_info=True)
@@ -277,63 +297,57 @@ def cleanup_files_after_zip(files: List[Path], timestamp_dir: Path):
 @app.route('/api/reports/download', methods=['GET'])
 @catch_exceptions
 @log_exceptions(logger)
-@with_session
-def download_report(session_id: str):
+def download_report():
     """Download a report file."""
+
+    # TODO: FIX DOWNLOAD REGARDING SESSION NOT BEING PASSED
+    #   CURRENTLY THE SESSION ID IS NOT BEING PASSED TO THE DOWNLOAD FUNCTION
+    #   SERVER RETURNS A 401 ERROR
     try:
+        session_id = request.cookies.get('session_id')
+        if not session_id:
+            return jsonify({
+                "success": False,
+                "message": "Invalid session"
+            }), 401
+
         file_path = request.args.get('file')
-
         if not file_path:
-            logger.error(f"Missing file parameter")
-            return {
+            return jsonify({
                 "success": False,
-                "message": "Missing required parameters"
-            }, 400
+                "message": "Missing file parameter"
+            }), 400
 
-        # Log the request details
-        logger.info(f"Download request - Session ID: {session_id}, File: {file_path}")
-
-        # Split the file path into directory and filename
-        path_parts = Path(file_path)
-        directory = path_parts.parent
-        filename = path_parts.name
-
-        # Construct the full directory path
-        full_dir_path = Path('output') / directory
-
-        logger.info(f"Looking for file in directory: {full_dir_path}")
-
-        # Verify the directory exists and is within the output directory
-        if not full_dir_path.exists() or not full_dir_path.is_dir():
-            logger.error(f"Directory not found: {full_dir_path}")
-            return {
+        # Verify the file exists and is in the correct session
+        full_path = Path('output') / file_path
+        if not full_path.exists():
+            return jsonify({
                 "success": False,
                 "message": "File not found"
-            }, 404
+            }), 404
 
-        # Verify the file exists
-        full_file_path = full_dir_path / filename
-        if not full_file_path.exists():
-            logger.error(f"File not found: {full_file_path}")
-            return {
+        # Security check: ensure file is within session directory
+        try:
+            session_path = Path('output') / session_id
+            full_path.relative_to(session_path)
+        except ValueError:
+            return jsonify({
                 "success": False,
-                "message": "File not found"
-            }, 404
-
-        logger.info(f"Sending file: {full_file_path}")
+                "message": "Invalid file access"
+            }), 403
 
         return send_from_directory(
-            directory=str(full_dir_path),
-            path=filename,
+            directory=str(full_path.parent),
+            path=full_path.name,
             as_attachment=True
         )
 
     except Exception as e:
         logger.error(f"Error processing download request: {str(e)}", exc_info=True)
-        return {
+        return jsonify({
             "success": False,
             "message": "Error processing download request"
-        }, 500
+        }), 500
 
 
 @app.route('/api/session/end', methods=['POST'])
