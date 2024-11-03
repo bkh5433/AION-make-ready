@@ -299,18 +299,7 @@ const PropertyReportGenerator = () => {
     };
 
     const handleDownload = async (file) => {
-        // Get current session from cookie
-        const currentSessionId = Cookies.get('session_id');
-
-        if (!currentSessionId) {
-            console.error('no valid session ID found');
-            addNotification('error', 'No valid session found. Please try generating the report again.');
-
-            throw new Error('No valid session found.');
-            return;
-        }
-
-        // Update file status to downloading
+        try {
         setDownloadManagerState(prev => ({
             ...prev,
             files: prev.files.map(f =>
@@ -320,14 +309,19 @@ const PropertyReportGenerator = () => {
             )
         }));
 
-        try {
-            // Log the session and file info
-            console.log('Downloading file:', file.path);
-            console.log('Using session ID:', currentSessionId);
+            const blob = await api.downloadReport(file.path);
 
-            await api.downloadReport(file.path);
+            // Create and trigger download
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(url);
+            document.body.removeChild(a);
 
-            // Update file status to downloaded
+            // Update download status
             setDownloadManagerState(prev => ({
                 ...prev,
                 files: prev.files.map(f =>
@@ -342,7 +336,6 @@ const PropertyReportGenerator = () => {
             console.error('Download error:', error);
             addNotification('error', `Failed to download ${file.name}: ${error.message}`);
 
-            // Reset downloading state on error
             setDownloadManagerState(prev => ({
                 ...prev,
                 files: prev.files.map(f =>

@@ -14,17 +14,17 @@ from typing import Dict, List, Optional, Union
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
-from session import generate_session_id, get_user_output_dir, cleanup_old_session_files, \
-    ensure_session_dirs
+from session import with_session, get_session_path, cleanup_session, run_session_cleanup
 
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:5173"],  # Vite's default port
-        "methods": ["GET", "POST", "PUT", "DELETE"],
-        "allow_headers": ["Content-Type"],
-        "supports_credentials": True,  # Allow credentials
-        "expose_headers": ["Set-Cookie"]  # Expose Set-Cookie header
+        "origins": ["http://localhost:5173"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie"],
+        "supports_credentials": True,
+        "expose_headers": ["Set-Cookie"],
+        "max_age": 3600
     }
 })
 
@@ -113,7 +113,7 @@ def search_properties():
         last_updated=cache['last_updated']
     )
 
-    return jsonify(result.model_dump())
+    return result.model_dump()
 
 
 # In app.py
@@ -121,23 +121,14 @@ def search_properties():
 @app.route('/api/reports/generate', methods=['POST'])
 @catch_exceptions
 @log_exceptions(logger)
-def generate_report():
+@with_session
+def generate_report(session_id: str):
     """Generate Excel report for selected properties."""
     try:
-        # Get or create session ID
-        session_id = request.cookies.get('session_id')
-        if not session_id:
-            session_id = generate_session_id()
-            logger.info(f"Generated new session ID: {session_id}")
-        else:
-            logger.info(f"Using existing session ID: {session_id}")
-
-        # Clean up any old files for this session
-        cleanup_old_session_files(session_id)
-
-        # Get user's output directory - simpler version without request_id
-        output_dir = get_user_output_dir(session_id)
-        ensure_session_dirs(output_dir)  # Make sure directories exist
+        # Get user's output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = get_session_path(session_id) / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Generated output directory: {output_dir}")
 
@@ -145,19 +136,19 @@ def generate_report():
         request_data = request.get_json()
         if not request_data:
             logger.error("No request data provided")
-            return jsonify({
+            return {
                 "success": False,
                 "message": "No request data provided"
-            }), 400
+            }, 400
 
         try:
             report_request = ReportGenerationRequest(**request_data)
         except ValidationError as e:
             logger.error(f"Invalid request format: {str(e)}")
-            return jsonify({
+            return {
                 "success": False,
                 "message": f"Invalid request format: {str(e)}"
-            }), 400
+            }, 400
 
         # Continue with report generation...
         searcher = PropertySearch(cache['data'])
@@ -165,10 +156,10 @@ def generate_report():
 
         if not properties:
             logger.warning(f"No properties found for keys: {report_request.properties}")
-            return jsonify({
+            return {
                 "success": False,
                 "message": "No properties found matching the request"
-            }), 404
+            }, 404
 
         try:
             # Generate reports
@@ -195,8 +186,7 @@ def generate_report():
 
             logger.info(f"Generated files: {files}")
 
-            # Create response
-            response = jsonify(ReportGenerationResponse(
+            return ReportGenerationResponse(
                 success=True,
                 message="Reports generated successfully",
                 output=ReportOutput(
@@ -204,20 +194,7 @@ def generate_report():
                     propertyCount=len(properties),
                     files=files
                 )
-            ).model_dump())
-
-            # Set cookie
-            response.set_cookie(
-                'session_id',
-                session_id,
-                max_age=86400,  # 24 hours
-                httponly=True,
-                samesite='Lax',
-                secure=False  # Set to True in production with HTTPS
-            )
-
-            logger.info(f"Set session cookie: {session_id}")
-            return response
+            ).model_dump()
 
         except Exception as e:
             logger.error(f"Error generating reports: {str(e)}", exc_info=True)
@@ -227,10 +204,10 @@ def generate_report():
 
     except Exception as e:
         logger.error(f"Error generating report: {str(e)}", exc_info=True)
-        return jsonify({
+        return {
             "success": False,
             "message": f"Error generating report: {str(e)}"
-        }), 500
+        }, 500
 
 
 @app.route('/api/refresh', methods=['POST'])
@@ -295,29 +272,25 @@ def cleanup_files_after_zip(files: List[Path], timestamp_dir: Path):
         # Don't raise the exception - cleanup failure shouldn't affect download
 
 
+# In app.py - Update the download_report route:
+
 @app.route('/api/reports/download', methods=['GET'])
 @catch_exceptions
 @log_exceptions(logger)
-def download_report():
+@with_session
+def download_report(session_id: str):
     """Download a report file."""
     try:
-        # First try to get session ID from cookie
-        session_id = request.cookies.get('session_id')
-
-        # If no cookie, try query parameter
-        if not session_id:
-            session_id = request.args.get('sessionId')
-
         file_path = request.args.get('file')
 
-        if not session_id or not file_path:
-            logger.error(f"Missing parameters - sessionId: {session_id}, file: {file_path}")
-            return jsonify({
+        if not file_path:
+            logger.error(f"Missing file parameter")
+            return {
                 "success": False,
                 "message": "Missing required parameters"
-            }), 400
+            }, 400
 
-        # Log the session and file info
+        # Log the request details
         logger.info(f"Download request - Session ID: {session_id}, File: {file_path}")
 
         # Split the file path into directory and filename
@@ -333,49 +306,71 @@ def download_report():
         # Verify the directory exists and is within the output directory
         if not full_dir_path.exists() or not full_dir_path.is_dir():
             logger.error(f"Directory not found: {full_dir_path}")
-            return jsonify({
+            return {
                 "success": False,
                 "message": "File not found"
-            }), 404
+            }, 404
 
         # Verify the file exists
         full_file_path = full_dir_path / filename
         if not full_file_path.exists():
             logger.error(f"File not found: {full_file_path}")
-            return jsonify({
+            return {
                 "success": False,
                 "message": "File not found"
-            }), 404
+            }, 404
 
         logger.info(f"Sending file: {full_file_path}")
 
-        # Create response with file
-        response = send_from_directory(
+        return send_from_directory(
             directory=str(full_dir_path),
             path=filename,
             as_attachment=True
         )
 
-        # Ensure the session cookie is included in the response
-        response.set_cookie(
-            'session_id',
-            session_id,
-            max_age=86400,  # 24 hours
-            httponly=True,
-            samesite='Lax',
-            secure=False  # Set to True in production with HTTPS
-        )
+    except Exception as e:
+        logger.error(f"Error processing download request: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "message": "Error processing download request"
+        }, 500
 
+
+@app.route('/api/session/end', methods=['POST'])
+@catch_exceptions
+@log_exceptions(logger)
+def end_session():
+    """End current session"""
+    try:
+        session_id = request.cookies.get('session_id')
+        if not session_id:
+            return jsonify({"success": True, "message": "No session to end"})
+
+        cleanup_session(session_id)
+
+        response = jsonify({"success": True, "message": "Session ended"})
+        response.delete_cookie('session_id')
         return response
 
     except Exception as e:
-        logger.error(f"Error processing download request: {str(e)}", exc_info=True)
+        logger.error(f"Error ending session: {e}")
         return jsonify({
             "success": False,
-            "message": "Error processing download request"
+            "message": "Error ending session"
         }), 500
 
 
+# Schedule periodic cleanup
+from apscheduler.schedulers.background import BackgroundScheduler
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(run_session_cleanup, 'interval', minutes=1)
+scheduler.start()
+
+if scheduler.state == 1:
+    logger.info("Scheduler started successfully.")
+else:
+    logger.error("Scheduler failed to start.")
 
 
 if __name__ == '__main__':
