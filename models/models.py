@@ -62,7 +62,7 @@ class WorkOrderMetrics(BaseModel):
 
         return self
 
-    @validator('percentage_completed', 'daily_rate', 'monthly_rate', 'break_even_target', 'current_output')
+    @field_validator('percentage_completed', 'daily_rate', 'monthly_rate', 'break_even_target', 'current_output')
     def round_values(cls, v: float) -> float:
         return round(v, 1)
 

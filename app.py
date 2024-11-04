@@ -1,5 +1,12 @@
 from pathlib import Path
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory, after_this_request, send_file
+import shutil
+import time
+import os
+import io
+import zipfile
+from werkzeug.wsgi import FileWrapper
+from flask_cors import CORS
 from datetime import datetime, timedelta
 from models.models import *
 from functools import wraps
@@ -7,8 +14,20 @@ from typing import Dict, List, Optional, Union
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
+from session import with_session, get_session_path, cleanup_session, run_session_cleanup, generate_session_id, \
+    setup_session_directory
 
 app = Flask(__name__)
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ["http://localhost:5173"],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie"],
+        "supports_credentials": True,
+        "expose_headers": ["Set-Cookie"],
+        "max_age": 3600
+    }
+})
 
 # Setup logging
 log_config = LogConfig()
@@ -98,87 +117,117 @@ def search_properties():
     return jsonify(result.model_dump())
 
 
+# In app.py
+
 @app.route('/api/reports/generate', methods=['POST'])
 @catch_exceptions
 @log_exceptions(logger)
 def generate_report():
     """Generate Excel report for selected properties."""
     try:
+
+        # Generate new session ID
+        session_id = generate_session_id()
+        setup_session_directory(session_id)
+
+        # Get user's output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = get_session_path(session_id) / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Generated directory for session {session_id}: {output_dir}")
+
         # Validate request data
         request_data = request.get_json()
         if not request_data:
             logger.error("No request data provided")
-            return jsonify({
+            return {
                 "success": False,
                 "message": "No request data provided"
-            }), 400
+            }, 400
 
         try:
             report_request = ReportGenerationRequest(**request_data)
         except ValidationError as e:
             logger.error(f"Invalid request format: {str(e)}")
-            return jsonify({
+            return {
                 "success": False,
                 "message": f"Invalid request format: {str(e)}"
-            }), 400
+            }, 400
 
-        # Ensure cache is up to date
-        if cache['data'] is None or (
-                isinstance(cache['last_updated'], datetime) and
-                datetime.now() - cache['last_updated'] > timedelta(hours=12)
-        ):
-            update_cache()
-
-        # Use PropertySearch class
+        # Continue with report generation...
         searcher = PropertySearch(cache['data'])
         properties = searcher.search_properties(property_keys=report_request.properties)
 
         if not properties:
             logger.warning(f"No properties found for keys: {report_request.properties}")
-            return jsonify({
+            return {
                 "success": False,
                 "message": "No properties found matching the request"
-            }), 404
+            }, 404
 
-        # Generate reports
-        from data_processing import generate_multi_property_report
-        output_dir = generate_multi_property_report(
-            template_name="break_even_template.xlsx",
-            properties=properties,
-            api_url='http://127.0.0.1:5000/api/data'
-        )
-
-        # Verify output directory exists
-        output_path = Path(output_dir)
-        if not output_path.exists():
-            logger.error(f"Output directory not created: {output_dir}")
-            return jsonify({
-                "success": False,
-                "message": "Failed to create output directory"
-            }), 500
-
-        # Get list of generated files
-        files = [f.name for f in output_path.glob('*.xlsx')]
-
-        # Create response using corrected model
-        response = ReportGenerationResponse(
-            success=True,
-            message="Reports generated successfully",
-            output=ReportOutput(
-                directory=output_dir,
-                propertyCount=len(properties),
-                files=files
+        try:
+            # Generate reports
+            from data_processing import generate_multi_property_report
+            report_files = generate_multi_property_report(
+                template_name="break_even_template.xlsx",
+                properties=properties,
+                output_dir=str(output_dir),
+                api_url='http://127.0.0.1:5000/api/data'
             )
-        )
 
-        return jsonify(response.model_dump())
+            # Process files
+            files = []
+            for file_path in report_files:
+                try:
+                    path = Path(file_path)
+                    if not path.is_absolute():
+                        path = Path.cwd() / path
+                    rel_path = path.relative_to(Path.cwd() / 'output')
+                    files.append(str(rel_path))
+                except Exception as e:
+                    logger.error(f"Error processing file path {file_path}: {e}")
+                    continue
+
+            logger.info(f"Generated files: {files}")
+
+            response = ReportGenerationResponse(
+                success=True,
+                message="Reports generated successfully",
+                output=ReportOutput(
+                    directory=str(output_dir.relative_to(Path('output'))),
+                    propertyCount=len(properties),
+                    files=files
+                )
+            ).model_dump()
+
+            response = jsonify(response)
+            response.set_cookie(
+                'session_id',
+                session_id,
+                max_age=3600,  # 1 hour - shorter since we only need it for downloads
+                httponly=False,
+                samesite='Lax',
+                secure=False,  # Set to True in production
+                path='/'
+            )
+
+            return response
+
+
+
+        except Exception as e:
+            logger.error(f"Error generating reports: {str(e)}", exc_info=True)
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+            raise
 
     except Exception as e:
         logger.error(f"Error generating report: {str(e)}", exc_info=True)
-        return jsonify({
+        return {
             "success": False,
             "message": f"Error generating report: {str(e)}"
-        }), 500
+        }, 500
 
 
 @app.route('/api/refresh', methods=['POST'])
@@ -189,6 +238,153 @@ def refresh_data():
     update_cache()
     logger.info("Data refreshed successfully.")
     return jsonify({"status": "success", "message": "Data refreshed successfully"})
+
+
+def cleanup_empty_directory(directory: Path):
+    """Clean up directory if empty after file removal."""
+    try:
+        # Only remove directory if it's empty and not the root output directory
+        if directory.exists() and directory.is_dir():
+            remaining_files = list(directory.glob('*'))
+            if not remaining_files and 'output' in directory.parts:
+                shutil.rmtree(directory)
+                logger.info(f"Cleaned up empty directory: {directory}")
+    except Exception as e:
+        logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
+
+
+def create_zip_file(files, base_dir: Path) -> io.BytesIO:
+    """Create a ZIP file in memory from multiple files."""
+    memory_file = io.BytesIO()
+
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for file_path in files:
+            # Ensure path is a Path object
+            file_path = Path(file_path)
+            full_path = base_dir / file_path.name
+
+            if full_path.exists():
+                # Add file to zip with just its name (no path)
+                zf.write(full_path, file_path.name)
+
+    # Seek to start of file for reading
+    memory_file.seek(0)
+    return memory_file
+
+
+def cleanup_files_after_zip(files: List[Path], timestamp_dir: Path):
+    """Clean up files after they've been zipped."""
+    try:
+        # Remove individual files
+        for file_path in files:
+            full_path = timestamp_dir / file_path.name
+            if full_path.exists():
+                full_path.unlink()
+                logger.info(f"Removed file after zipping: {full_path}")
+
+        # Check if directory is empty and remove if it is
+        if not any(timestamp_dir.iterdir()):
+            timestamp_dir.rmdir()
+            logger.info(f"Removed empty directory: {timestamp_dir}")
+
+    except Exception as e:
+        logger.error(f"Error during file cleanup: {e}")
+        # Don't raise the exception - cleanup failure shouldn't affect download
+
+
+# In app.py - Update the download_report route:
+
+@app.route('/api/reports/download', methods=['GET'])
+@catch_exceptions
+@log_exceptions(logger)
+def download_report():
+    """Download a report file."""
+
+    # TODO: FIX DOWNLOAD REGARDING SESSION NOT BEING PASSED
+    #   CURRENTLY THE SESSION ID IS NOT BEING PASSED TO THE DOWNLOAD FUNCTION
+    #   SERVER RETURNS A 401 ERROR
+    try:
+        session_id = request.cookies.get('session_id')
+        if not session_id:
+            return jsonify({
+                "success": False,
+                "message": "Invalid session"
+            }), 401
+
+        file_path = request.args.get('file')
+        if not file_path:
+            return jsonify({
+                "success": False,
+                "message": "Missing file parameter"
+            }), 400
+
+        # Verify the file exists and is in the correct session
+        full_path = Path('output') / file_path
+        if not full_path.exists():
+            return jsonify({
+                "success": False,
+                "message": "File not found"
+            }), 404
+
+        # Security check: ensure file is within session directory
+        try:
+            session_path = Path('output') / session_id
+            full_path.relative_to(session_path)
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "message": "Invalid file access"
+            }), 403
+
+        return send_from_directory(
+            directory=str(full_path.parent),
+            path=full_path.name,
+            as_attachment=True
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing download request: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "message": "Error processing download request"
+        }), 500
+
+
+@app.route('/api/session/end', methods=['POST'])
+@catch_exceptions
+@log_exceptions(logger)
+def end_session():
+    """End current session"""
+    try:
+        session_id = request.cookies.get('session_id')
+        if not session_id:
+            return jsonify({"success": True, "message": "No session to end"})
+
+        cleanup_session(session_id)
+
+        response = jsonify({"success": True, "message": "Session ended"})
+        response.delete_cookie('session_id')
+        return response
+
+    except Exception as e:
+        logger.error(f"Error ending session: {e}")
+        return jsonify({
+            "success": False,
+            "message": "Error ending session"
+        }), 500
+
+
+# Schedule periodic cleanup
+from apscheduler.schedulers.background import BackgroundScheduler
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(run_session_cleanup, 'interval', minutes=1)
+scheduler.start()
+
+if scheduler.state == 1:
+    logger.info("Scheduler started successfully.")
+else:
+    logger.error("Scheduler failed to start.")
 
 
 if __name__ == '__main__':

@@ -1,3 +1,5 @@
+import shutil
+import time
 from pathlib import Path
 from typing import Dict, List, Union, Any
 from datetime import datetime, timedelta
@@ -231,7 +233,7 @@ class ExcelGeneratorService:
                 evaluator = FormulaEvaluator()
                 break_even_value = evaluator.evaluate_formula(break_even_value, self.sheet)
             break_even_value = round(float(break_even_value or 0), 1)
-            l12_text = f"Required daily work order output *In addition to Break even ({break_even_value} per-workday)*"
+            l12_text = f"Required daily work order output *In addition to Break even\n({break_even_value} per-workday)*"
 
             # Update cells with validated data
             updates = {
@@ -287,38 +289,62 @@ class ExcelGeneratorService:
 def generate_multi_property_report(
         template_name: str,
         properties: List[Property],
-        api_url: str
-) -> str:
+        api_url: str,
+        output_dir: Union[str, Path] = None
+) -> List[Path]:
     """
-    Generate Excel reports for multiple properties.
+    Generate Excel reports for multiple properties with user-friendly filenames.
 
     Args:
         template_name: Name of the template file
         properties: List of Property objects
         api_url: API URL for data retrieval
+        output_dir: Optional output directory path. If not provided, creates timestamped directory.
 
     Returns:
-        str: Path to the output directory containing generated reports
+        List[Path]: List of paths to generated report files
     """
     logger.info(f"Starting multi-property report generation for {len(properties)} properties")
 
     try:
-        # Create timestamp-based output directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_output_dir = f'output/multi_property_report_{timestamp}'
-        os.makedirs(base_output_dir, exist_ok=True)
-        logger.info(f"Created output directory: {base_output_dir}")
+        # Use provided output directory or create timestamped one
+        if output_dir:
+            base_output_dir = Path(output_dir)
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base_output_dir = Path('output') / f'multi_property_report_{timestamp}'
+
+        # Ensure output directory exists
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using output directory: {base_output_dir}")
+
+        # Track used filenames to avoid duplicates
+        used_names = set()
 
         # Generate report for each property
         generated_files = []
         for property_data in properties:
             try:
-                # Create safe filename from property name
-                safe_name = "".join(c for c in property_data.property_name if c.isalnum() or c in (' ', '-', '_'))
-                safe_name = safe_name.replace(' ', '_')[:31]  # limit length and replace spaces
-                property_output_path = os.path.join(base_output_dir, f"{safe_name}.xlsx")
+                # Create base filename from property name
+                base_name = property_data.property_name.strip()
+                # Replace problematic characters
+                safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in base_name)
+                safe_name = safe_name.replace(' ', '_')
 
-                logger.info(f"Generating report for property: {property_data.property_name}")
+                # Handle duplicate names by adding a counter
+                final_name = safe_name
+                counter = 1
+                while final_name in used_names:
+                    # If name exists, add counter before extension
+                    final_name = f"{safe_name}_{counter}"
+                    counter += 1
+
+                used_names.add(final_name)
+
+                # Create final path with xlsx extension
+                property_output_path = base_output_dir / f"{final_name}.xlsx"
+
+                logger.info(f"Generating report for property: {property_data.property_name} -> {final_name}.xlsx")
 
                 # Convert Property model to dict format
                 property_dict = {
@@ -336,16 +362,16 @@ def generate_multi_property_report(
                 # Generate individual report
                 generate_report(
                     template_name=template_name,
-                    output_path=property_output_path,
+                    output_path=str(property_output_path),
                     property_data=property_dict
                 )
 
                 generated_files.append(property_output_path)
                 logger.info(f"Successfully generated report for {property_data.property_name}")
+                time.sleep(0.5)  # Add delay to prevent API rate limiting
 
             except Exception as e:
                 logger.error(f"Failed to generate report for {property_data.property_name}: {str(e)}", exc_info=True)
-                # Continue with next property instead of failing completely
                 continue
 
         # Verify generated files
@@ -356,10 +382,16 @@ def generate_multi_property_report(
         if successful_count == 0:
             raise Exception("Failed to generate any reports successfully")
 
-        return base_output_dir
+        return generated_files
 
     except Exception as e:
         logger.error(f"Failed to generate multi-property report: {str(e)}", exc_info=True)
+        if 'base_output_dir' in locals() and base_output_dir.exists():
+            try:
+                shutil.rmtree(base_output_dir)
+                logger.info(f"Cleaned up output directory after failure: {base_output_dir}")
+            except Exception as cleanup_error:
+                logger.error(f"Failed to clean up output directory: {cleanup_error}")
         raise
 
 
