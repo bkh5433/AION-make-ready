@@ -1,25 +1,44 @@
-// TODO: FIX DOWNLOAD REGARDING SESSION NOT BEING PASSED
-//  CURRENTLY THE SESSION ID IS NOT BEING PASSED TO THE DOWNLOAD FUNCTION
-//  SERVER RETURNS A 401 ERROR
+import {getSessionId, setSessionId, clearSessionId} from './session';
+
 const API_BASE_URL = 'http://127.0.0.1:5000/api';
 
 // Common fetch wrapper with error handling and session management
 const fetchWithErrorHandling = async (url, options = {}) => {
     try {
+        const sessionId = getSessionId();
+        console.debug('Current session ID:', sessionId);
+
+        // Don't set empty cookies
+        const headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...(sessionId && {'Cookie': `session_id=${sessionId}`}),
+            ...options.headers
+        };
+
         const response = await fetch(url, {
             ...options,
-            credentials: 'include',
-            headers: {
-                ...options.headers,
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-            }
+            credentials: 'include', // Important for cookie handling
+            headers
         });
 
-        // Log cookie information for debugging
-        console.debug('Cookies after request:', document.cookie);
+        // Handle session cookie from response
+        const setCookieHeader = response.headers.get('Set-Cookie');
+        if (setCookieHeader) {
+            const sessionMatch = setCookieHeader.match(/session_id=([^;]+)/);
+            if (sessionMatch) {
+                const newSessionId = sessionMatch[1];
+                setSessionId(newSessionId);
+                console.debug('New session ID set:', newSessionId);
+            }
+        }
 
         if (!response.ok) {
+            if (response.status === 401) {
+                // Clear session and throw specific error
+                clearSessionId();
+                throw new Error('Session expired or invalid');
+            }
             const errorData = await response.json().catch(() => null);
             throw new Error(
                 errorData?.message ||
@@ -30,9 +49,6 @@ const fetchWithErrorHandling = async (url, options = {}) => {
         return response;
     } catch (error) {
         console.error('API Error:', error);
-        if (error instanceof TypeError && error.message === 'Failed to fetch') {
-            throw new Error('Unable to connect to the API server.');
-        }
         throw error;
     }
 };
@@ -74,13 +90,19 @@ export const api = {
 
     async downloadReport(filePath) {
         console.log('Downloading file:', filePath);
+        const sessionId = getSessionId();
+
+        if (!sessionId) {
+            throw new Error('No active session. Please regenerate the reports.');
+        }
 
         const response = await fetchWithErrorHandling(
             `${API_BASE_URL}/reports/download?file=${encodeURIComponent(filePath)}`,
             {
                 method: 'GET',
+                credentials: 'include',
                 headers: {
-                    'Accept': 'application/octet-stream',
+                    'Accept': 'application/octet-stream'
                 }
             }
         );

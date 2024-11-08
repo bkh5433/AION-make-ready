@@ -97,24 +97,59 @@ def search_properties():
     Search properties by name.
     Query parameter:
     - q: Search term for property name (optional)
+    - include_metrics: Whether to include full metrics (default: true)
     """
-    search_term = request.args.get('q', None)
+    logger.info("Starting property search endpoint")
+    try:
+        search_term = request.args.get('q', None)
+        include_metrics = request.args.get('include_metrics', 'true').lower() == 'true'
 
-    # Ensure cache is up to date
-    if cache['data'] is None or (
-            isinstance(cache['last_updated'], datetime) and
-            datetime.now() - cache['last_updated'] > timedelta(hours=12)
-    ):
-        update_cache()
+        logger.debug(f"Search parameters - term: {search_term}, include_metrics: {include_metrics}")
 
-    # Use PropertySearch class
-    searcher = PropertySearch(cache['data'])
-    result = searcher.get_search_result(
-        search_term=search_term,
-        last_updated=cache['last_updated']
-    )
+        # Ensure cache is up to date
+        if cache['data'] is None or (
+                isinstance(cache['last_updated'], datetime) and
+                datetime.now() - cache['last_updated'] > timedelta(hours=12)
+        ):
+            logger.info("Cache needs update, refreshing data")
+            update_cache()
 
-    return jsonify(result.model_dump())
+        logger.debug(
+            f"Cache status - size: {len(cache['data']) if cache['data'] else 0}, last_updated: {cache['last_updated']}")
+
+        # Calculate period dates
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)  # Default 30-day period
+
+        logger.debug(f"Period dates - start: {start_date}, end: {end_date}")
+
+        # Initialize searcher
+        logger.info("Initializing PropertySearch")
+        searcher = PropertySearch(cache['data'])
+
+        # Get search results
+        logger.info("Executing search")
+        result = searcher.get_search_result(
+            search_term=search_term,
+            last_updated=cache['last_updated'],
+            period_info={
+                'start_date': start_date,
+                'end_date': end_date
+            }
+        )
+
+        logger.info(f"Search complete - found {result.count} properties")
+
+        # Convert to response
+        logger.debug("Converting result to JSON")
+        response_data = result.model_dump()
+
+        logger.info("Returning search results")
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Error in search endpoint: {str(e)}", exc_info=True)
+        raise
 
 
 # In app.py
@@ -157,7 +192,8 @@ def generate_report():
 
         # Continue with report generation...
         searcher = PropertySearch(cache['data'])
-        properties = searcher.search_properties(property_keys=report_request.properties)
+        properties = searcher.search_properties(property_keys=report_request.properties,
+                                                include_analytics=True)
 
         if not properties:
             logger.warning(f"No properties found for keys: {report_request.properties}")
@@ -173,7 +209,7 @@ def generate_report():
                 template_name="break_even_template.xlsx",
                 properties=properties,
                 output_dir=str(output_dir),
-                api_url='http://127.0.0.1:5000/api/data'
+                api_url='http://127.0.0.1:5000/api/data',
             )
 
             # Process files
@@ -191,17 +227,24 @@ def generate_report():
 
             logger.info(f"Generated files: {files}")
 
-            response = ReportGenerationResponse(
+            response_data = ReportGenerationResponse(
                 success=True,
                 message="Reports generated successfully",
                 output=ReportOutput(
                     directory=str(output_dir.relative_to(Path('output'))),
                     propertyCount=len(properties),
-                    files=files
-                )
+                    files=files,
+                    metrics_included=True,
+                    period_covered={
+                        'start_date': report_request.start_date or (datetime.now() - timedelta(days=30)),
+                        'end_date': report_request.end_date or datetime.now()
+                    }
+                ),
+                warnings=[],  # Add any non-critical warnings
+                session_id=session_id
             ).model_dump()
 
-            response = jsonify(response)
+            response = jsonify(response_data)
             response.set_cookie(
                 'session_id',
                 session_id,
@@ -292,23 +335,22 @@ def cleanup_files_after_zip(files: List[Path], timestamp_dir: Path):
         # Don't raise the exception - cleanup failure shouldn't affect download
 
 
-# In app.py - Update the download_report route:
 
 @app.route('/api/reports/download', methods=['GET'])
 @catch_exceptions
 @log_exceptions(logger)
 def download_report():
-    """Download a report file."""
-
-    # TODO: FIX DOWNLOAD REGARDING SESSION NOT BEING PASSED
-    #   CURRENTLY THE SESSION ID IS NOT BEING PASSED TO THE DOWNLOAD FUNCTION
-    #   SERVER RETURNS A 401 ERROR
+    """Download a report file with enhanced session validation."""
     try:
+        # Get session from cookie
         session_id = request.cookies.get('session_id')
+        logger.debug(f"Received session ID: {session_id}")  # Debug log
+        
         if not session_id:
+            logger.error("No session ID provided in cookies")
             return jsonify({
                 "success": False,
-                "message": "Invalid session"
+                "message": "No session ID provided"
             }), 401
 
         file_path = request.args.get('file')
@@ -318,9 +360,10 @@ def download_report():
                 "message": "Missing file parameter"
             }), 400
 
-        # Verify the file exists and is in the correct session
+        # Construct and verify full path
         full_path = Path('output') / file_path
         if not full_path.exists():
+            logger.error(f"File not found: {full_path}")
             return jsonify({
                 "success": False,
                 "message": "File not found"
@@ -329,18 +372,32 @@ def download_report():
         # Security check: ensure file is within session directory
         try:
             session_path = Path('output') / session_id
-            full_path.relative_to(session_path)
-        except ValueError:
+            if not str(full_path).startswith(str(session_path)):
+                logger.error(f"File access attempt outside session directory: {full_path}")
+                return jsonify({
+                    "success": False,
+                    "message": "Invalid file access"
+                }), 403
+        except Exception as e:
+            logger.error(f"Error validating file path: {str(e)}")
             return jsonify({
                 "success": False,
                 "message": "Invalid file access"
             }), 403
 
-        return send_from_directory(
+        # Stream the file
+        response = send_from_directory(
             directory=str(full_path.parent),
             path=full_path.name,
             as_attachment=True
         )
+
+        # Set cache-control headers
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+
+        return response
 
     except Exception as e:
         logger.error(f"Error processing download request: {str(e)}", exc_info=True)
@@ -378,7 +435,7 @@ def end_session():
 from apscheduler.schedulers.background import BackgroundScheduler
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(run_session_cleanup, 'interval', minutes=1)
+scheduler.add_job(run_session_cleanup, 'interval', hours=1)
 scheduler.start()
 
 if scheduler.state == 1:

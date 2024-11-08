@@ -151,33 +151,48 @@ class ExcelGeneratorService:
             raise
 
     @log_exceptions(logger)
-    def format_date_range(self, end_date: datetime) -> str:
-        """Format date range for the report"""
+    def format_date_range(self, start_date: datetime, end_date: datetime) -> str:
+        """Format date range for the report using start and end dates"""
         try:
-            start_date = end_date - timedelta(days=30)
             return f"{start_date.strftime('%m/%d/%y')} - {end_date.strftime('%m/%d/%y')}"
         except Exception as e:
             logger.error("Failed to format date range", exc_info=True)
-            raise ValueError(f"Failed to format date range: {str(e)}") from e
+            # Return a fallback date range if formatting fails
+            today = datetime.now()
+            month_ago = today - timedelta(days=31)
+            return f"{month_ago.strftime('%m/%d/%y')} - {today.strftime('%m/%d/%y')}"
 
     @log_exceptions(logger)
-    def _parse_date(self, date_value: Union[str, datetime]) -> datetime:
-        """Parse date from various formats with detailed error logging"""
+    def _parse_date(self, date_value: Union[str, datetime, None]) -> datetime:
+        """
+        Parse date from various formats with improved error handling.
+        Falls back to current date if parsing fails.
+        """
         logger.debug(f"Parsing date value: {date_value} of type {type(date_value)}")
 
+        # Handle None or empty string
+        if not date_value:
+            logger.warning("No date value provided, using current date")
+            return datetime.now()
+
+        # If already a datetime, return as is
         if isinstance(date_value, datetime):
             return date_value
 
+        if not isinstance(date_value, str):
+            logger.warning(f"Unexpected date type: {type(date_value)}, using current date")
+            return datetime.now()
+
         try:
             # Try parsing standard API format
-            return datetime.strptime(date_value, '%a, %d %b %Y %H:%M:%S GMT')
+            return datetime.strptime(date_value, '%Y-%m-%d')
         except ValueError:
-            logger.debug("Failed to parse GMT format, trying ISO format")
+            logger.debug("Failed to parse YYYY-MM-DD format, trying ISO format")
             try:
                 # Try ISO format
                 return datetime.fromisoformat(date_value.replace('Z', '+00:00'))
             except ValueError:
-                logger.error(f"Unsupported date format: {date_value}")
+                logger.warning(f"Failed to parse date: {date_value}, using current date")
                 return datetime.now()
 
     @log_exceptions(logger)
@@ -219,9 +234,12 @@ class ExcelGeneratorService:
             opened_actual = property_data['NewWorkOrders_Current'] - property_data['CancelledWorkOrder_Current']
             logger.debug(f"Calculated opened_actual: {opened_actual}")
 
-            # Parse and validate dates
-            end_date = self._parse_date(property_data['LatestPostDate'])
-            date_range = self.format_date_range(end_date)
+            # Parse start and end dates
+            start_date = self._parse_date(property_data.get('period_start_date'))
+            end_date = self._parse_date(property_data.get('period_end_date'))
+            logger.debug(f"Period: {start_date} to {end_date}")
+
+            date_range = self.format_date_range(start_date, end_date)
 
             # Update initial metrics cells
             self.update_cell('M9', opened_actual)  # Current output
@@ -237,11 +255,10 @@ class ExcelGeneratorService:
 
             # Update cells with validated data
             updates = {
-                'B22': property_data['TotalUnitCount'],
-                # 'M9': opened_actual,
-                'N9': property_data['CompletedWorkOrder_Current'],
-                'O9': property_data['PendingWorkOrders'],
-                'L8': property_data['PropertyName'],
+                'B22': property_data.get('TotalUnitCount', 0),
+                'N9': property_data.get('CompletedWorkOrder_Current', 0),
+                'O9': property_data.get('PendingWorkOrders', 0),
+                'L8': property_data.get('PropertyName', 'Unknown Property'),
                 'D4': date_range,
                 'M8': date_range,
                 'A1': f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -250,9 +267,7 @@ class ExcelGeneratorService:
 
             logger.debug(f"Updating cells with values: {updates}")
             for cell_ref, value in updates.items():
-                # self.update_cell(cell_ref, value, wrap_text=cell_ref in ['D4', 'M8'])
-                # wrap_text = cell_ref == 'L12'
-                self.update_cell(cell_ref, value)
+                self.update_cell(cell_ref, value, wrap_text=cell_ref in ['L12'])
 
             # Update what-if table after cell updates
             update_what_if_table(
@@ -263,7 +278,7 @@ class ExcelGeneratorService:
 
             logger.info("Successfully updated all property data")
         except Exception as e:
-            logger.error("Failed to update property data", exc_info=True)
+            logger.error(f"Failed to update property data: {str(e)}", exc_info=True)
             raise
 
     @log_exceptions(logger)
@@ -351,7 +366,7 @@ def generate_multi_property_report(
                     'PropertyKey': property_data.property_key,
                     'PropertyName': property_data.property_name,
                     'TotalUnitCount': property_data.total_unit_count,
-                    'LatestPostDate': property_data.latest_post_date,
+                    'PeriodEndDate': property_data.period_end_date,
                     'OpenWorkOrder_Current': property_data.metrics.open_work_orders if property_data.metrics else 0,
                     'NewWorkOrders_Current': property_data.metrics.new_work_orders if property_data.metrics else 0,
                     'CompletedWorkOrder_Current': property_data.metrics.completed_work_orders if property_data.metrics else 0,

@@ -7,6 +7,7 @@ import DownloadManager from './DownloadManager';
 import FloatingDownloadButton from './FloatingDownloadButton';
 import {ZipDownloader, createTimestampedZipName, formatFileSize} from '../lib/zipUtility';
 import useSessionManager from '../lib/session';
+import {getSessionId} from '../lib/session';
 
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
@@ -177,21 +178,15 @@ const PropertyReportGenerator = () => {
             const result = await api.generateReports(selectedProperties);
 
             if (result.success) {
-                // Use the session ID from the server response
-                if (result.sessionId) {
-                    // Update cookie with server's session ID
-                    Cookies.set('session_id', result.sessionId, {
-                        expires: 1,
-                        sameSite: 'Lax',
-                        secure: window.location.protocol === 'https:'
-                    });
+                if (result.session_id) {
+                    updateSessionId(result.session_id);
+                    console.log('Session ID set after report generation:', result.session_id);
                 }
 
                 setNotifications([]);
                 addNotification('success', `Successfully generated ${result.output.propertyCount} reports!`);
                 setSelectedProperties([]);
 
-                // Show the download manager if files are available
                 if (result.output?.files?.length) {
                     showDownloadManager(result.output.files, result.output.directory);
                 }
@@ -280,14 +275,19 @@ const PropertyReportGenerator = () => {
 
     const handleDownload = async (file) => {
         try {
-        setDownloadManagerState(prev => ({
-            ...prev,
-            files: prev.files.map(f =>
-                f.path === file.path
-                    ? {...f, downloading: true}
-                    : f
-            )
-        }));
+            const currentSessionId = getSessionId();
+            if (!currentSessionId) {
+                throw new Error('No active session. Please regenerate the reports.');
+            }
+
+            setDownloadManagerState(prev => ({
+                ...prev,
+                files: prev.files.map(f =>
+                    f.path === file.path
+                        ? {...f, downloading: true}
+                        : f
+                )
+            }));
 
             const blob = await api.downloadReport(file.path);
 
@@ -301,7 +301,6 @@ const PropertyReportGenerator = () => {
             URL.revokeObjectURL(url);
             document.body.removeChild(a);
 
-            // Update download status
             setDownloadManagerState(prev => ({
                 ...prev,
                 files: prev.files.map(f =>
@@ -314,13 +313,25 @@ const PropertyReportGenerator = () => {
             addNotification('success', `Successfully downloaded ${file.name}`);
         } catch (error) {
             console.error('Download error:', error);
-            addNotification('error', `Failed to download ${file.name}: ${error.message}`);
+
+            if (error.message.includes('session')) {
+                // Session-specific error handling
+                addNotification('error', 'Session expired. Please regenerate the reports.');
+                // Optionally clear the download manager
+                setDownloadManagerState(prev => ({
+                    ...prev,
+                    isVisible: false,
+                    files: []
+                }));
+            } else {
+                addNotification('error', `Failed to download ${file.name}: ${error.message}`);
+            }
 
             setDownloadManagerState(prev => ({
                 ...prev,
                 files: prev.files.map(f =>
                     f.path === file.path
-                        ? {...f, downloading: false}
+                        ? {...f, downloading: false, failed: true}
                         : f
                 )
             }));
