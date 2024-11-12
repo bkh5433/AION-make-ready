@@ -164,13 +164,13 @@ class WhatIfTableGenerator:
         """Calculate monthly rate from daily rate."""
         return round(daily_rate * self.days_per_month, 1)
 
-    def calculate_metrics(self, data: Dict, open_actual: float) -> Dict[str, float]:
+    def calculate_metrics(self, data: Dict) -> Dict[str, float]:
         """Calculate metrics from sheet formulas and data."""
         logger.info("Calculating metrics from sheet data")
 
         # Populate necessary cells
         self.sheet['B6'] = 21
-        self.sheet['M9'] = open_actual
+        self.sheet['M9'] = data.get('ActualOpenWorkOrders_Current', 0)
 
         # Evaluate break-even formula
         break_even_formula = self.sheet['B24'].value
@@ -285,7 +285,7 @@ class WhatIfTableGenerator:
 
 def update_what_if_table(sheet: Worksheet,
                          data: Dict[str, Any],
-                         open_actual: float) -> None:
+                         ) -> None:
     """
     Update the what-if table in the worksheet.
 
@@ -298,7 +298,7 @@ def update_what_if_table(sheet: Worksheet,
         generator = WhatIfTableGenerator(sheet)
 
         # Calculate metrics first
-        metrics = generator.calculate_metrics(data, open_actual)
+        metrics = generator.calculate_metrics(data)
 
         # Generate the table
         generator.generate_table(
@@ -415,7 +415,7 @@ if __name__ == "__main__":
 
                 # Setup test data
                 test_data = {
-                    'NewWorkOrders_Current': 450,
+                    'ActualOpenWorkOrders_Current': 450,
                     'CancelledWorkOrder_Current': 30,
                 }
 

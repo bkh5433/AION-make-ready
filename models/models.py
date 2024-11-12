@@ -27,12 +27,13 @@ class WorkOrderMetrics(BaseModel):
     """Model for work order metrics with calculations"""
     # Work order tracking fields
     open_work_orders: int = Field(ge=0)
-    new_work_orders: int = Field(ge=0)
+    actual_open_work_orders: int = Field(ge=0)
+    new_work_orders: int = Field(ge=0, default=0)
     completed_work_orders: int = Field(ge=0)
     cancelled_work_orders: int = Field(ge=0)
     pending_work_orders: int = Field(ge=0)
     percentage_completed: float = Field(ge=0, le=100)
-    average_days_to_complete: float = Field(ge=0)
+    average_days_to_complete: float = Field(ge=0, default=0.0)
 
     # Period dates
     period_start_date: Optional[datetime] = None
@@ -41,7 +42,7 @@ class WorkOrderMetrics(BaseModel):
     # Configuration
     days_per_month: int = Field(ge=0, le=31, default=21)
 
-    # Calculated metrics (do not validate assignment)
+    # Calculated metrics
     _daily_rate: float = PrivateAttr(default=0.0)
     _monthly_rate: float = PrivateAttr(default=0.0)
     _break_even_target: float = PrivateAttr(default=0.0)
@@ -50,7 +51,7 @@ class WorkOrderMetrics(BaseModel):
     model_config = ConfigDict(
         validate_assignment=True,
         extra='allow',
-        arbitrary_types_allowed=True,
+        arbitrary_types_allowed=True
     )
 
     @field_validator('days_per_month')
@@ -60,6 +61,22 @@ class WorkOrderMetrics(BaseModel):
         return v
 
     def __init__(self, **data):
+        # Ensure all required fields have at least default values
+        if 'open_work_orders' not in data:
+            data['open_work_orders'] = 0
+        if 'actual_open_work_orders' not in data:
+            data['actual_open_work_orders'] = data.get('ActualOpenWorkOrders_Current', 0)
+        if 'completed_work_orders' not in data:
+            data['completed_work_orders'] = data.get('CompletedWorkOrder_Current', 0)
+        if 'cancelled_work_orders' not in data:
+            data['cancelled_work_orders'] = data.get('CancelledWorkOrder_Current', 0)
+        if 'pending_work_orders' not in data:
+            data['pending_work_orders'] = data.get('PendingWorkOrders', 0)
+        if 'percentage_completed' not in data:
+            data['percentage_completed'] = data.get('PercentageCompletedThisPeriod', 0.0)
+        if 'average_days_to_complete' not in data:
+            data['average_days_to_complete'] = data.get('AverageDaysToComplete', 0.0)
+
         super().__init__(**data)
         self._calculate_metrics()
 
@@ -72,7 +89,7 @@ class WorkOrderMetrics(BaseModel):
                 self._current_output = self._daily_rate
 
                 # Calculate break-even target with 10% buffer
-                target_rate = max(self.new_work_orders, self.completed_work_orders) / self.days_per_month
+                target_rate = max(self.actual_open_work_orders, self.completed_work_orders) / self.days_per_month
                 self._break_even_target = round(target_rate * 1.1, 1)
         except Exception as e:
             logger.error(f"Error calculating metrics: {e}")

@@ -1,7 +1,7 @@
 import shutil
 import time
 from pathlib import Path
-from typing import Dict, List, Union, Any
+from typing import Dict, List, Union, Any, Optional
 from datetime import datetime, timedelta
 import os
 import openpyxl
@@ -42,40 +42,53 @@ class WorkOrderMetrics(BaseModel):
     """Model for work order metrics with calculations"""
     # Work order tracking fields
     open_work_orders: int = Field(ge=0)
-    new_work_orders: int = Field(ge=0)
+    actual_open_work_orders: int = Field(ge=0)
+    new_work_orders: int = Field(ge=0, default=0)
     completed_work_orders: int = Field(ge=0)
     cancelled_work_orders: int = Field(ge=0)
     pending_work_orders: int = Field(ge=0)
     percentage_completed: float = Field(ge=0, le=100)
+    average_days_to_complete: float = Field(ge=0, default=0.0)
 
-    # Rate calculations
+    # Period dates
+    period_start_date: Optional[datetime] = None
+    period_end_date: Optional[datetime] = None
+
+    # Configuration
     days_per_month: int = Field(ge=0, le=31, default=21)
-    daily_rate: float = Field(ge=0)
-    monthly_rate: float = Field(ge=0)
-    break_even_target: float = Field(ge=0)
-    current_output: float = Field(ge=0)
 
-    @model_validator(mode='after')
-    def calculate_rates(self) -> 'WorkOrderMetrics':
-        """Calculate all rates based on completed work orders"""
-        # Calculate daily rate from completed work orders
-        self.daily_rate = round(self.completed_work_orders / self.days_per_month, 1)
+    model_config = ConfigDict(
+        validate_assignment=True,
+        extra='allow',
+        arbitrary_types_allowed=True
+    )
 
-        # Calculate monthly rate from daily rate
-        self.monthly_rate = round(self.daily_rate * self.days_per_month, 1)
+    @computed_field
+    def daily_rate(self) -> float:
+        """Calculate daily completion rate"""
+        try:
+            return round(self.completed_work_orders / self.days_per_month, 1)
+        except ZeroDivisionError:
+            return 0.0
 
-        # Set current output same as daily rate for consistency
-        self.current_output = self.daily_rate
+    @computed_field
+    def monthly_rate(self) -> float:
+        """Calculate monthly completion rate"""
+        return round(self.daily_rate * self.days_per_month, 1)
 
-        # Calculate break-even target
-        target_rate = max(self.new_work_orders, self.completed_work_orders) / self.days_per_month
-        self.break_even_target = round(target_rate * 1.1, 1)  # Adding 10% buffer
+    @computed_field
+    def break_even_target(self) -> float:
+        """Calculate break-even target with 10% buffer"""
+        try:
+            target_rate = max(self.actual_open_work_orders, self.completed_work_orders) / self.days_per_month
+            return round(target_rate * 1.1, 1)
+        except ZeroDivisionError:
+            return 0.0
 
-        return self
-
-    @field_validator('percentage_completed', 'daily_rate', 'monthly_rate', 'break_even_target', 'current_output')
-    def round_values(cls, v: float) -> float:
-        return round(v, 1)
+    @computed_field
+    def current_output(self) -> float:
+        """Current output matches daily rate"""
+        return self.daily_rate
 
     def get_metrics_for_table(self) -> dict:
         """Get metrics formatted for what-if table calculations"""
@@ -87,16 +100,18 @@ class WorkOrderMetrics(BaseModel):
             'days_per_month': self.days_per_month
         }
 
-    def get_all_metrics(self) -> dict:
-        """Get all metrics including work orders and calculations"""
+    def get_performance_metrics(self) -> dict:
+        """Get comprehensive performance metrics"""
         return {
             **self.get_metrics_for_table(),
             'open_work_orders': self.open_work_orders,
+            'actual_open_work_orders': self.actual_open_work_orders,
             'new_work_orders': self.new_work_orders,
             'completed_work_orders': self.completed_work_orders,
             'cancelled_work_orders': self.cancelled_work_orders,
             'pending_work_orders': self.pending_work_orders,
-            'percentage_completed': self.percentage_completed
+            'percentage_completed': self.percentage_completed,
+            'average_days_to_complete': self.average_days_to_complete
         }
 
 
@@ -206,21 +221,20 @@ class ExcelGeneratorService:
 
             # Update initial metrics cells
             self.update_cell('B6', 21)  # Days per month
-            self.update_cell('M9', metrics.current_output)  # Current output
+            self.update_cell('M9', metrics.actual_open_work_orders)  # Current actual open work orders
 
             # Update what-if table with necessary data
             update_what_if_table(
                 sheet=self.sheet,
                 data={
-                    'NewWorkOrders_Current': metrics.new_work_orders,
+                    'ActualOpenWorkOrders_Current': metrics.actual_open_work_orders,
                     'CancelledWorkOrder_Current': metrics.cancelled_work_orders,
                     'CompletedWorkOrder_Current': metrics.completed_work_orders,
                     'PendingWorkOrders': metrics.pending_work_orders,
-                },
-                open_actual=metrics.new_work_orders - metrics.cancelled_work_orders
+                }
             )
 
-            logger.info("Successfully updated metrics and what-if table")
+            logger.info("Successfully updated metrics and what-if table")  
         except Exception as e:
             logger.error("Failed to update metrics", exc_info=True)
             raise
@@ -230,10 +244,6 @@ class ExcelGeneratorService:
         """Update cells with property data and handle all calculations"""
         logger.info(f"Updating property data for: {property_data.get('PropertyName', 'Unknown')}")
         try:
-            # Calculate opened actual
-            opened_actual = property_data['NewWorkOrders_Current'] - property_data['CancelledWorkOrder_Current']
-            logger.debug(f"Calculated opened_actual: {opened_actual}")
-
             # Parse start and end dates
             start_date = self._parse_date(property_data.get('period_start_date'))
             end_date = self._parse_date(property_data.get('period_end_date'))
@@ -242,7 +252,8 @@ class ExcelGeneratorService:
             date_range = self.format_date_range(start_date, end_date)
 
             # Update initial metrics cells
-            self.update_cell('M9', opened_actual)  # Current output
+            self.update_cell('M9',
+                             property_data.get('ActualOpenWorkOrders_Current', 0))  # Current actual open work orders
 
             # Get break-even value from B24
             break_even_value = self.sheet['B24'].value
@@ -272,8 +283,7 @@ class ExcelGeneratorService:
             # Update what-if table after cell updates
             update_what_if_table(
                 sheet=self.sheet,
-                data=property_data,
-                open_actual=opened_actual
+                data=property_data
             )
 
             logger.info("Successfully updated all property data")
@@ -368,7 +378,7 @@ def generate_multi_property_report(
                     'TotalUnitCount': property_data.total_unit_count,
                     'PeriodEndDate': property_data.period_end_date,
                     'OpenWorkOrder_Current': property_data.metrics.open_work_orders if property_data.metrics else 0,
-                    'NewWorkOrders_Current': property_data.metrics.new_work_orders if property_data.metrics else 0,
+                    'ActualOpenWorkOrders_Current': property_data.metrics.actual_open_work_orders if property_data.metrics else 0,
                     'CompletedWorkOrder_Current': property_data.metrics.completed_work_orders if property_data.metrics else 0,
                     'CancelledWorkOrder_Current': property_data.metrics.cancelled_work_orders if property_data.metrics else 0,
                     'PendingWorkOrders': property_data.metrics.pending_work_orders if property_data.metrics else 0,
@@ -444,7 +454,7 @@ if __name__ == "__main__":
         "PropertyName": "Test Property",
         "TotalUnitCount": 100,
         "LatestPostDate": "Wed, 23 Oct 2024 00:00:00 GMT",
-        "NewWorkOrders_Current": 399,
+        "ActualOpenWorkOrders_Current": 399,
         "CompletedWorkOrder_Current": 200,
         "CancelledWorkOrder_Current": 50,
         "PendingWorkOrders": 58

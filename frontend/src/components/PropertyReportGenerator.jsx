@@ -140,7 +140,7 @@ const PropertyReportGenerator = () => {
     // console.log('Properties before filtering:', properties);
 
     // Debug logging
-    // console.log('Raw properties before filtering:', properties);
+    console.log('Raw properties before filtering:', properties);
 
     const filteredProperties = Array.isArray(properties)
         ? properties.filter(property => {

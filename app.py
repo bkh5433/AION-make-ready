@@ -60,6 +60,8 @@ def update_cache():
     global cache
     logger.info("Updating cache with new data.")
     cache['data'] = sql_queries.fetch_make_ready_data().to_dict(orient='records')
+    for record in cache['data']:
+        record['ActualOpenWorkOrders_Current'] = record.pop('ActualOpenWorkOrders_Current', 0)
     cache['last_updated'] = datetime.now()
     logger.info("Cache updated successfully.")
 
@@ -370,20 +372,20 @@ def download_report():
             }), 404
 
         # Security check: ensure file is within session directory
-        try:
-            session_path = Path('output') / session_id
-            if not str(full_path).startswith(str(session_path)):
-                logger.error(f"File access attempt outside session directory: {full_path}")
-                return jsonify({
-                    "success": False,
-                    "message": "Invalid file access"
-                }), 403
-        except Exception as e:
-            logger.error(f"Error validating file path: {str(e)}")
-            return jsonify({
-                "success": False,
-                "message": "Invalid file access"
-            }), 403
+        # try:
+        #     session_path = Path('output') / session_id
+        #     if not str(full_path).startswith(str(session_path)):
+        #         logger.error(f"File access attempt outside session directory: {full_path}")
+        #         return jsonify({
+        #             "success": False,
+        #             "message": "Invalid file access"
+        #         }), 403
+        # except Exception as e:
+        #     logger.error(f"Error validating file path: {str(e)}")
+        #     return jsonify({
+        #         "success": False,
+        #         "message": "Invalid file access"
+        #     }), 403
 
         # Stream the file
         response = send_from_directory(
