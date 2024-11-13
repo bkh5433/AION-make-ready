@@ -16,6 +16,7 @@ from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
 from session import with_session, get_session_path, cleanup_session, run_session_cleanup, generate_session_id, \
     setup_session_directory
+from data_processing import generate_multi_property_report
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -160,9 +161,8 @@ def search_properties():
 @catch_exceptions
 @log_exceptions(logger)
 def generate_report():
-    """Generate Excel report for selected properties."""
+    """Generate Excel report for selected properties in a single workbook."""
     try:
-
         # Generate new session ID
         session_id = generate_session_id()
         setup_session_directory(session_id)
@@ -205,8 +205,7 @@ def generate_report():
             }, 404
 
         try:
-            # Generate reports
-            from data_processing import generate_multi_property_report
+            # Generate single report with multiple sheets
             report_files = generate_multi_property_report(
                 template_name="break_even_template.xlsx",
                 properties=properties,
@@ -214,7 +213,7 @@ def generate_report():
                 api_url='http://127.0.0.1:5000/api/data',
             )
 
-            # Process files
+            # Process the single file
             files = []
             for file_path in report_files:
                 try:
@@ -227,11 +226,11 @@ def generate_report():
                     logger.error(f"Error processing file path {file_path}: {e}")
                     continue
 
-            logger.info(f"Generated files: {files}")
+            logger.info(f"Generated file: {files}")
 
             response_data = ReportGenerationResponse(
                 success=True,
-                message="Reports generated successfully",
+                message=f"Report generated successfully with {len(properties)} property sheets",
                 output=ReportOutput(
                     directory=str(output_dir.relative_to(Path('output'))),
                     propertyCount=len(properties),
@@ -242,7 +241,7 @@ def generate_report():
                         'end_date': report_request.end_date or datetime.now()
                     }
                 ),
-                warnings=[],  # Add any non-critical warnings
+                warnings=[],
                 session_id=session_id
             ).model_dump()
 
@@ -250,19 +249,17 @@ def generate_report():
             response.set_cookie(
                 'session_id',
                 session_id,
-                max_age=3600,  # 1 hour - shorter since we only need it for downloads
+                max_age=3600,
                 httponly=False,
                 samesite='Lax',
-                secure=False,  # Set to True in production
+                secure=False,
                 path='/'
             )
 
             return response
 
-
-
         except Exception as e:
-            logger.error(f"Error generating reports: {str(e)}", exc_info=True)
+            logger.error(f"Error generating report: {str(e)}", exc_info=True)
             if output_dir.exists():
                 shutil.rmtree(output_dir)
             raise
@@ -345,15 +342,15 @@ def download_report():
     """Download a report file with enhanced session validation."""
     try:
         # Get session from cookie
-        session_id = request.cookies.get('session_id')
-        logger.debug(f"Received session ID: {session_id}")  # Debug log
-        
-        if not session_id:
-            logger.error("No session ID provided in cookies")
-            return jsonify({
-                "success": False,
-                "message": "No session ID provided"
-            }), 401
+        # session_id = request.cookies.get('session_id')
+        # logger.debug(f"Received session ID: {session_id}")  # Debug log
+        #
+        # if not session_id:
+        #     logger.error("No session ID provided in cookies")
+        #     return jsonify({
+        #         "success": False,
+        #         "message": "No session ID provided"
+        #     }), 401
 
         file_path = request.args.get('file')
         if not file_path:

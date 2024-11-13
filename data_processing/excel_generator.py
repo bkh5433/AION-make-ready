@@ -5,6 +5,7 @@ from typing import Dict, List, Union, Any, Optional
 from datetime import datetime, timedelta
 import os
 import openpyxl
+from openpyxl.styles.styleable import copy
 from click import wrap_text
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.worksheet.worksheet import Worksheet
@@ -148,8 +149,8 @@ class ExcelGeneratorService:
     def update_cell(self, cell_ref: str, value: Any, wrap_text: bool = False) -> None:
         """Update a cell with proper formatting and error handling"""
         if not self.sheet:
-            logger.error("Attempted to update cell without initialized workbook")
-            raise ValueError("Workbook not initialized")
+            logger.error("Attempted to update cell without initialized sheet")
+            raise ValueError("Sheet not initialized")
 
         try:
             logger.debug(f"Updating cell {cell_ref} with value: {value}")
@@ -262,7 +263,7 @@ class ExcelGeneratorService:
                 evaluator = FormulaEvaluator()
                 break_even_value = evaluator.evaluate_formula(break_even_value, self.sheet)
             break_even_value = round(float(break_even_value or 0), 1)
-            l12_text = f"Required daily work order output *In addition to Break even\n({break_even_value} per-workday)*"
+            l12_text = f"Required daily work order output *In addition to Break even\n ({break_even_value} per-workday)*"
 
             # Update cells with validated data
             updates = {
@@ -318,13 +319,14 @@ def generate_multi_property_report(
         output_dir: Union[str, Path] = None
 ) -> List[Path]:
     """
-    Generate Excel reports for multiple properties with user-friendly filenames.
+    Generate a single Excel report with multiple sheets for multiple properties.
+    Each sheet maintains exact template formatting and formulas.
 
     Args:
         template_name: Name of the template file
         properties: List of Property objects
         api_url: API URL for data retrieval
-        output_dir: Optional output directory path. If not provided, creates timestamped directory.
+        output_dir: Optional output directory path
 
     Returns:
         List[Path]: List of paths to generated report files
@@ -343,33 +345,89 @@ def generate_multi_property_report(
         base_output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Using output directory: {base_output_dir}")
 
-        # Track used filenames to avoid duplicates
-        used_names = set()
+        # Create filename for the consolidated report
+        report_filename = f"break_even_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        output_path = base_output_dir / report_filename
 
-        # Generate report for each property
-        generated_files = []
-        for property_data in properties:
+        # Initialize template
+        template = SpreadsheetTemplate(
+            template_name=template_name,
+            output_path=output_path
+        )
+
+        # Load the template once
+        template_workbook = openpyxl.load_workbook(template.template_path)
+        template_sheet = template_workbook.active
+
+        # Create the service for the consolidated workbook
+        service = ExcelGeneratorService(template)
+        service.initialize_workbook()
+
+        # Process each property
+        for idx, property_data in enumerate(properties):
             try:
-                # Create base filename from property name
-                base_name = property_data.property_name.strip()
-                # Replace problematic characters
-                safe_name = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in base_name)
-                safe_name = safe_name.replace(' ', '_')
+                logger.info(f"Processing property {idx + 1}/{len(properties)}: {property_data.property_name}")
 
-                # Handle duplicate names by adding a counter
-                final_name = safe_name
+                # For the first property, use the existing sheet
+                if idx == 0:
+                    sheet = service.sheet
+                else:
+                    # For subsequent properties, create new sheet
+                    sheet = service.workbook.create_sheet()
+
+                # Create and clean sheet name
+                safe_name = "".join(c if c.isalnum() or c in (' ', '-') else '_' for c in property_data.property_name)
+                sheet_name = safe_name[:31]
+
+                # Handle duplicate sheet names
+                base_name = sheet_name
                 counter = 1
-                while final_name in used_names:
-                    # If name exists, add counter before extension
-                    final_name = f"{safe_name}_{counter}"
+                while sheet_name in (s.title for s in service.workbook.worksheets if s != sheet):
+                    suffix = f"_{counter}"
+                    sheet_name = f"{base_name[:31 - len(suffix)]}{suffix}"
                     counter += 1
 
-                used_names.add(final_name)
+                sheet.title = sheet_name
 
-                # Create final path with xlsx extension
-                property_output_path = base_output_dir / f"{final_name}.xlsx"
+                # Copy template content and formatting
+                for row in template_sheet.rows:
+                    for cell in row:
+                        new_cell = sheet.cell(
+                            row=cell.row,
+                            column=cell.column
+                        )
 
-                logger.info(f"Generating report for property: {property_data.property_name} -> {final_name}.xlsx")
+                        # Copy value and formula
+                        if cell.value is not None:
+                            new_cell.value = cell.value
+                            if cell.data_type == 'f':  # If it's a formula
+                                new_cell.data_type = cell.data_type
+
+                        # Copy styling
+                        if cell.has_style:
+                            new_cell.font = copy(cell.font)
+                            new_cell.border = copy(cell.border)
+                            new_cell.fill = copy(cell.fill)
+                            new_cell.number_format = cell.number_format
+                            new_cell.alignment = copy(cell.alignment)
+                            new_cell.protection = copy(cell.protection)
+
+                # Copy column dimensions
+                for key, value in template_sheet.column_dimensions.items():
+                    sheet.column_dimensions[key].width = value.width
+
+                # Copy row dimensions
+                for key, value in template_sheet.row_dimensions.items():
+                    sheet.row_dimensions[key].height = value.height
+
+                # Copy merged cells
+                sheet.merged_cells = template_sheet.merged_cells
+
+                # Copy conditional formatting
+                sheet.conditional_formatting = template_sheet.conditional_formatting
+
+                # Update service to use current sheet
+                service.sheet = sheet
 
                 # Convert Property model to dict format
                 property_dict = {
@@ -384,30 +442,23 @@ def generate_multi_property_report(
                     'PendingWorkOrders': property_data.metrics.pending_work_orders if property_data.metrics else 0,
                 }
 
-                # Generate individual report
-                generate_report(
-                    template_name=template_name,
-                    output_path=str(property_output_path),
-                    property_data=property_dict
-                )
+                # Update the sheet with property data
+                service.update_property_data(property_dict)
 
-                generated_files.append(property_output_path)
-                logger.info(f"Successfully generated report for {property_data.property_name}")
-                time.sleep(0.5)  # Add delay to prevent API rate limiting
+                logger.info(f"Successfully processed {property_data.property_name}")
+
+                time.sleep(1)
+                
 
             except Exception as e:
-                logger.error(f"Failed to generate report for {property_data.property_name}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to process {property_data.property_name}: {str(e)}", exc_info=True)
                 continue
 
-        # Verify generated files
-        successful_count = len(generated_files)
-        logger.info(
-            f"Completed report generation. Successfully generated {successful_count} out of {len(properties)} reports")
+        # Save the consolidated workbook
+        logger.info(f"Saving consolidated report to {output_path}")
+        service.save()
 
-        if successful_count == 0:
-            raise Exception("Failed to generate any reports successfully")
-
-        return generated_files
+        return [output_path]
 
     except Exception as e:
         logger.error(f"Failed to generate multi-property report: {str(e)}", exc_info=True)
