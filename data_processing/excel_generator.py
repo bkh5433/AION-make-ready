@@ -245,16 +245,33 @@ class ExcelGeneratorService:
         """Update cells with property data and handle all calculations"""
         logger.info(f"Updating property data for: {property_data.get('PropertyName', 'Unknown')}")
         try:
-            # Parse start and end dates
-            start_date = self._parse_date(property_data.get('period_start_date'))
-            end_date = self._parse_date(property_data.get('period_end_date'))
-            logger.debug(f"Period: {start_date} to {end_date}")
+            # Extract period dates directly from property data
+            period_start = self._parse_date(property_data.get('period_start_date'))
+            period_end = self._parse_date(property_data.get('period_end_date'))
 
-            date_range = self.format_date_range(start_date, end_date)
+            if not period_start or not period_end:
+                # Look for dates in metrics if not found at top level
+                metrics = property_data.get('metrics', {})
+                period_start = self._parse_date(metrics.get('period_start_date'))
+                period_end = self._parse_date(metrics.get('period_end_date'))
+
+            # If still no valid dates, look for LatestPostDate and calculate range
+            if not period_start or not period_end:
+                latest_post = self._parse_date(property_data.get('LatestPostDate'))
+                if latest_post:
+                    period_end = latest_post
+                    period_start = latest_post - timedelta(days=30)
+                else:
+                    # Final fallback - log warning and use current date range
+                    logger.warning("No valid dates found in property data, using default date range")
+                    period_end = datetime.now()
+                    period_start = period_end - timedelta(days=30)
+
+            logger.info(f"Using date range: {period_start} to {period_end}")
+            date_range = self.format_date_range(period_start, period_end)
 
             # Update initial metrics cells
-            self.update_cell('M9',
-                             property_data.get('ActualOpenWorkOrders_Current', 0))  # Current actual open work orders
+            self.update_cell('M9', property_data.get('ActualOpenWorkOrders_Current', 0))
 
             # Get break-even value from B24
             break_even_value = self.sheet['B24'].value

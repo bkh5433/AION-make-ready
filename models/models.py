@@ -1,8 +1,9 @@
-from pydantic import BaseModel, Field, ConfigDict, field_validator, validator, model_validator, PrivateAttr
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator, PrivateAttr
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from logger_config import LogConfig
+from typing import Union
 
 logger = LogConfig().get_logger('models')
 
@@ -121,8 +122,41 @@ class WorkOrderMetrics(BaseModel):
             'monthly_rate': self.monthly_rate,
             'break_even_target': self.break_even_target,
             'current_output': self.current_output,
-            'days_per_month': self.days_per_month
+            'days_per_month': self.days_per_month,
+            'period_start': self.period_start_date,  # Include dates in output
+            'period_end': self.period_end_date
         }
+
+    @field_validator('period_start_date', 'period_end_date', mode='before')
+    @classmethod
+    def parse_dates(cls, v: Optional[Union[str, datetime]]) -> Optional[datetime]:
+        if not v:
+            return None
+        if isinstance(v, datetime):
+            return v
+        try:
+            # Try parsing common formats
+            for fmt in [
+                '%a, %d %b %Y %H:%M:%S GMT',  # Tue, 12 Nov 2024 00:00:00 GMT
+                '%Y-%m-%dT%H:%M:%S',  # ISO format
+                '%Y-%m-%d'  # Simple date
+            ]:
+                try:
+                    return datetime.strptime(v, fmt)
+                except ValueError:
+                    continue
+            raise ValueError(f"Could not parse date: {v}")
+        except Exception as e:
+            logger.error(f"Date parsing error in WorkOrderMetrics: {str(e)}")
+            return None
+
+    @model_validator(mode='after')
+    def validate_dates(self) -> 'WorkOrderMetrics':
+        """Validate period dates if present"""
+        if self.period_start_date and self.period_end_date:
+            if self.period_end_date < self.period_start_date:
+                raise ValueError("End date must be after start date")
+        return self
 
     def model_dump(self, **kwargs) -> Dict:
         """Override model_dump to include calculated metrics"""
@@ -158,6 +192,42 @@ class Property(BaseModel):
         if v.startswith("Historical"):
             raise ValueError("Property name cannot start with 'Historical'")
         return v
+
+    @field_validator('period_start_date', 'period_end_date', mode='before')
+    @classmethod
+    def parse_dates(cls, v: Optional[Union[str, datetime]]) -> Optional[datetime]:
+        if not v:
+            return None
+        if isinstance(v, datetime):
+            return v
+        try:
+            # Try parsing common formats
+            for fmt in [
+                '%a, %d %b %Y %H:%M:%S GMT',  # Tue, 12 Nov 2024 00:00:00 GMT
+                '%Y-%m-%dT%H:%M:%S',  # ISO format
+                '%Y-%m-%d'  # Simple date
+            ]:
+                try:
+                    return datetime.strptime(v, fmt)
+                except ValueError:
+                    continue
+            raise ValueError(f"Could not parse date: {v}")
+        except Exception as e:
+            raise ValueError(f"Date parsing error: {str(e)}")
+
+    @model_validator(mode='after')
+    def validate_dates(self) -> 'Property':
+        """Ensure period dates are valid and propagate to metrics"""
+        if self.period_start_date and self.period_end_date:
+            if self.period_end_date < self.period_start_date:
+                raise ValueError("End date must be after start date")
+
+            # Propagate dates to metrics if they exist
+            if self.metrics:
+                self.metrics.period_start_date = self.period_start_date
+                self.metrics.period_end_date = self.period_end_date
+
+        return self
 
     def get_summary(self) -> Dict:
         """Get property summary including key metrics"""
