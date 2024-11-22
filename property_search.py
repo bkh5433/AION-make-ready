@@ -2,15 +2,16 @@ from typing import List, Optional, Dict, Union
 from datetime import datetime, date
 from pydantic import ValidationError
 from logger_config import LogConfig
-from models.models import (Property,
-                           WorkOrderMetrics,
-                           PropertyStatus,
-                           PropertySearchResult,
-                           WorkOrderAnalytics)
+from models.Property import Property, PropertyStatus
+from models.WorkOrderMetrics import WorkOrderMetrics
+from models.WorkOrderAnalytics import WorkOrderAnalytics
+from models.PropertySearchResult import PropertySearchResult
+
 
 # Setup logging
 log_config = LogConfig()
 logger = log_config.get_logger('property_search')
+
 
 class PropertySearch:
     def __init__(self, cache_data: List[Dict]):

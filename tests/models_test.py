@@ -1,13 +1,11 @@
 from datetime import datetime, timedelta
 import pytest
 from pydantic import ValidationError
-from models.models import (
-    WorkOrderMetrics,
-    Property,
-    PropertyStatus,
-    ReportGenerationRequest,
-    WorkOrderAnalytics
-)
+from models.WorkOrderMetrics import WorkOrderMetrics
+from models.Property import Property, PropertyStatus
+from models.WorkOrderAnalytics import WorkOrderAnalytics
+from models.ReportGenerationRequest import ReportGenerationRequest
+
 
 
 class TestWorkOrderMetrics:

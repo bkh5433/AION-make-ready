@@ -14,7 +14,7 @@ from what_if_table import update_what_if_table, WhatIfTableGenerator
 
 from logger_config import LogConfig, log_exceptions
 from utils.path_resolver import PathResolver
-from models.models import Property
+from models.Property import Property
 
 # Initialize logging
 log_config = LogConfig()
@@ -493,9 +493,9 @@ def generate_report(template_name: str, output_path: str, property_data: Dict[st
     logger.info(f"Starting report generation for property: {property_data.get('PropertyName', 'Unknown')}")
 
     try:
-        # Initialize template with template_name instead of template_path
+        # Initialize template with template_name
         template = SpreadsheetTemplate(
-            template_name=template_name,  # Use template_name here
+            template_name=template_name,
             output_path=Path(output_path)
         )
 

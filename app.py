@@ -1,22 +1,24 @@
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, after_this_request, send_file
 import shutil
-import time
-import os
 import io
 import zipfile
-from werkzeug.wsgi import FileWrapper
+import threading
+import asyncio
 from flask_cors import CORS
+from models.ReportGenerationRequest import ReportGenerationRequest
+from models.ReportGenerationResponse import ReportGenerationResponse
+from models.ReportOutput import ReportOutput
 from datetime import datetime, timedelta
-from models.models import *
 from functools import wraps
 from typing import Dict, List, Optional, Union
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
-from session import with_session, get_session_path, cleanup_session, run_session_cleanup, generate_session_id, \
+from session import get_session_path, cleanup_session, run_session_cleanup, generate_session_id, \
     setup_session_directory
 from data_processing import generate_multi_property_report
+from cache_module import ConcurrentSQLCache, CacheConfig
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -34,11 +36,17 @@ CORS(app, resources={
 log_config = LogConfig()
 logger = log_config.get_logger('api')
 
-# In-memory cache with type hints
-cache: Dict[str, Optional[Union[List[Dict], datetime]]] = {
-    'data': None,
-    'last_updated': None
-}
+cache_config = CacheConfig(
+    refresh_interval=43200,  # 12 hours
+    force_refresh_interval=86400,  # 24 hours
+    refresh_timeout=30,
+    max_retry_attempts=3,
+    retry_delay=2,
+    enable_monitoring=True,
+    stale_if_error=True
+)
+
+cache = ConcurrentSQLCache(cache_config)
 
 
 def catch_exceptions(func):
@@ -56,15 +64,34 @@ def catch_exceptions(func):
     return wrapper
 
 
-def update_cache():
+def fetch_make_ready_data_sync():
+    """Synchronous function to fetch data from SQL"""
     from data_retrieval import sql_queries
-    global cache
-    logger.info("Updating cache with new data.")
-    cache['data'] = sql_queries.fetch_make_ready_data().to_dict(orient='records')
-    for record in cache['data']:
-        record['ActualOpenWorkOrders_Current'] = record.pop('ActualOpenWorkOrders_Current', 0)
-    cache['last_updated'] = datetime.now()
-    logger.info("Cache updated successfully.")
+    try:
+        data = sql_queries.fetch_make_ready_data().to_dict(orient='records')
+        # Process ActualOpenWorkOrders_Current consistently
+        for record in data:
+            record['ActualOpenWorkOrders_Current'] = record.pop('ActualOpenWorkOrders_Current', 0)
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching make ready data: {str(e)}")
+        raise
+
+
+async def fetch_make_ready_data():
+    """Async wrapper for the synchronous fetch function"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, fetch_make_ready_data_sync)
+
+
+def run_async(coro):
+    """Run an async function in a new event loop"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 @app.route('/api/data', methods=['GET'])
@@ -72,18 +99,36 @@ def update_cache():
 @log_exceptions(logger)
 def get_make_ready_data():
     logger.info("GET /api/data endpoint accessed.")
-    if cache['data'] is None or (isinstance(cache['last_updated'], datetime) and
-                                 datetime.now() - cache['last_updated'] > timedelta(hours=12)):
-        logger.info("Cache is empty or outdated. Updating cache.")
-        update_cache()
+    try:
+        # Get data and check staleness
+        data, is_stale = run_async(cache.get_data())
 
-    logger.info("Returning data from cache.")
-    return jsonify({
-        "status": "success",
-        "data": cache['data'],
-        "total_records": len(cache['data']) if cache['data'] is not None else 0,
-        "last_updated": cache['last_updated'].isoformat() if isinstance(cache['last_updated'], datetime) else None
-    })
+        if not data:
+            # Initial cache population
+            logger.info("Cache empty, performing initial population")
+            run_async(cache.refresh_data(fetch_make_ready_data))
+            data, is_stale = run_async(cache.get_data())
+        elif is_stale:
+            # Trigger background refresh
+            logger.info("Data is stale, triggering background refresh")
+            thread = threading.Thread(
+                target=run_async,
+                args=(cache.refresh_data(fetch_make_ready_data),)
+            )
+            thread.daemon = True
+            thread.start()
+
+        return jsonify({
+            "status": "success",
+            "data": data,
+            "total_records": len(data) if data else 0,
+            "last_updated": cache._last_refresh.isoformat() if cache._last_refresh else None,
+            "is_stale": is_stale
+        })
+
+    except Exception as e:
+        logger.error(f"Error in get_make_ready_data: {str(e)}")
+        raise
 
 
 @app.route('/api/health', methods=['GET'])
@@ -109,16 +154,26 @@ def search_properties():
 
         logger.debug(f"Search parameters - term: {search_term}, include_metrics: {include_metrics}")
 
-        # Ensure cache is up to date
-        if cache['data'] is None or (
-                isinstance(cache['last_updated'], datetime) and
-                datetime.now() - cache['last_updated'] > timedelta(hours=12)
-        ):
-            logger.info("Cache needs update, refreshing data")
-            update_cache()
+        # Get data from cache
+        data, is_stale = run_async(cache.get_data())
+
+        if not data:
+            # Initial cache population
+            logger.info("Cache empty, performing initial population")
+            run_async(cache.refresh_data(fetch_make_ready_data))
+            data, is_stale = run_async(cache.get_data())
+        elif is_stale:
+            # Trigger background refresh if data is stale
+            logger.info("Data is stale, triggering background refresh")
+            thread = threading.Thread(
+                target=run_async,
+                args=(cache.refresh_data(fetch_make_ready_data),)
+            )
+            thread.daemon = True
+            thread.start()
 
         logger.debug(
-            f"Cache status - size: {len(cache['data']) if cache['data'] else 0}, last_updated: {cache['last_updated']}")
+            f"Cache status - size: {len(data) if data else 0}, is_stale: {is_stale}")
 
         # Calculate period dates
         end_date = datetime.now()
@@ -128,13 +183,13 @@ def search_properties():
 
         # Initialize searcher
         logger.info("Initializing PropertySearch")
-        searcher = PropertySearch(cache['data'])
+        searcher = PropertySearch(data)
 
         # Get search results
         logger.info("Executing search")
         result = searcher.get_search_result(
             search_term=search_term,
-            last_updated=cache['last_updated'],
+            last_updated=cache._last_refresh,  # Use the cache's last refresh time
             period_info={
                 'start_date': start_date,
                 'end_date': end_date
@@ -143,9 +198,21 @@ def search_properties():
 
         logger.info(f"Search complete - found {result.count} properties")
 
-        # Convert to response
+        # Convert to response and include staleness
         logger.debug("Converting result to JSON")
         response_data = result.model_dump()
+        response_data['is_stale'] = is_stale
+
+        # Add cache statistics if needed
+        if include_metrics:
+            response_data['cache_stats'] = {
+                'last_refresh': cache._last_refresh.isoformat() if cache._last_refresh else None,
+                'is_refreshing': cache._refresh_state.is_refreshing,
+                'refresh_age': (
+                    (datetime.now() - cache._last_refresh).total_seconds()
+                    if cache._last_refresh else None
+                )
+            }
 
         logger.info("Returning search results")
         return jsonify(response_data)
@@ -192,10 +259,29 @@ def generate_report():
                 "message": f"Invalid request format: {str(e)}"
             }, 400
 
-        # Continue with report generation...
-        searcher = PropertySearch(cache['data'])
-        properties = searcher.search_properties(property_keys=report_request.properties,
-                                                include_analytics=True)
+        # Get data from cache
+        data, is_stale = run_async(cache.get_data())
+
+        if not data:
+            logger.info("Cache empty, performing initial population")
+            run_async(cache.refresh_data(fetch_make_ready_data))
+            data, is_stale = run_async(cache.get_data())
+        elif is_stale:
+            # Trigger background refresh if data is stale
+            logger.info("Data is stale, triggering background refresh")
+            thread = threading.Thread(
+                target=run_async,
+                args=(cache.refresh_data(fetch_make_ready_data),)
+            )
+            thread.daemon = True
+            thread.start()
+
+        # Initialize searcher with cached data
+        searcher = PropertySearch(data)
+        properties = searcher.search_properties(
+            property_keys=report_request.properties,
+            include_analytics=True
+        )
 
         if not properties:
             logger.warning(f"No properties found for keys: {report_request.properties}")
@@ -228,6 +314,11 @@ def generate_report():
 
             logger.info(f"Generated file: {files}")
 
+            # Create warnings list only if there are actual warnings
+            warnings = []
+            if is_stale:
+                warnings.append("Using stale data")
+
             response_data = ReportGenerationResponse(
                 success=True,
                 message=f"Report generated successfully with {len(properties)} property sheets",
@@ -241,7 +332,7 @@ def generate_report():
                         'end_date': report_request.end_date or datetime.now()
                     }
                 ),
-                warnings=[],
+                warnings=warnings if warnings else None,  # Only include warnings if there are any
                 session_id=session_id
             ).model_dump()
 
@@ -277,9 +368,16 @@ def generate_report():
 @log_exceptions(logger)
 def refresh_data():
     logger.info("POST /api/refresh endpoint accessed. Refreshing data.")
-    update_cache()
-    logger.info("Data refreshed successfully.")
-    return jsonify({"status": "success", "message": "Data refreshed successfully"})
+    try:
+        run_async(cache.refresh_data(fetch_make_ready_data))
+        return jsonify({
+            "status": "success",
+            "message": "Data refreshed successfully",
+            "stats": cache.get_stats()
+        })
+    except Exception as e:
+        logger.error(f"Error refreshing data: {str(e)}")
+        raise
 
 
 def cleanup_empty_directory(directory: Path):
@@ -429,6 +527,19 @@ def end_session():
             "message": "Error ending session"
         }), 500
 
+
+@app.route('/api/cache/stats', methods=['GET'])
+@catch_exceptions
+def get_cache_stats():
+    """Get cache statistics."""
+    try:
+        return jsonify(cache.get_stats())
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Error getting cache stats"
+        }), 500
 
 # Schedule periodic cleanup
 from apscheduler.schedulers.background import BackgroundScheduler
