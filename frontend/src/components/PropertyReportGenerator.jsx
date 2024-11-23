@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from './ui/card';
 import {Search, Download, FileDown, CheckCircle, X, Plus, AlertTriangle, Moon, Sun} from 'lucide-react';
 import {useTheme} from "../lib/theme.jsx";
@@ -29,6 +29,22 @@ const PropertyReportGenerator = () => {
         files: []
     });
     const [isFirstLoad, setIsFirstLoad] = useState(true); // New state variable
+
+    const searchInputRef = useRef(null);
+
+    const [showScrollTop, setShowScrollTop] = useState(false);
+
+    useEffect(() => {
+        const handleKeyPress = (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                searchInputRef.current?.focus();
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyPress);
+        return () => document.removeEventListener('keydown', handleKeyPress);
+    }, []);
 
     useEffect(() => {
         if (isDarkMode) {
@@ -471,27 +487,37 @@ const PropertyReportGenerator = () => {
         }
     };
 
+    useEffect(() => {
+        const handleScroll = () => {
+            setShowScrollTop(window.scrollY > 400);
+        };
+
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
 
     return (
-        <div className={`container mx-auto p-6 space-y-6 ${isDarkMode ? 'dark' : ''}`}>
-            {/* Notifications */}
-            <div className="fixed top-4 right-4 z-50 space-y-2">
-                {notifications.map(({id, type, message}) => (
+        <div className="container mx-auto space-y-8 px-4 py-6 max-w-7xl">
+            {/* Notifications Container - Add scale transition */}
+            <div className="fixed top-4 right-4 z-50 space-y-3">
+                {notifications.map(notification => (
                     <div
-                        key={id}
-                        className={`flex items-center gap-3 p-4 rounded-lg shadow-lg max-w-md animate-in slide-in-from-right-5 ${
-                            type === 'success' ? 'bg-green-50 border border-green-100' :
-                                type === 'error' ? 'bg-red-50 border border-red-100' :
-                                    'bg-blue-50 border border-blue-100'
+                        key={notification.id}
+                        className={`flex items-center gap-2 p-4 rounded-lg shadow-lg slide-in-from-right transform transition-all duration-200 hover:translate-x-[-4px] ${
+                            notification.type === 'success'
+                                ? 'bg-green-500/90 text-white'
+                                : notification.type === 'error'
+                                    ? 'bg-red-500/90 text-white'
+                                    : 'bg-blue-500/90 text-white'
                         }`}
                     >
-                        {type === 'success' ? <CheckCircle className="h-5 w-5 text-green-500"/> :
-                            type === 'error' ? <X className="h-5 w-5 text-red-500"/> :
-                                <Plus className="h-5 w-5 text-blue-500"/>}
-                        <p className="flex-1 text-sm text-gray-700">{message}</p>
+                        {notification.type === 'success' && <CheckCircle className="h-5 w-5"/>}
+                        {notification.type === 'error' && <X className="h-5 w-5"/>}
+                        {notification.type === 'info' && <AlertTriangle className="h-5 w-5"/>}
+                        <p>{notification.message}</p>
                         <button
-                            onClick={() => removeNotification(id)}
-                            className="text-gray-400 hover:text-gray-600"
+                            onClick={() => removeNotification(notification.id)}
+                            className="ml-2 hover:opacity-80"
                         >
                             <X className="h-4 w-4"/>
                         </button>
@@ -499,23 +525,16 @@ const PropertyReportGenerator = () => {
                 ))}
             </div>
 
-            <Card className="bg-white dark:bg-gray-800 shadow-md">
-                <CardHeader className="border-b border-gray-100 dark:border-gray-700">
-                    <CardTitle className="text-2xl font-semibold text-gray-800 dark:text-gray-100">
-                        Property Report Generator
-                    </CardTitle>
-                </CardHeader>
-
-                <CardContent className="space-y-6 pt-6">
-
-                    {/* Data Age Status Message */}
-                    {/* Data Age Status Message */}
+            <Card
+                className="bg-white dark:bg-[#1f2937] shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-200">
+                <CardContent className="space-y-8 pt-6">
+                    {/* Data Age Status Message - Add hover effect */}
                     {isDataUpToDate !== null && (
                         <div
-                            className={`flex items-center gap-3 p-4 rounded-lg ${
+                            className={`flex items-center gap-3 p-4 rounded-lg transition-all duration-200 hover:shadow-md ${
                                 isDataUpToDate
-                                    ? 'bg-green-50 border border-green-100 text-green-700'
-                                    : 'bg-yellow-50 border border-yellow-100 text-yellow-700'
+                                    ? 'bg-green-50 dark:bg-green-50/10 border border-green-200 dark:border-green-100/20 text-green-700 dark:text-green-400'
+                                    : 'bg-yellow-50 dark:bg-yellow-50/10 border border-yellow-200 dark:border-yellow-100/20 text-yellow-700 dark:text-yellow-400'
                             }`}
                         >
                             {isDataUpToDate ? (
@@ -535,24 +554,38 @@ const PropertyReportGenerator = () => {
                             </div>
                         </div>
                     )}
-                    {/* Search and Generate Section */}
-                    <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4">
+
+                    {/* Search and Generate Section - Improve spacing and button feedback */}
+                    <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
                         <div className="relative flex-grow">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <Search className="h-5 w-5 text-gray-400 dark:text-gray-500"/>
+                                <Search className="h-5 w-5 text-gray-400"/>
                             </div>
                             <input
+                                ref={searchInputRef}
                                 type="text"
                                 placeholder="Search properties..."
-                                className="pl-10 pr-4 py-3 w-full border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                className="pl-10 pr-10 py-3 w-full rounded-lg bg-gray-50 dark:bg-[#2d3748] border-gray-200 dark:border-gray-700 
+                                text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 
+                                focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200
+                                hover:border-gray-300 dark:hover:border-gray-600"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
+                            {searchTerm && (
+                                <button
+                                    onClick={() => setSearchTerm('')}
+                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                >
+                                    <X className="h-5 w-5"/>
+                                </button>
+                            )}
                         </div>
                         <button
-                            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white transition-all duration-200 ${
+                            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white transition-all duration-200 
+                            transform hover:scale-[1.02] active:scale-[0.98] ${
                                 isGenerating || selectedProperties.length === 0
-                                    ? 'bg-gray-400 cursor-not-allowed'
+                                    ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-75'
                                     : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'
                             }`}
                             onClick={handleGenerateReports}
@@ -573,12 +606,12 @@ const PropertyReportGenerator = () => {
                         </button>
                     </div>
 
-                    {/* Properties Table */}
-                    <div className="overflow-hidden rounded-lg border border-gray-200">
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead className="bg-gray-50 dark:bg-gray-700">
-                                <tr className="bg-gray-50">
+                    {/* Properties Table - Add better hover states and transitions */}
+                    <div
+                        className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-600">
+                        <table className="w-full">
+                            <thead>
+                            <tr className="bg-gray-50 dark:bg-[#2d3748]">
                                     <th className="px-6 py-4 text-left">
                                         <input
                                             type="checkbox"
@@ -590,40 +623,47 @@ const PropertyReportGenerator = () => {
                                                     setSelectedProperties(properties.map(p => p.PropertyKey));
                                                 }
                                             }}
-                                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                            className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 focus:ring-blue-500"
                                         />
                                     </th>
-                                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Property
+                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-400">Property
                                         Name
                                     </th>
-                                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-600">Property
+                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-400">Property
                                         ID
                                     </th>
                                 </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200">
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan="3" className="px-6 py-8 text-center text-gray-500">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <div
-                                                    className="animate-spin h-5 w-5 border-2 border-blue-500 border-t-transparent rounded-full"/>
-                                                <span>Loading properties...</span>
+                                        <td colSpan="3" className="px-6 py-4">
+                                            <div className="space-y-3">
+                                                {[...Array(5)].map((_, i) => (
+                                                    <div key={i} className="flex items-center gap-4 animate-pulse">
+                                                        <div className="h-4 w-4 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                        <div className="h-4 w-48 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                        <div className="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </td>
                                     </tr>
                                 ) : properties.length === 0 ? (
                                     <tr>
-                                        <td colSpan="3"
-                                            className="px-6 py-8 text-center text-gray-500 dark:text-gray-400">
-                                            No properties found
+                                        <td colSpan="3" className="px-6 py-12 text-center">
+                                            <div className="flex flex-col items-center justify-center gap-2">
+                                                <Search className="h-8 w-8 text-gray-400"/>
+                                                <span
+                                                    className="text-gray-500 dark:text-gray-400">No properties found</span>
+                                            </div>
                                         </td>
                                     </tr>
                                 ) : (
                                     properties.map((property) => (
                                         <tr
                                             key={property.PropertyKey}
-                                            className="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+                                            className="hover:bg-gray-50 dark:hover:bg-[#374151] cursor-pointer transition-all duration-200"
                                             onClick={() => togglePropertySelection(property.PropertyKey)}
                                         >
                                             <td className="px-6 py-4">
@@ -632,22 +672,33 @@ const PropertyReportGenerator = () => {
                                                     checked={selectedProperties.includes(property.PropertyKey)}
                                                     onChange={() => togglePropertySelection(property.PropertyKey)}
                                                     onClick={(e) => e.stopPropagation()}
-                                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                                    className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 focus:ring-blue-500"
                                                 />
                                             </td>
-                                            <td className="px-6 py-4 text-gray-900 dark:text-gray-100">{property.PropertyName}</td>
+                                            <td className="px-6 py-4 text-gray-900 dark:text-gray-100">
+                                                <div className="group relative">
+                                                    <span
+                                                        className="truncate block max-w-md">{property.PropertyName}</span>
+                                                    <span
+                                                        className="invisible group-hover:visible absolute left-0 top-full mt-2 px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-sm rounded-md z-10 whitespace-nowrap">
+                                                        {property.PropertyName}
+                                                    </span>
+                                                </div>
+                                            </td>
                                             <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{property.PropertyKey}</td>
                                         </tr>
                                     ))
                                 )}
-                                </tbody>
-                            </table>
-                        </div>
+                            </tbody>
+                        </table>
                     </div>
 
-                    {/* Selection Counter */}
-                    <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-                        <span>{selectedProperties.length} of {properties.length} properties selected</span>
+                    {/* Selection Counter - Add better visibility */}
+                    <div className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">
+                            {selectedProperties.length}
+                        </span>
+                        of {properties.length} properties selected
                     </div>
                 </CardContent>
             </Card>
@@ -675,6 +726,21 @@ const PropertyReportGenerator = () => {
                     />
                     </div>
                 )}
+
+            {showScrollTop && (
+                <button
+                    onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}
+                    className="fixed bottom-4 left-4 p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg 
+                             hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-200
+                             transform hover:scale-110"
+                    aria-label="Scroll to top"
+                >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+                    </svg>
+                </button>
+            )}
 
         </div>
     );
