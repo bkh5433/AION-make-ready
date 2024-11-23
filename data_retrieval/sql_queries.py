@@ -1,11 +1,8 @@
-from sqlalchemy import create_engine
-import pandas as pd
-from .db_connection import get_db_connection
+# Description: SQL queries for data retrieval
 
 
-def fetch_make_ready_data():
-    query = """
-    
+MAKE_READY_QUERY = """
+
 DECLARE @CalendarDate DATE = DATEADD(DAY, -1, GETDATE());
 DECLARE @StartDate DATE = DATEADD(DAY, -31, @CalendarDate);
 
@@ -167,8 +164,5 @@ SELECT
 FROM WorkOrderMetrics wm
 LEFT JOIN dbo.FactOperationalKPI fo ON wm.PropertyKey = fo.PropertyKey
 ORDER BY wm.PropertyName;
-    """
-    engine = create_engine(get_db_connection())
-    with engine.connect() as connection:
-        df = pd.read_sql(query, connection)
-    return df
+
+"""

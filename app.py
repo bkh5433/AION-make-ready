@@ -66,9 +66,10 @@ def catch_exceptions(func):
 
 def fetch_make_ready_data_sync():
     """Synchronous function to fetch data from SQL"""
-    from data_retrieval import sql_queries
+    from data_retrieval.db_connection import DatabaseConnection
     try:
-        data = sql_queries.fetch_make_ready_data().to_dict(orient='records')
+        db = DatabaseConnection()
+        data = db.fetch_data().to_dict(orient='records')
         # Process ActualOpenWorkOrders_Current consistently
         for record in data:
             record['ActualOpenWorkOrders_Current'] = record.pop('ActualOpenWorkOrders_Current', 0)
@@ -528,30 +529,67 @@ def end_session():
         }), 500
 
 
-@app.route('/api/cache/stats', methods=['GET'])
+@app.route('/api/cache/status', methods=['GET'])
 @catch_exceptions
-def get_cache_stats():
-    """Get cache statistics."""
-    try:
-        return jsonify(cache.get_stats())
-    except Exception as e:
-        logger.error(f"Error getting cache stats: {str(e)}")
-        return jsonify({
-            "success": False,
-            "message": "Error getting cache stats"
-        }), 500
+def cache_status():
+    """Endpoint to check cache status"""
+    stats = cache.get_stats()
+    return jsonify({
+        "status": "healthy",
+        "cache": stats,
+        "last_refresh_age_hours": (
+            (datetime.now() - cache._last_refresh).total_seconds() / 3600
+            if cache._last_refresh else None
+        )
+    })
 
-# Schedule periodic cleanup
-from apscheduler.schedulers.background import BackgroundScheduler
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(run_session_cleanup, 'interval', hours=1)
-scheduler.start()
+def schedule_data_refresh():
+    """Schedule data refresh tasks"""
+    from apscheduler.schedulers.background import BackgroundScheduler
 
-if scheduler.state == 1:
-    logger.info("Scheduler started successfully.")
-else:
-    logger.error("Scheduler failed to start.")
+    def refresh_data_task():
+        """Wrapper for async refresh task"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
+        finally:
+            loop.close()
+
+    scheduler = BackgroundScheduler()
+
+    # Add session cleanup job
+    scheduler.add_job(
+        run_session_cleanup,
+        'interval',
+        hours=1,
+        id='session_cleanup'
+    )
+
+    # Add daily refresh at 9 AM
+    scheduler.add_job(
+        refresh_data_task,
+        'cron',
+        hour=9,
+        minute=0,
+        id='daily_refresh'
+    )
+
+    # Add backup refresh every 12 hours
+    scheduler.add_job(
+        refresh_data_task,
+        'interval',
+        hours=12,
+        misfire_grace_time=3600,
+        id='backup_refresh'
+    )
+
+    scheduler.start()
+    return scheduler
+
+
+app.scheduler = schedule_data_refresh()
 
 
 if __name__ == '__main__':

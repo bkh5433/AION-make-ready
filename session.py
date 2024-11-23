@@ -148,7 +148,6 @@ def cleanup_session(session_id: str) -> None:
         logger.error(f"Error cleaning up session {session_id}: {e}")
 
 
-# Example usage in app.py
 from functools import wraps
 
 
