@@ -14,11 +14,51 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+class RequestQueue:
+    def __init__(self, max_concurrent=20):
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.queue = asyncio.Queue()
+        self.active_requests = 0
+        self.total_processed = 0
+        self.processing = False
+
+    async def add_request(self, request_func):
+        """Add a request to the queue"""
+        await self.queue.put(request_func)
+        if not self.processing:
+            self.processing = True
+            asyncio.create_task(self._process_queue())
+
+    async def _process_queue(self):
+        """Process requests from the queue"""
+        try:
+            while not self.queue.empty():
+                async with self.semaphore:
+                    self.active_requests += 1
+                    request_func = await self.queue.get()
+                    try:
+                        await request_func()
+                        self.total_processed += 1
+                    finally:
+                        self.active_requests -= 1
+                        self.queue.task_done()
+        finally:
+            self.processing = False
+
+    @property
+    def stats(self):
+        return {
+            'queue_size': self.queue.qsize(),
+            'active_requests': self.active_requests,
+            'total_processed': self.total_processed
+        }
+
 class APILoadTester:
     def __init__(self, base_url: str = "http://127.0.0.1:5000"):
         self.base_url = base_url
         self.results: List[Dict] = []
         self.session = None
+        self.request_queue = RequestQueue(max_concurrent=20)
 
     async def initialize_session(self):
         """Initialize aiohttp session"""
@@ -32,36 +72,34 @@ class APILoadTester:
             self.session = None
 
     async def make_request(self, endpoint: str) -> Dict:
-        """Make a single request and record metrics"""
+        """Make a single request with queue management"""
         if not self.session:
             await self.initialize_session()
 
         start_time = time.time()
-        success = False
-        status_code = None
-        error = None
-
-        try:
-            async with self.session.get(f"{self.base_url}{endpoint}") as response:
-                await response.json()  # Read the response
-                status_code = response.status
-                success = 200 <= status_code < 300
-
-        except Exception as e:
-            error = str(e)
-            logger.error(f"Request error: {error}")
-
-        end_time = time.time()
-        duration = end_time - start_time
-
         result = {
             'timestamp': datetime.now(),
-            'duration': duration,
-            'success': success,
-            'status_code': status_code,
-            'error': error,
-            'endpoint': endpoint
+            'endpoint': endpoint,
+            'queued_at': start_time
         }
+
+        try:
+            async with self.semaphore:
+                async with self.session.get(f"{self.base_url}{endpoint}") as response:
+                    await response.json()
+                    result.update({
+                        'status_code': response.status,
+                        'success': 200 <= response.status < 300,
+                        'duration': time.time() - start_time,
+                        'queue_time': time.time() - result['queued_at']
+                    })
+        except Exception as e:
+            result.update({
+                'success': False,
+                'error': str(e),
+                'duration': time.time() - start_time
+            })
+            logger.error(f"Request error: {e}")
 
         self.results.append(result)
         return result

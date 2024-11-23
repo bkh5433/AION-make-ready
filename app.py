@@ -1,5 +1,5 @@
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory, after_this_request, send_file
+from flask import Flask, jsonify, request, send_from_directory
 import shutil
 import io
 import zipfile
@@ -11,7 +11,7 @@ from models.ReportGenerationResponse import ReportGenerationResponse
 from models.ReportOutput import ReportOutput
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Dict, List, Optional, Union
+from typing import List
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
@@ -567,11 +567,11 @@ def schedule_data_refresh():
         id='session_cleanup'
     )
 
-    # Add daily refresh at 9 AM
+    # Add daily refresh at 10 AM
     scheduler.add_job(
         refresh_data_task,
         'cron',
-        hour=9,
+        hour=10,
         minute=0,
         id='daily_refresh'
     )
