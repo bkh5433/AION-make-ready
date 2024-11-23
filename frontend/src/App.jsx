@@ -7,8 +7,8 @@ function App() {
   return (
       <ThemeProvider>
         <div className="min-h-screen bg-gray-50 dark:bg-[#1a1b1e]">
-          <header className="bg-black dark:bg-black border-b border-gray-200 dark:border-gray-800 shadow-sm">
-            <div className="max-w-4xl mx-auto py-4 px-4 flex items-center">
+          <header className="bg-white dark:bg-[#1f2937] border-b border-gray-200 dark:border-gray-800">
+            <div className="container mx-auto py-4 px-8 flex items-center">
               {/* Logo and Company Name */}
               <div className="flex items-center gap-3">
                 <img
@@ -16,13 +16,13 @@ function App() {
                     alt="AION Logo"
                     className="w-8 h-8 object-contain"
                 />
-                <h1 className="text-2xl font-bold text-white">
+                <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
                   Break Even Report Generator
-              </h1>
-            </div>
+                </h1>
+              </div>
             </div>
           </header>
-          <main className="max-w-4xl mx-auto p-6">
+          <main className="py-6">
             <PropertyReportGenerator/>
           </main>
           <ThemeToggle/>
@@ -30,6 +30,5 @@ function App() {
       </ThemeProvider>
   );
 }
-
 
 export default App;

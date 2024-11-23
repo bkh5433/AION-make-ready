@@ -13,7 +13,7 @@ const FloatingDownloadButton = ({
     return (
         <button
             onClick={onClick}
-            className={`fixed bottom-6 right-6 z-50 relative inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 animate-in fade-in slide-in-from-right-5 ${className}`}
+            className={`fixed bottom-6 right-6 z-50 relative inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-all duration-200 ${className}`}
             title="Open Download Manager"
         >
             {/* Background circle for progress ring */}

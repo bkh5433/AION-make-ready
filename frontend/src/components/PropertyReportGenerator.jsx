@@ -9,6 +9,32 @@ import {ZipDownloader, createTimestampedZipName, formatFileSize} from '../lib/zi
 import useSessionManager from '../lib/session';
 import {getSessionId} from '../lib/session';
 
+const getWorkOrderSeverity = (openWorkOrders, unitCount) => {
+    // Calculate work orders per unit
+    const workOrdersPerUnit = openWorkOrders / unitCount;
+
+    // Define thresholds based on work orders per unit
+    if (workOrdersPerUnit >= 0.5) {
+        return {
+            color: 'text-red-600 dark:text-red-400',
+            severity: 'high',
+            message: 'High volume'
+        };
+    } else if (workOrdersPerUnit >= 0.25) {
+        return {
+            color: 'text-yellow-600 dark:text-yellow-400',
+            severity: 'medium',
+            message: 'Moderate'
+        };
+    } else {
+        return {
+            color: 'text-green-600 dark:text-green-400',
+            severity: 'low',
+            message: 'Normal'
+        };
+    }
+};
+
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -33,6 +59,10 @@ const PropertyReportGenerator = () => {
     const searchInputRef = useRef(null);
 
     const [showScrollTop, setShowScrollTop] = useState(false);
+
+    // Add new state variables to hold the period start and end dates
+    const [periodStartDate, setPeriodStartDate] = useState(null);
+    const [periodEndDate, setPeriodEndDate] = useState(null);
 
     useEffect(() => {
         const handleKeyPress = (e) => {
@@ -111,8 +141,11 @@ const PropertyReportGenerator = () => {
 
                     // Map only the property_key and property_name
                     const formattedProperties = response.data.map(property => ({
-                        PropertyKey: property.property_key || 0,  // Note the lowercase property_key
-                        PropertyName: property.property_name || 'Unnamed Property'  // Note the lowercase property_name
+                        PropertyKey: property.property_key,
+                        PropertyName: property.property_name,
+                        metrics: property.metrics,
+                        status: property.status,
+                        unitCount: property.total_unit_count
                     }));
 
                     // Debug log the first few properties
@@ -496,14 +529,22 @@ const PropertyReportGenerator = () => {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
+    useEffect(() => {
+        if (properties.length > 0) {
+            const firstProperty = properties[0];
+            setPeriodStartDate(new Date(firstProperty.period_start_date));
+            setPeriodEndDate(new Date(firstProperty.period_end_date));
+        }
+    }, [properties]);
+
     return (
-        <div className="container mx-auto space-y-8 px-4 py-6 max-w-7xl">
+        <div className="container mx-auto space-y-8 px-4 py-6 max-w-[90rem]">
             {/* Notifications Container - Add scale transition */}
             <div className="fixed top-4 right-4 z-50 space-y-3">
                 {notifications.map(notification => (
                     <div
                         key={notification.id}
-                        className={`flex items-center gap-2 p-4 rounded-lg shadow-lg slide-in-from-right transform transition-all duration-200 hover:translate-x-[-4px] ${
+                        className={`flex items-center gap-2 p-4 rounded-lg shadow-lg slide-in-from-right transform transition-all duration-300 hover:translate-x-[-4px] hover:shadow-xl ${
                             notification.type === 'success'
                                 ? 'bg-green-500/90 text-white'
                                 : notification.type === 'error'
@@ -527,37 +568,64 @@ const PropertyReportGenerator = () => {
 
             <Card
                 className="bg-white dark:bg-[#1f2937] shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-200">
-                <CardContent className="space-y-8 pt-6">
+                <CardContent className="space-y-10 p-8">
                     {/* Data Age Status Message - Add hover effect */}
                     {isDataUpToDate !== null && (
                         <div
-                            className={`flex items-center gap-3 p-4 rounded-lg transition-all duration-200 hover:shadow-md ${
+                            className={`flex items-center gap-3 p-4 rounded-lg transition-all duration-300 animate-scale-in ${
                                 isDataUpToDate
-                                    ? 'bg-green-50 dark:bg-green-50/10 border border-green-200 dark:border-green-100/20 text-green-700 dark:text-green-400'
-                                    : 'bg-yellow-50 dark:bg-yellow-50/10 border border-yellow-200 dark:border-yellow-100/20 text-yellow-700 dark:text-yellow-400'
+                                    ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700'
+                                    : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700'
                             }`}
                         >
-                            {isDataUpToDate ? (
-                                <CheckCircle className="w-6 h-6"/>
-                            ) : (
-                                <AlertTriangle className="w-6 h-6"/>
-                            )}
-                            <div>
-                                <p className="font-bold">
-                                    {isDataUpToDate ? 'Data is Up-to-Date' : 'Warning'}
-                                </p>
-                                <p>
-                                    {isDataUpToDate
-                                        ? 'The data is current as of yesterday.'
-                                        : 'The data is not up-to-date and may be outdated.'}
-                                </p>
+                            <div className="flex-shrink-0">
+                                {isDataUpToDate ? (
+                                    <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400"/>
+                                ) : (
+                                    <AlertTriangle className="w-6 h-6 text-yellow-600 dark:text-yellow-400"/>
+                                )}
+                            </div>
+                            <div className="flex-grow">
+                                <div className="flex items-center gap-2">
+                                    <h3 className={`font-semibold ${
+                                        isDataUpToDate
+                                            ? 'text-green-900 dark:text-green-100'
+                                            : 'text-yellow-900 dark:text-yellow-100'
+                                    }`}>
+                                        {isDataUpToDate ? 'Data is Current' : 'Data Status Warning'}
+                                    </h3>
+                                    <span
+                                        className="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+                                        {properties.length} Properties
+                                    </span>
+                                </div>
+                                <div className="mt-1 space-y-1">
+                                    <p className={`text-sm ${
+                                        isDataUpToDate
+                                            ? 'text-green-700 dark:text-green-300'
+                                            : 'text-yellow-700 dark:text-yellow-300'
+                                    }`}>
+                                        {isDataUpToDate
+                                            ? 'All property data is up to date and ready for report generation.'
+                                            : 'Some property data may be outdated. Reports may not reflect the most recent changes.'}
+                                    </p>
+                                    {periodStartDate && periodEndDate && (
+                                        <div
+                                            className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+                                            <div className="flex items-center gap-1">
+                                                <span className="font-medium">Period:</span>
+                                                <span>{periodStartDate.toLocaleDateString()} - {periodEndDate.toLocaleDateString()}</span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}
 
                     {/* Search and Generate Section - Improve spacing and button feedback */}
                     <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
-                        <div className="relative flex-grow">
+                        <div className="relative flex-grow animate-slide-up">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <Search className="h-5 w-5 text-gray-400"/>
                             </div>
@@ -582,8 +650,9 @@ const PropertyReportGenerator = () => {
                             )}
                         </div>
                         <button
-                            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white transition-all duration-200 
-                            transform hover:scale-[1.02] active:scale-[0.98] ${
+                            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white 
+                            transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
+                            ${isGenerating ? 'animate-pulse-shadow' : ''} ${
                                 isGenerating || selectedProperties.length === 0
                                     ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-75'
                                     : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'
@@ -608,11 +677,11 @@ const PropertyReportGenerator = () => {
 
                     {/* Properties Table - Add better hover states and transitions */}
                     <div
-                        className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 transition-all duration-200 hover:border-gray-300 dark:hover:border-gray-600">
+                        className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1f2937]">
                         <table className="w-full">
                             <thead>
-                            <tr className="bg-gray-50 dark:bg-[#2d3748]">
-                                    <th className="px-6 py-4 text-left">
+                            <tr className="bg-gray-50 dark:bg-[#2d3748] border-b border-gray-200 dark:border-gray-800">
+                                <th className="px-8 py-5 text-left">
                                         <input
                                             type="checkbox"
                                             checked={selectedProperties.length === properties.length && properties.length > 0}
@@ -623,27 +692,38 @@ const PropertyReportGenerator = () => {
                                                     setSelectedProperties(properties.map(p => p.PropertyKey));
                                                 }
                                             }}
-                                            className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 focus:ring-blue-500"
+                                            className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-500 focus:ring-blue-500"
                                         />
                                     </th>
-                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-400">Property
-                                        Name
-                                    </th>
-                                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 dark:text-gray-400">Property
-                                        ID
-                                    </th>
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Property
+                                    Name
+                                </th>
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Units</th>
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Completion
+                                    Rate
+                                </th>
+                                <th className="hidden md:table-cell px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400 min-w-[320px]">Work
+                                    Orders
+                                </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                                 {isLoading ? (
                                     <tr>
-                                        <td colSpan="3" className="px-6 py-4">
+                                        <td colSpan="5" className="px-8 py-6">
                                             <div className="space-y-3">
                                                 {[...Array(5)].map((_, i) => (
-                                                    <div key={i} className="flex items-center gap-4 animate-pulse">
-                                                        <div className="h-4 w-4 bg-gray-200 dark:bg-gray-700 rounded"/>
-                                                        <div className="h-4 w-48 bg-gray-200 dark:bg-gray-700 rounded"/>
-                                                        <div className="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                    <div
+                                                        key={i}
+                                                        className="flex items-center gap-4 animate-pulse"
+                                                        style={{animationDelay: `${i * 100}ms`}}
+                                                    >
+                                                        <div
+                                                            className="h-4 w-4 bg-gray-400 dark:bg-gray-700 rounded animate-shimmer"/>
+                                                        <div
+                                                            className="h-4 w-48 bg-gray-400 dark:bg-gray-700 rounded animate-shimmer"/>
+                                                        <div
+                                                            className="h-4 w-24 bg-gray-400 dark:bg-gray-700 rounded animate-shimmer"/>
                                                     </div>
                                                 ))}
                                             </div>
@@ -651,7 +731,7 @@ const PropertyReportGenerator = () => {
                                     </tr>
                                 ) : properties.length === 0 ? (
                                     <tr>
-                                        <td colSpan="3" className="px-6 py-12 text-center">
+                                        <td colSpan="5" className="px-8 py-16 text-center">
                                             <div className="flex flex-col items-center justify-center gap-2">
                                                 <Search className="h-8 w-8 text-gray-400"/>
                                                 <span
@@ -660,32 +740,144 @@ const PropertyReportGenerator = () => {
                                         </td>
                                     </tr>
                                 ) : (
-                                    properties.map((property) => (
+                                    properties.map((property, index) => (
                                         <tr
                                             key={property.PropertyKey}
-                                            className="hover:bg-gray-50 dark:hover:bg-[#374151] cursor-pointer transition-all duration-200"
+                                            className={`cursor-pointer transition-all duration-200 animate-slide-up
+                                                        ${selectedProperties.includes(property.PropertyKey)
+                                                ? 'bg-blue-50 dark:bg-blue-900/30'
+                                                : 'hover:bg-gray-50 dark:hover:bg-[#2d3748]'}`}
+                                            style={{animationDelay: `${index * 50}ms`}}
                                             onClick={() => togglePropertySelection(property.PropertyKey)}
                                         >
-                                            <td className="px-6 py-4">
+                                            <td className="px-8 py-6">
                                                 <input
                                                     type="checkbox"
                                                     checked={selectedProperties.includes(property.PropertyKey)}
                                                     onChange={() => togglePropertySelection(property.PropertyKey)}
                                                     onClick={(e) => e.stopPropagation()}
-                                                    className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 focus:ring-blue-500"
+                                                    className={`rounded border-gray-600 
+                                                                ${selectedProperties.includes(property.PropertyKey)
+                                                        ? 'bg-blue-900/50 border-blue-400'
+                                                        : 'bg-gray-700'} 
+                                                                text-blue-400 focus:ring-blue-500`}
                                                 />
                                             </td>
-                                            <td className="px-6 py-4 text-gray-900 dark:text-gray-100">
-                                                <div className="group relative">
+                                            <td className="px-8 py-6">
+                                                <div className="flex flex-col">
                                                     <span
-                                                        className="truncate block max-w-md">{property.PropertyName}</span>
-                                                    <span
-                                                        className="invisible group-hover:visible absolute left-0 top-full mt-2 px-2 py-1 bg-gray-900 dark:bg-gray-700 text-white text-sm rounded-md z-10 whitespace-nowrap">
-                                                        {property.PropertyName}
+                                                        className="font-medium text-gray-900 dark:text-gray-100">{property.PropertyName}</span>
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span
+                                                            className="text-sm text-gray-500 dark:text-gray-400">ID: {property.PropertyKey}</span>
+                                                        {property.metrics.average_days_to_complete > 5 && (
+                                                            <span
+                                                                className="px-2 py-0.5 text-xs rounded-full bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200">
+                                                                Avg {property.metrics.average_days_to_complete.toFixed(1)} days
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-8 py-6">
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium">{property.unitCount}</span>
+                                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                        {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} WO/unit
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{property.PropertyKey}</td>
+                                            <td className="px-8 py-6">
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                                                        <div
+                                                            className={`h-2 rounded-full transform origin-left ${
+                                                                property.metrics.percentage_completed >= 90 ? 'bg-green-500' :
+                                                                    property.metrics.percentage_completed >= 75 ? 'bg-yellow-500' :
+                                                                        'bg-red-500'
+                                                            }`}
+                                                            style={{
+                                                                transform: 'scaleX(0)',
+                                                                animation: 'progress-scale 0.6s ease-out forwards',
+                                                                animationDelay: `${index * 50}ms`,
+                                                                transformOrigin: 'left',
+                                                                width: `${property.metrics.percentage_completed}%`
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <span className={`text-sm font-medium ${
+                                                        property.metrics.percentage_completed >= 90 ? 'text-green-600 dark:text-green-400' :
+                                                            property.metrics.percentage_completed >= 75 ? 'text-yellow-600 dark:text-yellow-400' :
+                                                                'text-red-600 dark:text-red-400'
+                                                    }`}>
+                                                        {property.metrics.percentage_completed.toFixed(1)}%
+                                                    </span>
+                                                </div>
+                                                <div
+                                                    className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                                                    <span>{property.metrics.completed_work_orders} completed</span>
+                                                    {property.metrics.cancelled_work_orders > 0 && (
+                                                        <span className="text-red-500 dark:text-red-400">
+                                                            • {property.metrics.cancelled_work_orders} cancelled
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="hidden md:table-cell px-8 py-6 min-w-[320px]">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="flex flex-col">
+                                                        {(() => {
+                                                            const severity = getWorkOrderSeverity(
+                                                                property.metrics.actual_open_work_orders,
+                                                                property.unitCount
+                                                            );
+                                                            return (
+                                                                <>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span
+                                                                            className={`font-medium ${severity.color}`}>
+                                                                            {property.metrics.actual_open_work_orders}
+                                                                        </span>
+                                                                        <span
+                                                                            className={`text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap ${
+                                                                                severity.severity === 'high'
+                                                                                    ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800'
+                                                                                    : severity.severity === 'medium'
+                                                                                        ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800'
+                                                                                        : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 border border-green-200 dark:border-green-800'
+                                                                            }`}>
+                                                                            {severity.message}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-1 mt-1">
+                                                                        <span
+                                                                            className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                                                            {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit
+                                                                        </span>
+                                                                    </div>
+                                                                </>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-center gap-2">
+                                                            <span
+                                                                className="font-medium">{property.metrics.pending_work_orders}</span>
+                                                            <span
+                                                                className="text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                                                                Pending
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center gap-1 mt-1">
+                                                            <span
+                                                                className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                                                {(property.metrics.pending_work_orders / property.unitCount).toFixed(2)} per unit
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
                                         </tr>
                                     ))
                                 )}
@@ -694,8 +886,8 @@ const PropertyReportGenerator = () => {
                     </div>
 
                     {/* Selection Counter - Add better visibility */}
-                    <div className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded">
+                    <div className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2 px-2">
+                        <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded">
                             {selectedProperties.length}
                         </span>
                         of {properties.length} properties selected

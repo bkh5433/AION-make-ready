@@ -75,29 +75,29 @@ const DownloadManager = ({
               </div>
 
               {/* Download All Button with ZIP indication */}
-              {!allDownloaded && (
-                  <div className="space-y-2">
-                    <button
-                        onClick={() => onDownloadAll(files.filter(f => !f.downloaded))}
-                        disabled={remainingDownloads === 0 || downloadProgress}
-                        className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md transition-colors ${
-                            downloadProgress
-                                ? 'bg-gray-400 cursor-not-allowed text-white'
-                                : 'bg-blue-600 text-white hover:bg-blue-700'
-                        }`}
-                    >
-                      {shouldZip ? <Archive className="h-4 w-4"/> : <Download className="h-4 w-4"/>}
-                      <span>
-                    {shouldZip
-                        ? `Download All as ZIP (${remainingDownloads} files)`
-                        : `Download All (${remainingDownloads} remaining)`
-                    }
-                  </span>
-                    </button>
-
-                    {renderProgress()}
-                  </div>
-              )}
+                {/* Remove the entire block for Download All button */}
+                {/* {!allDownloaded && ( */}
+                {/*     <div className="space-y-2"> */}
+                {/*         <button */}
+                {/*             onClick={() => onDownloadAll(files.filter(f => !f.downloaded))} */}
+                {/*             disabled={remainingDownloads === 0 || downloadProgress} */}
+                {/*             className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md transition-colors ${ */}
+                {/*                 downloadProgress */}
+                {/*                     ? 'bg-gray-400 cursor-not-allowed text-white' */}
+                {/*                     : 'bg-blue-600 text-white hover:bg-blue-700' */}
+                {/*             }`} */}
+                {/*         > */}
+                {/*             {shouldZip ? <Archive className="h-4 w-4"/> : <Download className="h-4 w-4"/>} */}
+                {/*             <span> */}
+                {/*                 {shouldZip */}
+                {/*                     ? `Download All as ZIP (${remainingDownloads} files)` */}
+                {/*                     : `Download All (${remainingDownloads} remaining)` */}
+                {/*             } */}
+                {/*             </span> */}
+                {/*         </button> */}
+                {/*         {renderProgress()} */}
+                {/*     </div> */}
+                {/* )} */}
             </div>
 
             <CardContent className="p-4 max-h-96 overflow-y-auto">
