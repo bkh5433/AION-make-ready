@@ -53,6 +53,13 @@ const fetchWithErrorHandling = async (url, options = {}) => {
     }
 };
 
+// Mock user for testing
+const MOCK_USER = {
+    email: 'test@example.com',
+    password: 'password123',
+    token: 'mock-jwt-token-12345'
+};
+
 export const api = {
     async searchProperties(searchTerm = '') {
         const params = new URLSearchParams();
@@ -146,5 +153,24 @@ export const api = {
             console.error('Health check failed:', error);
             return false;
         }
+    },
+
+    async login({email, password}) {
+        // Simulate network delay
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+        // Mock authentication
+        if (email === MOCK_USER.email && password === MOCK_USER.password) {
+            return {
+                token: MOCK_USER.token,
+                user: {
+                    email: MOCK_USER.email,
+                    name: 'Test User'
+                }
+            };
+        }
+
+        // Simulate authentication failure
+        throw new Error('Invalid email or password');
     }
 };
