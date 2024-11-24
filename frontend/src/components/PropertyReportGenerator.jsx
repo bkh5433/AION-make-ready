@@ -61,6 +61,38 @@ const getWorkOrderSeverity = (openWorkOrders, unitCount) => {
     }
 };
 
+// Add this helper function near the other helper functions at the top
+const getPendingSeverity = (pendingWorkOrders, unitCount) => {
+    // Calculate pending work orders per unit
+    const pendingPerUnit = pendingWorkOrders / unitCount;
+
+    if (pendingPerUnit >= 0.25) {
+        return {
+            color: 'text-orange-600 dark:text-orange-400',
+            bgColor: 'bg-orange-100 dark:bg-orange-900/30',
+            borderColor: 'border-orange-200 dark:border-orange-800',
+            severity: 'high',
+            message: 'High pending'
+        };
+    } else if (pendingPerUnit >= 0.1) {
+        return {
+            color: 'text-amber-600 dark:text-amber-400',
+            bgColor: 'bg-amber-100 dark:bg-amber-900/30',
+            borderColor: 'border-amber-200 dark:border-amber-800',
+            severity: 'medium',
+            message: 'Moderate'
+        };
+    } else {
+        return {
+            color: 'text-gray-600 dark:text-gray-400',
+            bgColor: 'bg-gray-100 dark:bg-gray-800',
+            borderColor: 'border-gray-200 dark:border-gray-700',
+            severity: 'low',
+            message: 'Normal'
+        };
+    }
+};
+
 // Update the TOOLTIP_CONTENT to be a function that takes property data
 const getTooltipContent = (property) => ({
     workOrderSeverity: {
@@ -228,7 +260,7 @@ const PropertyReportGenerator = () => {
     // console.log('Properties before filtering:', properties);
 
     // Debug logging
-    console.log('Raw properties before filtering:', properties);
+    // console.log('Raw properties before filtering:', properties);
 
     const filteredProperties = Array.isArray(properties)
         ? properties.filter(property => {
@@ -675,7 +707,7 @@ const PropertyReportGenerator = () => {
                                     }`}>
                                         {isDataUpToDate
                                             ? 'All property data is complete through yesterday and ready for report generation.'
-                                            : 'Some property data may be outdated. Reports may not reflect the most recent changes.'}
+                                            : 'Property data may be outdated. Reports may not reflect the most recent changes.'}
                                     </p>
                                     {periodStartDate && periodEndDate && (
                                         <div
@@ -784,26 +816,76 @@ const PropertyReportGenerator = () => {
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                                 {isLoading ? (
-                                    <tr>
-                                        <td colSpan="5" className="px-8 py-6">
-                                            <div className="space-y-3">
-                                                {[...Array(5)].map((_, i) => (
-                                                    <div
-                                                        key={i}
-                                                        className="flex items-center gap-4 animate-pulse"
-                                                        style={{animationDelay: `${i * 100}ms`}}
-                                                    >
-                                                        <div
-                                                            className="h-4 w-4 bg-gray-400 dark:bg-gray-700 rounded animate-shimmer"/>
-                                                        <div
-                                                            className="h-4 w-48 bg-gray-400 dark:bg-gray-700 rounded animate-shimmer"/>
-                                                        <div
-                                                            className="h-4 w-24 bg-gray-400 dark:bg-gray-700 rounded animate-shimmer"/>
+                                    // Updated skeleton loading rows
+                                    [...Array(5)].map((_, i) => (
+                                        <tr key={i}>
+                                            <td colSpan="5" className="px-8 py-8">
+                                                <div className="flex items-start gap-8 animate-pulse"
+                                                     style={{animationDelay: `${i * 100}ms`}}>
+                                                    {/* Checkbox skeleton */}
+                                                    <div className="h-5 w-5 bg-gray-200 dark:bg-gray-700 rounded"/>
+
+                                                    {/* Property info skeleton */}
+                                                    <div className="flex-1 space-y-3">
+                                                        <div className="space-y-2">
+                                                            <div
+                                                                className="h-5 w-64 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                            <div
+                                                                className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                        </div>
                                                     </div>
-                                                ))}
-                                            </div>
-                                        </td>
-                                    </tr>
+
+                                                    {/* Units skeleton */}
+                                                    <div className="w-24 space-y-2">
+                                                        <div className="h-5 w-16 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                        <div className="h-4 w-20 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                    </div>
+
+                                                    {/* Completion rate skeleton */}
+                                                    <div className="w-48 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <div
+                                                                className="h-2 w-24 bg-gray-200 dark:bg-gray-700 rounded-full"/>
+                                                            <div
+                                                                className="h-5 w-12 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                        </div>
+                                                        <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                    </div>
+
+                                                    {/* Work orders skeleton */}
+                                                    <div className="hidden md:block w-80 space-y-6">
+                                                        {/* Open work orders */}
+                                                        <div className="space-y-2">
+                                                            <div
+                                                                className="h-4 w-40 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                            <div className="flex items-center gap-2">
+                                                                <div
+                                                                    className="h-6 w-16 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                                <div
+                                                                    className="h-6 w-24 bg-gray-200 dark:bg-gray-700 rounded-full"/>
+                                                            </div>
+                                                            <div
+                                                                className="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                        </div>
+
+                                                        {/* Pending work orders */}
+                                                        <div className="space-y-2">
+                                                            <div
+                                                                className="h-4 w-48 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                            <div className="flex items-center gap-2">
+                                                                <div
+                                                                    className="h-6 w-16 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                                <div
+                                                                    className="h-6 w-24 bg-gray-200 dark:bg-gray-700 rounded-full"/>
+                                                            </div>
+                                                            <div
+                                                                className="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded"/>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
                                 ) : properties.length === 0 ? (
                                     <tr>
                                         <td colSpan="5" className="px-8 py-16 text-center">
@@ -916,8 +998,13 @@ const PropertyReportGenerator = () => {
                                                 </div>
                                             </td>
                                             <td className="hidden md:table-cell px-8 py-6 min-w-[320px]">
-                                                <div className="flex items-center gap-4">
+                                                <div className="flex flex-col gap-4">
+                                                    {/* Open Work Orders Section */}
                                                     <div className="flex flex-col">
+                                                        <span
+                                                            className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">
+                                                            OPEN WORK ORDERS (TOTAL)
+                                                        </span>
                                                         {(() => {
                                                             const severity = getWorkOrderSeverity(
                                                                 property.metrics.actual_open_work_orders,
@@ -927,7 +1014,7 @@ const PropertyReportGenerator = () => {
                                                                 <>
                                                                     <div className="flex items-center gap-2">
                                                                         <span
-                                                                            className={`font-medium ${severity.color}`}>
+                                                                            className={`text-lg font-medium ${severity.color}`}>
                                                                             {property.metrics.actual_open_work_orders}
                                                                         </span>
                                                                         <Tooltip
@@ -944,33 +1031,48 @@ const PropertyReportGenerator = () => {
                                                                         </span>
                                                                         </Tooltip>
                                                                     </div>
-                                                                    <div className="flex items-center gap-1 mt-1">
-                                                                        <span
-                                                                            className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                                                            {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit
-                                                                        </span>
-                                                                    </div>
+                                                                    <span
+                                                                        className="text-sm text-gray-500 dark:text-gray-400">
+                                                                        {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit
+                                                                    </span>
                                                                 </>
                                                             );
                                                         })()}
                                                     </div>
+
+                                                    {/* Pending Work Orders Section */}
                                                     <div className="flex flex-col">
-                                                        <div className="flex items-center gap-2">
-                                                            <span
-                                                                className="font-medium">{property.metrics.pending_work_orders}</span>
-                                                            <Tooltip content={getTooltipContent(property).pending}>
-                                                                <span
-                                                                    className="text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
-                                                                    Pending
-                                                                </span>
-                                                            </Tooltip>
-                                                        </div>
-                                                        <div className="flex items-center gap-1 mt-1">
-                                                            <span
-                                                                className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                                                {(property.metrics.pending_work_orders / property.unitCount).toFixed(2)} per unit
-                                                            </span>
-                                                        </div>
+                                                        <span
+                                                            className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">
+                                                            PENDING START (NOT YET ASSIGNED)
+                                                        </span>
+                                                        {(() => {
+                                                            const pendingSeverity = getPendingSeverity(
+                                                                property.metrics.pending_work_orders,
+                                                                property.unitCount
+                                                            );
+                                                            return (
+                                                                <>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span
+                                                                            className={`text-lg font-medium ${pendingSeverity.color}`}>
+                                                                            {property.metrics.pending_work_orders}
+                                                                        </span>
+                                                                        <Tooltip
+                                                                            content={getTooltipContent(property).pending}>
+                                                                            <span className={`text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap 
+                                                                                ${pendingSeverity.bgColor} ${pendingSeverity.color} border ${pendingSeverity.borderColor}`}>
+                                                                                {pendingSeverity.message}
+                                                                            </span>
+                                                                        </Tooltip>
+                                                                    </div>
+                                                                    <span
+                                                                        className="text-sm text-gray-500 dark:text-gray-400">
+                                                                        {(property.metrics.pending_work_orders / property.unitCount).toFixed(2)} per unit
+                                                                    </span>
+                                                                </>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </div>
                                             </td>
