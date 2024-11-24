@@ -9,6 +9,7 @@ import {ZipDownloader, createTimestampedZipName, formatFileSize} from '../lib/zi
 import useSessionManager from '../lib/session';
 import {getSessionId} from '../lib/session';
 import {Tooltip} from './ui/tooltip';
+import PropertyRow from './PropertyRow';
 
 // Add this helper function at the top of the file, outside the component
 const parseAPIDate = (dateStr) => {
@@ -94,22 +95,31 @@ const getPendingSeverity = (pendingWorkOrders, unitCount) => {
 };
 
 // Update the TOOLTIP_CONTENT to be a function that takes property data
-const getTooltipContent = (property) => ({
-    workOrderSeverity: {
-        high: `High volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`,
-        medium: `Moderate volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`,
-        low: `Normal volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`
-    },
-    completionRate: {
-        high: `Excellent: ${property.metrics.percentage_completed}% completion rate`,
-        medium: `Good: ${property.metrics.percentage_completed}% completion rate`,
-        low: `Needs attention: ${property.metrics.percentage_completed}% completion rate`
-    },
-    avgDays: `Average completion time per work order: ${property.metrics.average_days_to_complete.toFixed(1)} days`,
-    pending: `${property.metrics.pending_work_orders} work orders pending start (${(property.metrics.pending_work_orders / property.unitCount).toFixed(2)} per unit)`,
-    woPerUnit: `${property.metrics.actual_open_work_orders} open work orders across ${property.unitCount} units`,
-    cancelled: `${property.metrics.cancelled_work_orders} work orders cancelled (${((property.metrics.cancelled_work_orders / property.metrics.actual_open_work_orders) * 100).toFixed(1)}% of total)`
-});
+const getTooltipContent = (property) => {
+    // Calculate total work orders handled during the period
+    const totalWorkOrders = property.metrics.open_work_order_current + property.metrics.actual_open_work_orders_current;
+
+    return {
+        workOrderSeverity: {
+            high: `High volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`,
+            medium: `Moderate volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`,
+            low: `Normal volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`
+        },
+        completionRate: {
+            high: `Excellent: ${property.metrics.percentage_completed}% completion rate`,
+            medium: `Good: ${property.metrics.percentage_completed}% completion rate`,
+            low: `Needs attention: ${property.metrics.percentage_completed}% completion rate`
+        },
+        avgDays: `Average completion time per work order: ${property.metrics.average_days_to_complete.toFixed(1)} days`,
+        pending: `${property.metrics.pending_work_orders} work orders pending start (${(property.metrics.pending_work_orders / property.unitCount).toFixed(2)} per unit)`,
+        woPerUnit: `${property.metrics.actual_open_work_orders} open work orders across ${property.unitCount} units`,
+        cancelled: `${property.metrics.cancelled_work_orders} work orders cancelled (${
+            totalWorkOrders > 0
+                ? ((property.metrics.cancelled_work_orders / totalWorkOrders) * 100).toFixed(1)
+                : 0
+        }% of total)`
+    };
+};
 
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
@@ -898,185 +908,13 @@ const PropertyReportGenerator = () => {
                                     </tr>
                                 ) : (
                                     properties.map((property, index) => (
-                                        <tr
+                                        <PropertyRow
                                             key={property.PropertyKey}
-                                            className={`cursor-pointer transition-all duration-200 animate-slide-up
-                                                        ${selectedProperties.includes(property.PropertyKey)
-                                                ? 'bg-blue-50 dark:bg-blue-900/30'
-                                                : 'hover:bg-gray-50 dark:hover:bg-[#2d3748]'}`}
-                                            style={{animationDelay: `${index * 50}ms`}}
-                                            onClick={() => togglePropertySelection(property.PropertyKey)}
-                                        >
-                                            <td className="px-8 py-6">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedProperties.includes(property.PropertyKey)}
-                                                    onChange={() => togglePropertySelection(property.PropertyKey)}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className={`rounded border-gray-600 
-                                                                ${selectedProperties.includes(property.PropertyKey)
-                                                        ? 'bg-blue-900/50 border-blue-400'
-                                                        : 'bg-gray-700'} 
-                                                                text-blue-400 focus:ring-blue-500`}
-                                                />
-                                            </td>
-                                            <td className="px-8 py-6">
-                                                <div className="flex flex-col">
-                                                    <span
-                                                        className="font-medium text-gray-900 dark:text-gray-100">{property.PropertyName}</span>
-                                                    <div className="flex items-center gap-2 mt-1">
-                                                        <span
-                                                            className="text-sm text-gray-500 dark:text-gray-400">ID: {property.PropertyKey}</span>
-                                                        {property.metrics.average_days_to_complete > 5 && (
-                                                            <Tooltip content={getTooltipContent(property).avgDays}>
-                                                                <span
-                                                                    className="px-2 py-0.5 text-xs rounded-full bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200">
-                                                                    Avg {property.metrics.average_days_to_complete.toFixed(1)} days
-                                                                </span>
-                                                            </Tooltip>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-8 py-6">
-                                                <div className="flex flex-col">
-                                                    <span className="font-medium">{property.unitCount}</span>
-                                                    <Tooltip content={getTooltipContent(property).woPerUnit}>
-                                                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                            {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} WO/unit
-                                                        </span>
-                                                    </Tooltip>
-                                                </div>
-                                            </td>
-                                            <td className="px-8 py-6">
-                                                <Tooltip content={
-                                                    getTooltipContent(property).completionRate[
-                                                        property.metrics.percentage_completed >= 90
-                                                            ? 'high'
-                                                            : property.metrics.percentage_completed >= 75
-                                                                ? 'medium'
-                                                                : 'low'
-                                                        ]
-                                                }>
-                                                    <div className="flex items-center gap-2">
-                                                        <div
-                                                            className="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                                                            <div
-                                                                className={`h-2 rounded-full transform origin-left ${
-                                                                    property.metrics.percentage_completed >= 90 ? 'bg-green-500' :
-                                                                        property.metrics.percentage_completed >= 75 ? 'bg-yellow-500' :
-                                                                            'bg-red-500'
-                                                                }`}
-                                                                style={{
-                                                                    transform: 'scaleX(0)',
-                                                                    animation: 'progress-scale 0.6s ease-out forwards',
-                                                                    animationDelay: `${index * 50}ms`,
-                                                                    transformOrigin: 'left',
-                                                                    width: `${property.metrics.percentage_completed}%`
-                                                                }}
-                                                            />
-                                                        </div>
-                                                        <span className={`text-sm font-medium ${
-                                                            property.metrics.percentage_completed >= 90 ? 'text-green-600 dark:text-green-400' :
-                                                                property.metrics.percentage_completed >= 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                                                                    'text-red-600 dark:text-red-400'
-                                                        }`}>
-                                                            {property.metrics.percentage_completed.toFixed(1)}%
-                                                        </span>
-                                                    </div>
-                                                </Tooltip>
-                                                <div
-                                                    className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                                                    <span>{property.metrics.completed_work_orders} completed</span>
-                                                    {property.metrics.cancelled_work_orders > 0 && (
-                                                        <Tooltip content={getTooltipContent(property).cancelled}>
-                                                            <span className="text-red-500 dark:text-red-400">
-                                                                • {property.metrics.cancelled_work_orders} cancelled
-                                                            </span>
-                                                        </Tooltip>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="hidden md:table-cell px-8 py-6 min-w-[320px]">
-                                                <div className="flex flex-col gap-4">
-                                                    {/* Open Work Orders Section */}
-                                                    <div className="flex flex-col">
-                                                        <span
-                                                            className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">
-                                                            OPEN WORK ORDERS (TOTAL)
-                                                        </span>
-                                                        {(() => {
-                                                            const severity = getWorkOrderSeverity(
-                                                                property.metrics.actual_open_work_orders,
-                                                                property.unitCount
-                                                            );
-                                                            return (
-                                                                <>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span
-                                                                            className={`text-lg font-medium ${severity.color}`}>
-                                                                            {property.metrics.actual_open_work_orders}
-                                                                        </span>
-                                                                        <Tooltip
-                                                                            content={getTooltipContent(property).workOrderSeverity[severity.severity]}>
-                                                                            <span
-                                                                                className={`text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap ${
-                                                                                severity.severity === 'high'
-                                                                                    ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800'
-                                                                                    : severity.severity === 'medium'
-                                                                                        ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800'
-                                                                                        : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 border border-green-200 dark:border-green-800'
-                                                                            }`}>
-                                                                            {severity.message}
-                                                                        </span>
-                                                                        </Tooltip>
-                                                                    </div>
-                                                                    <span
-                                                                        className="text-sm text-gray-500 dark:text-gray-400">
-                                                                        {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit
-                                                                    </span>
-                                                                </>
-                                                            );
-                                                        })()}
-                                                    </div>
-
-                                                    {/* Pending Work Orders Section */}
-                                                    <div className="flex flex-col">
-                                                        <span
-                                                            className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">
-                                                            PENDING START (NOT YET ASSIGNED)
-                                                        </span>
-                                                        {(() => {
-                                                            const pendingSeverity = getPendingSeverity(
-                                                                property.metrics.pending_work_orders,
-                                                                property.unitCount
-                                                            );
-                                                            return (
-                                                                <>
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span
-                                                                            className={`text-lg font-medium ${pendingSeverity.color}`}>
-                                                                            {property.metrics.pending_work_orders}
-                                                                        </span>
-                                                                        <Tooltip
-                                                                            content={getTooltipContent(property).pending}>
-                                                                            <span className={`text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap 
-                                                                                ${pendingSeverity.bgColor} ${pendingSeverity.color} border ${pendingSeverity.borderColor}`}>
-                                                                                {pendingSeverity.message}
-                                                                            </span>
-                                                                        </Tooltip>
-                                                                    </div>
-                                                                    <span
-                                                                        className="text-sm text-gray-500 dark:text-gray-400">
-                                                                        {(property.metrics.pending_work_orders / property.unitCount).toFixed(2)} per unit
-                                                                    </span>
-                                                                </>
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                        </tr>
+                                            property={property}
+                                            onSelect={togglePropertySelection}
+                                            isSelected={selectedProperties.includes(property.PropertyKey)}
+                                            animationDelay={index * 50}
+                                        />
                                     ))
                                 )}
                             </tbody>
@@ -1120,7 +958,7 @@ const PropertyReportGenerator = () => {
             {showScrollTop && (
                 <button
                     onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}
-                    className="fixed bottom-4 left-4 p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg 
+                    className="fixed bottom-4 right-20 p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg 
                              hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-200
                              transform hover:scale-110"
                     aria-label="Scroll to top"
