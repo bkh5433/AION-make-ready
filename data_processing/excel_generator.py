@@ -177,7 +177,7 @@ class ExcelGeneratorService:
             return f"{month_ago.strftime('%m/%d/%y')} - {today.strftime('%m/%d/%y')}"
 
     @log_exceptions(logger)
-    def _parse_date(self, date_value: Union[str, datetime, None]) -> datetime:
+    def _parse_date(self, date_value: Union[str, datetime, None]) -> Optional[datetime]:
         """
         Parse date from various formats with improved error handling.
         Falls back to current date if parsing fails.
@@ -186,28 +186,35 @@ class ExcelGeneratorService:
 
         # Handle None or empty string
         if not date_value:
-            logger.warning("No date value provided, using current date")
-            return datetime.now()
+            return None
 
         # If already a datetime, return as is
         if isinstance(date_value, datetime):
             return date_value
 
         if not isinstance(date_value, str):
-            logger.warning(f"Unexpected date type: {type(date_value)}, using current date")
-            return datetime.now()
+            logger.warning(f"Unexpected date type: {type(date_value)}")
+            return None
 
         try:
-            # Try parsing standard API format
-            return datetime.strptime(date_value, '%Y-%m-%d')
-        except ValueError:
-            logger.debug("Failed to parse YYYY-MM-DD format, trying ISO format")
-            try:
-                # Try ISO format
-                return datetime.fromisoformat(date_value.replace('Z', '+00:00'))
-            except ValueError:
-                logger.warning(f"Failed to parse date: {date_value}, using current date")
-                return datetime.now()
+            # Try common formats
+            for fmt in [
+                '%a, %d %b %Y %H:%M:%S GMT',  # Fri, 22 Nov 2024 00:00:00 GMT
+                '%Y-%m-%dT%H:%M:%S.%f',  # ISO format with microseconds
+                '%Y-%m-%dT%H:%M:%S',  # ISO format
+                '%Y-%m-%d %H:%M:%S',  # Standard datetime
+                '%Y-%m-%d'  # Simple date
+            ]:
+                try:
+                    return datetime.strptime(date_value, fmt)
+                except ValueError:
+                    continue
+
+            logger.warning(f"Could not parse date: {date_value}")
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing date {date_value}: {str(e)}")
+            return None
 
     @log_exceptions(logger)
     def update_metrics(self, metrics: WorkOrderMetrics) -> None:
@@ -243,25 +250,19 @@ class ExcelGeneratorService:
         """Update cells with property data and handle all calculations"""
         logger.info(f"Updating property data for: {property_data.get('PropertyName', 'Unknown')}")
         try:
-            # Extract period dates directly from property data
-            period_start = self._parse_date(property_data.get('period_start_date'))
-            period_end = self._parse_date(property_data.get('period_end_date'))
+            # Extract period dates - they should already be datetime objects
+            period_start = property_data.get('period_start_date')
+            period_end = property_data.get('period_end_date')
 
+            # Fallback only if dates are somehow missing
             if not period_start or not period_end:
-                # Look for dates in metrics if not found at top level
-                metrics = property_data.get('metrics', {})
-                period_start = self._parse_date(metrics.get('period_start_date'))
-                period_end = self._parse_date(metrics.get('period_end_date'))
-
-            # If still no valid dates, look for LatestPostDate and calculate range
-            if not period_start or not period_end:
-                latest_post = self._parse_date(property_data.get('LatestPostDate'))
+                logger.warning("Missing period dates in property data, using latest_post_date")
+                latest_post = property_data.get('latest_post_date')
                 if latest_post:
                     period_end = latest_post
                     period_start = latest_post - timedelta(days=30)
                 else:
-                    # Final fallback - log warning and use current date range
-                    logger.warning("No valid dates found in property data, using default date range")
+                    logger.warning("No valid dates found, using default date range")
                     period_end = datetime.now()
                     period_start = period_end - timedelta(days=30)
 
@@ -444,18 +445,32 @@ def generate_multi_property_report(
                 # Update service to use current sheet
                 service.sheet = sheet
 
-                # Convert Property model to dict format
+                # Convert Property model to dict format with proper date handling
                 property_dict = {
                     'PropertyKey': property_data.property_key,
                     'PropertyName': property_data.property_name,
                     'TotalUnitCount': property_data.total_unit_count,
-                    'PeriodEndDate': property_data.period_end_date,
+                    'period_start_date': property_data.period_start_date,
+                    'period_end_date': property_data.period_end_date,
+                    'latest_post_date': property_data.latest_post_date,
                     'OpenWorkOrder_Current': property_data.metrics.open_work_orders if property_data.metrics else 0,
                     'ActualOpenWorkOrders_Current': property_data.metrics.actual_open_work_orders if property_data.metrics else 0,
                     'CompletedWorkOrder_Current': property_data.metrics.completed_work_orders if property_data.metrics else 0,
                     'CancelledWorkOrder_Current': property_data.metrics.cancelled_work_orders if property_data.metrics else 0,
                     'PendingWorkOrders': property_data.metrics.pending_work_orders if property_data.metrics else 0,
                 }
+
+                if property_data.metrics:
+                    property_dict.update({
+                        'metrics': {
+                            'period_start_date': property_data.period_start_date,
+                            'period_end_date': property_data.period_end_date,
+                            'actual_open_work_orders': property_data.metrics.actual_open_work_orders,
+                            'completed_work_orders': property_data.metrics.completed_work_orders,
+                            'cancelled_work_orders': property_data.metrics.cancelled_work_orders,
+                            'pending_work_orders': property_data.metrics.pending_work_orders,
+                        }
+                    })
 
                 # Update the sheet with property data
                 service.update_property_data(property_dict)

@@ -157,8 +157,8 @@ SELECT
         ELSE 0
     END AS PercentageCompletedThisPeriod,
 
-    FORMAT(@StartDate, 'yyyy-MM-dd') AS PeriodStartDate,
-    FORMAT(@CalendarDate, 'yyyy-MM-dd') AS PeriodEndDate,
+    @StartDate AS PeriodStartDate,
+    @CalendarDate AS PeriodEndDate,
     fo.PostDate AS LatestPostDate
 
 FROM WorkOrderMetrics wm

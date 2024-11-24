@@ -8,6 +8,32 @@ import FloatingDownloadButton from './FloatingDownloadButton';
 import {ZipDownloader, createTimestampedZipName, formatFileSize} from '../lib/zipUtility';
 import useSessionManager from '../lib/session';
 import {getSessionId} from '../lib/session';
+import {Tooltip} from './ui/tooltip';
+
+// Add this helper function at the top of the file, outside the component
+const parseAPIDate = (dateStr) => {
+    if (!dateStr) return null;
+
+    // First try parsing as ISO string
+    let date = new Date(dateStr);
+    if (!isNaN(date.getTime())) {
+        return date;
+    }
+
+    // Try parsing YYYY-MM-DD format
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return new Date(dateStr + 'T00:00:00Z');
+    }
+
+    // Try parsing the SQL format (YYYY-MM-DD HH:mm:ss)
+    const sqlMatch = dateStr.match(/^(\d{4}-\d{2}-\d{2})\s(\d{2}:\d{2}:\d{2})$/);
+    if (sqlMatch) {
+        return new Date(sqlMatch[1] + 'T' + sqlMatch[2] + 'Z');
+    }
+
+    console.warn('Unable to parse date:', dateStr);
+    return null;
+};
 
 const getWorkOrderSeverity = (openWorkOrders, unitCount) => {
     // Calculate work orders per unit
@@ -34,6 +60,24 @@ const getWorkOrderSeverity = (openWorkOrders, unitCount) => {
         };
     }
 };
+
+// Update the TOOLTIP_CONTENT to be a function that takes property data
+const getTooltipContent = (property) => ({
+    workOrderSeverity: {
+        high: `High volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`,
+        medium: `Moderate volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`,
+        low: `Normal volume: ${property.metrics.actual_open_work_orders} open work orders (${(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} per unit)`
+    },
+    completionRate: {
+        high: `Excellent: ${property.metrics.percentage_completed}% completion rate`,
+        medium: `Good: ${property.metrics.percentage_completed}% completion rate`,
+        low: `Needs attention: ${property.metrics.percentage_completed}% completion rate`
+    },
+    avgDays: `Average completion time per work order: ${property.metrics.average_days_to_complete.toFixed(1)} days`,
+    pending: `${property.metrics.pending_work_orders} work orders pending start (${(property.metrics.pending_work_orders / property.unitCount).toFixed(2)} per unit)`,
+    woPerUnit: `${property.metrics.actual_open_work_orders} open work orders across ${property.unitCount} units`,
+    cancelled: `${property.metrics.cancelled_work_orders} work orders cancelled (${((property.metrics.cancelled_work_orders / property.metrics.actual_open_work_orders) * 100).toFixed(1)}% of total)`
+});
 
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
@@ -87,15 +131,12 @@ const PropertyReportGenerator = () => {
             let attempts = 0;
             let success = false;
 
-
             while (!success) {
                 try {
                     setIsLoading(true);
                     setError(null);
 
                     const response = await api.searchProperties(searchTerm);
-
-
                     console.log('API Response:', response);
 
                     // Ensure we have the data array
@@ -139,20 +180,22 @@ const PropertyReportGenerator = () => {
                         console.log('No data available');
                     }
 
-                    // Map only the property_key and property_name
+                    // Map properties with all necessary fields including dates
                     const formattedProperties = response.data.map(property => ({
                         PropertyKey: property.property_key,
                         PropertyName: property.property_name,
                         metrics: property.metrics,
                         status: property.status,
-                        unitCount: property.total_unit_count
+                        unitCount: property.total_unit_count,
+                        period_start_date: property.period_start_date,
+                        period_end_date: property.period_end_date,
+                        latest_post_date: property.latest_post_date
                     }));
 
                     // Debug log the first few properties
                     console.log('First few formatted properties:', formattedProperties.slice(0, 3));
 
                     setTimeout(() => {
-
                         setProperties(formattedProperties);
                         setIsLoading(false);
 
@@ -164,17 +207,13 @@ const PropertyReportGenerator = () => {
 
                     success = true; // Mark as successful
                 } catch (error) {
-
                     console.error(`Error fetching properties (Attempt ${attempts}):`, error);
                     setError(error.message);
                     setProperties([]);
                     addNotification('error', `${error.message || 'Error fetching properties (Attempt ${attempts})' || 'Unknown error occurred'}`);
                     await new Promise(resolve => setTimeout(resolve, 10000)); // Add a 10-second timeout between retries
-
-
                 }
                 attempts++;
-
             }
         };
 
@@ -532,10 +571,39 @@ const PropertyReportGenerator = () => {
     useEffect(() => {
         if (properties.length > 0) {
             const firstProperty = properties[0];
-            setPeriodStartDate(new Date(firstProperty.period_start_date));
-            setPeriodEndDate(new Date(firstProperty.period_end_date));
+            console.log('First property dates:', {
+                start: firstProperty.period_start_date,
+                end: firstProperty.period_end_date
+            });
+
+            const startDate = parseAPIDate(firstProperty.period_start_date);
+            const endDate = parseAPIDate(firstProperty.period_end_date);
+
+            if (startDate && endDate) {
+                setPeriodStartDate(startDate);
+                setPeriodEndDate(endDate);
+                console.log('Period dates set:', {
+                    start: startDate.toLocaleDateString(),
+                    end: endDate.toLocaleDateString()
+                });
+            } else {
+                console.warn('Invalid dates received:', {
+                    start: firstProperty.period_start_date,
+                    end: firstProperty.period_end_date
+                });
+            }
         }
     }, [properties]);
+
+    // Update the date display in the JSX to handle potential null values
+    const formatDate = (date) => {
+        if (!date || isNaN(date.getTime())) return 'N/A';
+        return new Intl.DateTimeFormat('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        }).format(date);
+    };
 
     return (
         <div className="container mx-auto space-y-8 px-4 py-6 max-w-[90rem]">
@@ -592,7 +660,7 @@ const PropertyReportGenerator = () => {
                                             ? 'text-green-900 dark:text-green-100'
                                             : 'text-yellow-900 dark:text-yellow-100'
                                     }`}>
-                                        {isDataUpToDate ? 'Data is Current' : 'Data Status Warning'}
+                                        {isDataUpToDate ? 'Data is Current (as of yesterday)' : 'Data Status Warning'}
                                     </h3>
                                     <span
                                         className="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
@@ -606,15 +674,22 @@ const PropertyReportGenerator = () => {
                                             : 'text-yellow-700 dark:text-yellow-300'
                                     }`}>
                                         {isDataUpToDate
-                                            ? 'All property data is up to date and ready for report generation.'
+                                            ? 'All property data is complete through yesterday and ready for report generation.'
                                             : 'Some property data may be outdated. Reports may not reflect the most recent changes.'}
                                     </p>
                                     {periodStartDate && periodEndDate && (
                                         <div
                                             className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
                                             <div className="flex items-center gap-1">
-                                                <span className="font-medium">Period:</span>
-                                                <span>{periodStartDate.toLocaleDateString()} - {periodEndDate.toLocaleDateString()}</span>
+                                                <span className="font-medium">30-Day Period:</span>
+                                                <span>
+                                                    {formatDate(periodStartDate)}
+                                                    {' - '}
+                                                    {formatDate(periodEndDate)}
+                                                    <span className="ml-1 text-xs text-gray-500">
+                                                        (Data complete through end of day)
+                                                    </span>
+                                                </span>
                                             </div>
                                         </div>
                                     )}
@@ -771,10 +846,12 @@ const PropertyReportGenerator = () => {
                                                         <span
                                                             className="text-sm text-gray-500 dark:text-gray-400">ID: {property.PropertyKey}</span>
                                                         {property.metrics.average_days_to_complete > 5 && (
-                                                            <span
-                                                                className="px-2 py-0.5 text-xs rounded-full bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200">
-                                                                Avg {property.metrics.average_days_to_complete.toFixed(1)} days
-                                                            </span>
+                                                            <Tooltip content={getTooltipContent(property).avgDays}>
+                                                                <span
+                                                                    className="px-2 py-0.5 text-xs rounded-full bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200">
+                                                                    Avg {property.metrics.average_days_to_complete.toFixed(1)} days
+                                                                </span>
+                                                            </Tooltip>
                                                         )}
                                                     </div>
                                                 </div>
@@ -782,45 +859,59 @@ const PropertyReportGenerator = () => {
                                             <td className="px-8 py-6">
                                                 <div className="flex flex-col">
                                                     <span className="font-medium">{property.unitCount}</span>
-                                                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                        {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} WO/unit
-                                                    </span>
+                                                    <Tooltip content={getTooltipContent(property).woPerUnit}>
+                                                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                            {(property.metrics.actual_open_work_orders / property.unitCount).toFixed(2)} WO/unit
+                                                        </span>
+                                                    </Tooltip>
                                                 </div>
                                             </td>
                                             <td className="px-8 py-6">
-                                                <div className="flex items-center gap-2">
-                                                    <div
-                                                        className="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                                                <Tooltip content={
+                                                    getTooltipContent(property).completionRate[
+                                                        property.metrics.percentage_completed >= 90
+                                                            ? 'high'
+                                                            : property.metrics.percentage_completed >= 75
+                                                                ? 'medium'
+                                                                : 'low'
+                                                        ]
+                                                }>
+                                                    <div className="flex items-center gap-2">
                                                         <div
-                                                            className={`h-2 rounded-full transform origin-left ${
-                                                                property.metrics.percentage_completed >= 90 ? 'bg-green-500' :
-                                                                    property.metrics.percentage_completed >= 75 ? 'bg-yellow-500' :
-                                                                        'bg-red-500'
-                                                            }`}
-                                                            style={{
-                                                                transform: 'scaleX(0)',
-                                                                animation: 'progress-scale 0.6s ease-out forwards',
-                                                                animationDelay: `${index * 50}ms`,
-                                                                transformOrigin: 'left',
-                                                                width: `${property.metrics.percentage_completed}%`
-                                                            }}
-                                                        />
+                                                            className="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                                                            <div
+                                                                className={`h-2 rounded-full transform origin-left ${
+                                                                    property.metrics.percentage_completed >= 90 ? 'bg-green-500' :
+                                                                        property.metrics.percentage_completed >= 75 ? 'bg-yellow-500' :
+                                                                            'bg-red-500'
+                                                                }`}
+                                                                style={{
+                                                                    transform: 'scaleX(0)',
+                                                                    animation: 'progress-scale 0.6s ease-out forwards',
+                                                                    animationDelay: `${index * 50}ms`,
+                                                                    transformOrigin: 'left',
+                                                                    width: `${property.metrics.percentage_completed}%`
+                                                                }}
+                                                            />
+                                                        </div>
+                                                        <span className={`text-sm font-medium ${
+                                                            property.metrics.percentage_completed >= 90 ? 'text-green-600 dark:text-green-400' :
+                                                                property.metrics.percentage_completed >= 75 ? 'text-yellow-600 dark:text-yellow-400' :
+                                                                    'text-red-600 dark:text-red-400'
+                                                        }`}>
+                                                            {property.metrics.percentage_completed.toFixed(1)}%
+                                                        </span>
                                                     </div>
-                                                    <span className={`text-sm font-medium ${
-                                                        property.metrics.percentage_completed >= 90 ? 'text-green-600 dark:text-green-400' :
-                                                            property.metrics.percentage_completed >= 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                                                                'text-red-600 dark:text-red-400'
-                                                    }`}>
-                                                        {property.metrics.percentage_completed.toFixed(1)}%
-                                                    </span>
-                                                </div>
+                                                </Tooltip>
                                                 <div
                                                     className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                                                     <span>{property.metrics.completed_work_orders} completed</span>
                                                     {property.metrics.cancelled_work_orders > 0 && (
-                                                        <span className="text-red-500 dark:text-red-400">
-                                                            • {property.metrics.cancelled_work_orders} cancelled
-                                                        </span>
+                                                        <Tooltip content={getTooltipContent(property).cancelled}>
+                                                            <span className="text-red-500 dark:text-red-400">
+                                                                • {property.metrics.cancelled_work_orders} cancelled
+                                                            </span>
+                                                        </Tooltip>
                                                     )}
                                                 </div>
                                             </td>
@@ -839,8 +930,10 @@ const PropertyReportGenerator = () => {
                                                                             className={`font-medium ${severity.color}`}>
                                                                             {property.metrics.actual_open_work_orders}
                                                                         </span>
-                                                                        <span
-                                                                            className={`text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap ${
+                                                                        <Tooltip
+                                                                            content={getTooltipContent(property).workOrderSeverity[severity.severity]}>
+                                                                            <span
+                                                                                className={`text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap ${
                                                                                 severity.severity === 'high'
                                                                                     ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 border border-red-200 dark:border-red-800'
                                                                                     : severity.severity === 'medium'
@@ -849,6 +942,7 @@ const PropertyReportGenerator = () => {
                                                                             }`}>
                                                                             {severity.message}
                                                                         </span>
+                                                                        </Tooltip>
                                                                     </div>
                                                                     <div className="flex items-center gap-1 mt-1">
                                                                         <span
@@ -864,10 +958,12 @@ const PropertyReportGenerator = () => {
                                                         <div className="flex items-center gap-2">
                                                             <span
                                                                 className="font-medium">{property.metrics.pending_work_orders}</span>
-                                                            <span
-                                                                className="text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
-                                                                Pending
-                                                            </span>
+                                                            <Tooltip content={getTooltipContent(property).pending}>
+                                                                <span
+                                                                    className="text-xs inline-flex items-center px-3 py-1 rounded-full font-medium whitespace-nowrap bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+                                                                    Pending
+                                                                </span>
+                                                            </Tooltip>
                                                         </div>
                                                         <div className="flex items-center gap-1 mt-1">
                                                             <span
