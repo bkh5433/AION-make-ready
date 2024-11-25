@@ -350,7 +350,7 @@ const PropertyReportGenerator = () => {
         setDownloadManagerState(prev => ({
             ...prev,
             isVisible: false,
-            showFloatingButton: true // Keep showFloatingButton true when hiding manager
+            showFloatingButton: prev.files.some(f => f.downloaded)
         }));
     };
 
@@ -369,28 +369,31 @@ const PropertyReportGenerator = () => {
             // Build the correct file path
             const fullPath = `${outputDirectory}/${normalizedPath}`;
 
-            // Log for debugging
-            console.log('Processing file:', {
-                original: file,
-                normalized: normalizedPath,
-                fullPath: fullPath
-            });
-
             return {
                 name: normalizedPath.split('/').pop(), // Get just the filename
                 path: fullPath,
                 downloaded: false,
                 downloading: false,
-                failed: false
+                failed: false,
+                timestamp: new Date().toISOString(), // Add timestamp for sorting
+                outputDirectory // Store the output directory
             };
         });
 
-        console.log('Setting up download manager with files:', processedFiles);
+        console.log('Adding new files to download manager:', processedFiles);
 
-        setDownloadManagerState({
-            isVisible: true,
-            showFloatingButton: true, // Always set to true when files are available
-            files: processedFiles
+        // Merge new files with existing files, avoiding duplicates by path
+        setDownloadManagerState(prev => {
+            const existingPaths = new Set(prev.files.map(f => f.path));
+            const newFiles = processedFiles.filter(f => !existingPaths.has(f.path));
+
+            return {
+                isVisible: true,
+                showFloatingButton: true,
+                files: [...prev.files, ...newFiles].sort((a, b) =>
+                    new Date(b.timestamp) - new Date(a.timestamp)
+                )
+            };
         });
     };
 
@@ -398,8 +401,7 @@ const PropertyReportGenerator = () => {
     const handleFloatingButtonClick = () => {
         setDownloadManagerState(prev => ({
             ...prev,
-            isVisible: true,
-            showFloatingButton: true // Keep showFloatingButton true
+            isVisible: true
         }));
     };
 
