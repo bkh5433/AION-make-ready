@@ -2,41 +2,45 @@ import {getSessionId, setSessionId, clearSessionId} from './session';
 
 const API_BASE_URL = 'http://127.0.0.1:5000/api';
 
+export const isTokenExpired = () => {
+    const expiresAt = localStorage.getItem('tokenExpiresAt');
+    if (!expiresAt) return true;
+
+    const expirationDate = new Date(expiresAt);
+    const now = new Date();
+
+    return now >= expirationDate;
+};
+
 // Common fetch wrapper with error handling and session management
 const fetchWithErrorHandling = async (url, options = {}) => {
     try {
-        const sessionId = getSessionId();
-        console.debug('Current session ID:', sessionId);
+        if (isTokenExpired()) {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('tokenExpiresAt');
+            localStorage.removeItem('tokenExpiresIn');
+            window.location.href = '/login';
+            throw new Error('Session expired');
+        }
 
-        // Don't set empty cookies
+        const token = localStorage.getItem('authToken');
         const headers = {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            ...(sessionId && {'Cookie': `session_id=${sessionId}`}),
+            ...(token && {'Authorization': `Bearer ${token}`}),
             ...options.headers
         };
 
         const response = await fetch(url, {
             ...options,
-            credentials: 'include', // Important for cookie handling
+            credentials: 'include',
             headers
         });
 
-        // Handle session cookie from response
-        const setCookieHeader = response.headers.get('Set-Cookie');
-        if (setCookieHeader) {
-            const sessionMatch = setCookieHeader.match(/session_id=([^;]+)/);
-            if (sessionMatch) {
-                const newSessionId = sessionMatch[1];
-                setSessionId(newSessionId);
-                console.debug('New session ID set:', newSessionId);
-            }
-        }
-
         if (!response.ok) {
             if (response.status === 401) {
-                // Clear session and throw specific error
-                clearSessionId();
+                localStorage.removeItem('authToken');
+                window.location.href = '/login';
                 throw new Error('Session expired or invalid');
             }
             const errorData = await response.json().catch(() => null);
@@ -51,13 +55,6 @@ const fetchWithErrorHandling = async (url, options = {}) => {
         console.error('API Error:', error);
         throw error;
     }
-};
-
-// Mock user for testing
-const MOCK_USER = {
-    email: 'test@example.com',
-    password: 'password123',
-    token: 'mock-jwt-token-12345'
 };
 
 export const api = {
@@ -155,22 +152,69 @@ export const api = {
         }
     },
 
-    async login({email, password}) {
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 800));
+    async login({username, password}) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({username, password})
+            });
 
-        // Mock authentication
-        if (email === MOCK_USER.email && password === MOCK_USER.password) {
-            return {
-                token: MOCK_USER.token,
-                user: {
-                    email: MOCK_USER.email,
-                    name: 'Test User'
-                }
-            };
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Login failed');
+            }
+
+            const data = await response.json();
+
+            // Store token and expiration
+            localStorage.setItem('authToken', data.token);
+            localStorage.setItem('tokenExpiresAt', data.expires_at);
+            localStorage.setItem('tokenExpiresIn', data.expires_in);
+
+            return data;
+        } catch (error) {
+            console.error('Login error:', error);
+            throw error;
         }
+    },
 
-        // Simulate authentication failure
-        throw new Error('Invalid email or password');
+    async register({username, password, name, role = 'user'}) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/auth/register`,
+            {
+                method: 'POST',
+                body: JSON.stringify({username, password, name, role})
+            }
+        );
+        return response.json();
+    },
+
+    async getCurrentUser() {
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/auth/me`);
+        return response.json();
+    },
+
+    logout() {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+    },
+
+    async listUsers() {
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/users`);
+        return response.json();
+    },
+
+    async updateUserRole(email, role) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/users/${email}/role`,
+            {
+                method: 'PUT',
+                body: JSON.stringify({role})
+            }
+        );
+        return response.json();
     }
 };

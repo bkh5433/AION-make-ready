@@ -19,13 +19,14 @@ from session import get_session_path, cleanup_session, run_session_cleanup, gene
     setup_session_directory
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
+from auth_middleware import AuthMiddleware, require_auth, require_role
 
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
         "origins": ["http://localhost:5173"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie"],
+        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie", "Authorization"],
         "supports_credentials": True,
         "expose_headers": ["Set-Cookie"],
         "max_age": 3600
@@ -47,6 +48,8 @@ cache_config = CacheConfig(
 )
 
 cache = ConcurrentSQLCache(cache_config)
+
+auth = AuthMiddleware()
 
 
 def catch_exceptions(func):
@@ -96,6 +99,7 @@ def run_async(coro):
 
 
 @app.route('/api/data', methods=['GET'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def get_make_ready_data():
@@ -139,6 +143,7 @@ def health_check():
 
 
 @app.route('/api/properties/search', methods=['GET'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def search_properties():
@@ -591,6 +596,168 @@ def schedule_data_refresh():
 
 app.scheduler = schedule_data_refresh()
 
+
+@app.route('/api/auth/login', methods=['POST'])
+@catch_exceptions
+def login():
+    """Login endpoint"""
+    try:
+        data = request.get_json()
+        logger.debug(f"Login attempt with data: {data}")  # Add debug logging
+
+        if not data:
+            logger.warning("Login attempt with no data")
+            return jsonify({
+                'success': False,
+                'message': 'No data provided'
+            }), 400
+
+        username = data.get('username')
+        password = data.get('password')
+
+        logger.debug(f"Login attempt for username: {username}")  # Add debug logging
+
+        if not username or not password:
+            logger.warning(
+                f"Login attempt missing credentials - username: {bool(username)}, password: {bool(password)}")
+            return jsonify({
+                'success': False,
+                'message': 'Username and password required'
+            }), 400
+
+        result = auth.authenticate(username, password)
+        if result:
+            logger.info(f"Successful login for user: {username}")  # Add success logging
+            return jsonify({
+                'success': True,
+                'message': 'Login successful',
+                **result
+            }), 200
+
+        logger.warning(f"Failed login attempt for user: {username}")  # Add failure logging
+        return jsonify({
+            'success': False,
+            'message': 'Invalid credentials'
+        }), 401
+
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred during login'
+        }), 500
+
+
+@app.route('/api/auth/register', methods=['POST'])
+@catch_exceptions
+def register():
+    """Register a new user"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'No data provided'
+            }), 400
+
+        username = data.get('username')
+        password = data.get('password')
+        name = data.get('name')
+        role = data.get('role', 'user')  # Default to 'user' if not specified
+
+        if not all([username, password, name]):
+            return jsonify({
+                'success': False,
+                'message': 'Username, password, and name are required'
+            }), 400
+
+        if role not in ['user', 'admin']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid role'
+            }), 400
+
+        user_data = auth.create_user(username, password, name, role)
+
+        return jsonify({
+            'success': True,
+            'message': 'User created successfully',
+            'user': user_data
+        }), 201
+
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 400
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred during registration'
+        }), 500
+
+
+@app.route('/api/auth/me', methods=['GET'])
+@require_auth
+def get_current_user():
+    """Get current user information"""
+    return jsonify({
+        'user': request.user
+    })
+
+
+@app.route('/api/users', methods=['GET'])
+@require_auth
+@require_role('admin')
+def list_users():
+    """List all users (admin only)"""
+    try:
+        users = auth.users_ref.stream()
+        user_list = [{
+            'email': user.get('email'),
+            'name': user.get('name'),
+            'role': user.get('role'),
+            'lastLogin': user.get('lastLogin'),
+            'isActive': user.get('isActive')
+        } for user in (doc.to_dict() for doc in users)]
+
+        return jsonify({
+            'users': user_list
+        })
+    except Exception as e:
+        return jsonify({
+            'message': f'Error fetching users: {str(e)}'
+        }), 500
+
+
+@app.route('/api/users/<email>/role', methods=['PUT'])
+@require_auth
+@require_role('admin')
+def update_user_role(email):
+    """Update user role (admin only)"""
+    data = request.get_json()
+    new_role = data.get('role')
+
+    if not new_role:
+        return jsonify({
+            'message': 'Role is required'
+        }), 400
+
+    if new_role not in ['user', 'admin']:
+        return jsonify({
+            'message': 'Invalid role'
+        }), 400
+
+    success = auth.update_user_role(email, new_role)
+    if success:
+        return jsonify({
+            'message': f'Role updated for {email}'
+        })
+
+    return jsonify({
+        'message': 'User not found'
+    }), 404
 
 if __name__ == '__main__':
     logger.info("Starting application and updating initial cache.")

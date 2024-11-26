@@ -12,7 +12,7 @@ const LoginPage = () => {
     const [error, setError] = useState(null);
     const [notifications, setNotifications] = useState([]);
     const [formData, setFormData] = useState({
-        email: '',
+        username: '',
         password: ''
     });
 
@@ -119,10 +119,10 @@ const LoginPage = () => {
                                 <Mail
                                     className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground"/>
                                 <input
-                                    type="email"
-                                    name="email"
-                                    placeholder="name@example.com"
-                                    value={formData.email}
+                                    type="text"
+                                    name="username"
+                                    placeholder="Enter your username"
+                                    value={formData.username}
                                     onChange={handleInputChange}
                                     disabled={isLoading}
                                     className="pl-10 pr-4 py-3 w-full rounded-lg bg-input 
