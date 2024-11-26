@@ -15,9 +15,7 @@ logger = log_config.get_logger('property_search')
 
 class PropertySearch:
     def __init__(self, cache_data: List[Dict]):
-        self.properties = []
-        self.data_issues = []  # Track problematic data
-        self._convert_to_models(cache_data)
+        self.properties = self._convert_to_models(cache_data)
         logger.info(f"Initialized PropertySearch with {len(self.properties)} properties")
 
     def _parse_date(self, date_value: Union[str, datetime, date]) -> datetime:
@@ -49,8 +47,9 @@ class PropertySearch:
                     # Try parsing date-only format
                     return datetime.strptime(date_value, '%Y-%m-%d')
 
-    def _convert_to_models(self, cache_data: List[Dict]) -> None:
+    def _convert_to_models(self, cache_data: List[Dict]) -> List[Property]:
         """Convert raw cache data to Property models with comprehensive error handling"""
+        properties = []
         success_count = 0
 
         for data in cache_data:
@@ -61,7 +60,7 @@ class PropertySearch:
                 metrics_data = {
                     'open_work_orders': data.get('OpenWorkOrder_Current', 0),
                     'actual_open_work_orders': data.get('ActualOpenWorkOrders_Current', 0),
-                    'new_work_orders': data.get('NewWorkOrders_Current', 0),
+                    # 'new_work_orders': data.get('NewWorkOrders_Current', 0),
                     'completed_work_orders': data.get('CompletedWorkOrder_Current', 0),
                     'cancelled_work_orders': data.get('CancelledWorkOrder_Current', 0),
                     'pending_work_orders': data.get('PendingWorkOrders', 0),
@@ -90,34 +89,23 @@ class PropertySearch:
                     period_end_date=period_end
                 )
 
-                self.properties.append(property)
+                properties.append(property)
                 success_count += 1
 
             except ValidationError as e:
-                error_detail = {
-                    'property_key': data.get('PropertyKey', 'Unknown'),
-                    'property_name': data.get('PropertyName', 'Unknown'),
-                    'error_type': 'validation_error',
-                    'message': str(e)
-                }
-                self.data_issues.append(error_detail)
-                logger.error(f"Validation error for property {error_detail['property_name']}: {str(e)}")
+                logger.error(f"Error converting property {data.get('PropertyKey')} data: {str(e)}")
+                logger.error(f"Problematic data: {data}")
                 continue
             except Exception as e:
-                error_detail = {
-                    'property_key': data.get('PropertyKey', 'Unknown'),
-                    'property_name': data.get('PropertyName', 'Unknown'),
-                    'error_type': 'processing_error',
-                    'message': str(e)
-                }
-                self.data_issues.append(error_detail)
-                logger.error(f"Processing error for property {error_detail['property_name']}: {str(e)}")
+                logger.error(f"Unexpected error converting property {data.get('PropertyKey')}: {str(e)}")
                 continue
 
         logger.info(f"Completed conversion - {success_count} properties processed")
 
-        if not self.properties:
+        if not properties:
             logger.warning("No properties were successfully converted")
+
+        return properties
 
     def search_properties(self,
                           search_term: Optional[str] = None,
@@ -191,6 +179,5 @@ class PropertySearch:
             count=len(properties),
             data=properties,
             last_updated=last_updated or datetime.now(),
-            period_info=period_info,
-            data_issues=self.data_issues if self.data_issues else None  # Include data issues in response
+            period_info=period_info
         )

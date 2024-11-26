@@ -8,9 +8,8 @@ class PropertySearchResult(BaseModel):
     """Model for property search results"""
     count: int
     data: List[Property]
-    last_updated: Optional[datetime] = None
-    period_info: Optional[Dict] = None
-    data_issues: Optional[List[Dict]] = None
+    last_updated: datetime
+    period_info: Optional[Dict[str, datetime]] = None
 
     model_config = ConfigDict(frozen=True)
 

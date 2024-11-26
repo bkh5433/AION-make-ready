@@ -9,33 +9,25 @@ export const AuthProvider = ({children}) => {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        let authCheckPromise = null;
-
-        const checkAuth = async () => {
+        const loadUser = async () => {
             try {
+                // Only attempt to load user if we have a token
                 const token = localStorage.getItem('authToken');
                 if (token) {
-                    if (!authCheckPromise) {
-                        authCheckPromise = api.getCurrentUser();
-                    }
-                    const response = await authCheckPromise;
-                    setUser(response.user);
+                    const {user} = await api.getCurrentUser();
+                    setUser(user);
                 }
-            } catch (error) {
-                console.error('Auth check failed:', error);
+            } catch (err) {
+                console.error('Error loading user:', err);
+                setError(err.message);
+                // Clear invalid token
                 localStorage.removeItem('authToken');
-                setUser(null);
             } finally {
                 setLoading(false);
             }
         };
 
-        checkAuth();
-
-        // Cleanup function
-        return () => {
-            authCheckPromise = null;
-        };
+        loadUser();
     }, []);
 
     const login = async (credentials) => {

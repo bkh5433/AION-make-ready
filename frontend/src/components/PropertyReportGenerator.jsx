@@ -23,7 +23,6 @@ import {Tooltip} from './ui/tooltip';
 import PropertyRow from './PropertyRow';
 import {useAuth} from '../lib/auth';
 import DataFreshnessIndicator from './DataFreshnessIndicator';
-import {debounce} from '../lib/utils';
 
 const parseAPIDate = (dateStr) => {
     if (!dateStr) return null;
@@ -166,38 +165,43 @@ const PropertyReportGenerator = () => {
     const {user} = useAuth();
     const [isRefreshing, setIsRefreshing] = useState(false);
 
-    const [prevSearchTerm, setPrevSearchTerm] = useState('');
+    useEffect(() => {
+        // Handle dark mode class
+        if (isDarkMode) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    }, [isDarkMode]);
 
-    const [dataIssues, setDataIssues] = useState([]);
-
-    // Create a memoized debounced search function
-    const debouncedSearch = React.useCallback(
-        debounce(async (term) => {
-            // Only check for duplicate searches if there is a search term
-            if (term.length > 0 && term === prevSearchTerm) {
-                return;
+    useEffect(() => {
+        const handleKeyPress = (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                searchInputRef.current?.focus();
             }
+        };
 
+        document.addEventListener('keydown', handleKeyPress);
+        return () => document.removeEventListener('keydown', handleKeyPress);
+    }, []);
+
+    useEffect(() => {
+        const fetchData = async () => {
             let attempts = 0;
-            const MAX_ATTEMPTS = 5;
+            let success = false;
 
-            while (attempts < MAX_ATTEMPTS) {
+            while (!success) {
                 try {
                     setIsLoading(true);
                     setError(null);
 
-                    const response = await api.searchProperties(term);
+                    const response = await api.searchProperties(searchTerm);
                     console.log('API Response:', response);
 
+                    // Ensure we have the data array
                     if (!Array.isArray(response.data)) {
                         throw new Error('Invalid response format');
-                    }
-
-                    // Handle data issues if present
-                    if (response.data_issues && response.data_issues.length > 0) {
-                        setDataIssues(response.data_issues);
-                    } else {
-                        setDataIssues([]);
                     }
 
                     // Check data age
@@ -248,52 +252,37 @@ const PropertyReportGenerator = () => {
                         latest_post_date: property.latest_post_date
                     }));
 
-                    // Only show success notification on first load
-                    if (isFirstLoad) {
-                        setTimeout(() => {
-                            setProperties(formattedProperties);
-                            setIsLoading(false);
+                    // Debug log the first few properties
+                    console.log('First few formatted properties:', formattedProperties.slice(0, 3));
+
+                    setTimeout(() => {
+                        setProperties(formattedProperties);
+                        setIsLoading(false);
+
+                        if (isFirstLoad) {
                             addNotification('success', 'Successfully fetched properties');
                             setIsFirstLoad(false);
-                        }, 1000);
-                    } else {
-                        // Regular update without notification
-                        setTimeout(() => {
-                            setProperties(formattedProperties);
-                            setIsLoading(false);
-                        }, 1000);
-                    }
+                        }
+                    }, 1000);
 
-                    setPrevSearchTerm(term);
-                    break; // Exit the loop on success
-
+                    success = true; // Mark as successful
                 } catch (error) {
-                    console.error(`Error fetching properties (Attempt ${attempts + 1}):`, error);
-                    attempts++;
-
-                    if (attempts === MAX_ATTEMPTS) {
-                        setError('Unable to connect to the server. Please refresh the page and try again.');
-                        setProperties([]);
-                        setIsLoading(false);
-                        addNotification('error', 'Connection failed. Please refresh the page and try again.');
-                        break;
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+                    console.error(`Error fetching properties (Attempt ${attempts}):`, error);
+                    setError(error.message);
+                    setProperties([]);
+                    addNotification('error', `${error.message || 'Error fetching properties (Attempt ${attempts})' || 'Unknown error occurred'}`);
+                    await new Promise(resolve => setTimeout(resolve, 10000)); // Add a 10-second timeout between retries
                 }
+                attempts++;
             }
-        }, 800),
-        []
-    );
+        };
 
-    // Update the search effect
-    useEffect(() => {
-        // Always perform the search, even with empty search term
-        debouncedSearch(searchTerm);
+        const delayDebounceFn = setTimeout(() => {
+            fetchData();
+        }, 500);
 
-        // Cleanup function to cancel pending searches
-        return () => debouncedSearch.cancel();
-    }, [searchTerm, debouncedSearch]);
+        return () => clearTimeout(delayDebounceFn);
+    }, [searchTerm]);
 
     // Debug properties before filtering
     // console.log('Properties before filtering:', properties);
@@ -709,42 +698,6 @@ const PropertyReportGenerator = () => {
         }
     };
 
-    // Update the DataIssuesAlert component to be more subtle
-    const DataIssuesAlert = () => {
-        if (dataIssues.length === 0) return null;
-
-        return (
-            <div className="px-8 py-2">
-                <details className="text-sm group">
-                    <summary
-                        className="flex items-center gap-2 cursor-pointer text-yellow-600 dark:text-yellow-500 hover:text-yellow-700 dark:hover:text-yellow-400">
-                        <AlertTriangle className="h-4 w-4"/>
-                        <span className="font-medium">
-                            {dataIssues.length} {dataIssues.length === 1 ? 'property has' : 'properties have'} data quality issues and cannot be displayed
-                        </span>
-                        <div className="ml-auto transform transition-transform duration-200 group-open:rotate-180">
-                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
-                            </svg>
-                        </div>
-                    </summary>
-                    <div className="mt-2 pl-6 text-sm text-gray-600 dark:text-gray-400">
-                        <ul className="space-y-1">
-                            {dataIssues.map((issue, index) => (
-                                <li key={index} className="flex items-start gap-2">
-                                    <span className="text-yellow-500 dark:text-yellow-400">•</span>
-                                    <span>
-                                        <span className="font-medium">{issue.property_name}</span>: {issue.message}
-                                    </span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                </details>
-            </div>
-        );
-    };
-
     return (
         <div className="container mx-auto space-y-8 px-4 py-6 max-w-[90rem]">
             {/* Notifications Container */}
@@ -794,20 +747,12 @@ const PropertyReportGenerator = () => {
                         <div className="h-8"/> // This maintains top padding
                     )}
 
-                    {/* Move DataIssuesAlert here, after DataFreshnessIndicator */}
-                    <DataIssuesAlert/>
-
                     {/* Search and Generate Section */}
-                    <div className="px-8 pb-8">
+                    <div className="px-8 pb-8 pt-8"> {/* Add pt-8 for consistent top padding */}
                         <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
                             <div className="relative flex-grow animate-slide-up">
                                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    {isLoading ? (
-                                        <div
-                                            className="animate-spin h-5 w-5 border-2 border-gray-500 border-t-transparent rounded-full"/>
-                                    ) : (
-                                        <Search className="h-5 w-5 text-gray-400"/>
-                                    )}
+                                    <Search className="h-5 w-5 text-gray-400"/>
                                 </div>
                                 <input
                                     ref={searchInputRef}

@@ -163,10 +163,12 @@ def search_properties():
         data, is_stale = run_async(cache.get_data())
 
         if not data:
+            # Initial cache population
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
             data, is_stale = run_async(cache.get_data())
         elif is_stale:
+            # Trigger background refresh if data is stale
             logger.info("Data is stale, triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
@@ -174,6 +176,15 @@ def search_properties():
             )
             thread.daemon = True
             thread.start()
+
+        logger.debug(
+            f"Cache status - size: {len(data) if data else 0}, is_stale: {is_stale}")
+
+        # Calculate period dates
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)  # Default 30-day period
+
+        logger.debug(f"Period dates - start: {start_date}, end: {end_date}")
 
         # Initialize searcher
         logger.info("Initializing PropertySearch")
@@ -183,29 +194,19 @@ def search_properties():
         logger.info("Executing search")
         result = searcher.get_search_result(
             search_term=search_term,
-            last_updated=cache._last_refresh,
+            last_updated=cache._last_refresh,  # Use the cache's last refresh time
             period_info={
-                'start_date': datetime.now() - timedelta(days=30),
-                'end_date': datetime.now()
+                'start_date': start_date,
+                'end_date': end_date
             }
         )
 
         logger.info(f"Search complete - found {result.count} properties")
 
-        # Convert Pydantic models to dict
-        response_data = {
-            'count': result.count,
-            'data': [property.model_dump() for property in result.data],  # Convert Property objects to dict
-            'is_stale': is_stale,
-            'last_updated': result.last_updated.isoformat() if result.last_updated else None,
-            'period_info': {
-                'start_date': result.period_info[
-                    'start_date'].isoformat() if result.period_info and result.period_info.get('start_date') else None,
-                'end_date': result.period_info['end_date'].isoformat() if result.period_info and result.period_info.get(
-                    'end_date') else None
-            } if result.period_info else None,
-            'data_issues': result.data_issues
-        }
+        # Convert to response and include staleness
+        logger.debug("Converting result to JSON")
+        response_data = result.model_dump()
+        response_data['is_stale'] = is_stale
 
         # Add cache statistics if needed
         if include_metrics:
@@ -288,19 +289,11 @@ def generate_report():
             include_analytics=True
         )
 
-        # Check for data issues
-        if searcher.data_issues:
-            logger.warning(f"Found {len(searcher.data_issues)} data issues during report generation")
-            warnings = [f"Data quality issues found in {len(searcher.data_issues)} properties"]
-        else:
-            warnings = []
-
         if not properties:
-            logger.warning(f"No valid properties found for keys: {report_request.properties}")
+            logger.warning(f"No properties found for keys: {report_request.properties}")
             return {
                 "success": False,
-                "message": "No valid properties found matching the request",
-                "data_issues": searcher.data_issues  # Include data issues in error response
+                "message": "No properties found matching the request"
             }, 404
 
         try:
@@ -327,6 +320,11 @@ def generate_report():
 
             logger.info(f"Generated file: {files}")
 
+            # Create warnings list only if there are actual warnings
+            warnings = []
+            if is_stale:
+                warnings.append("Using stale data")
+
             response_data = ReportGenerationResponse(
                 success=True,
                 message=f"Report generated successfully with {len(properties)} property sheets",
@@ -340,8 +338,7 @@ def generate_report():
                         'end_date': report_request.end_date or datetime.now()
                     }
                 ),
-                warnings=warnings if warnings else None,
-                data_issues=searcher.data_issues if searcher.data_issues else None,  # Include data issues
+                warnings=warnings if warnings else None,  # Only include warnings if there are any
                 session_id=session_id
             ).model_dump()
 
