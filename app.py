@@ -38,7 +38,6 @@ log_config = LogConfig()
 logger = log_config.get_logger('api')
 
 cache_config = CacheConfig(
-    refresh_interval=10800,  # 3 hours
     force_refresh_interval=43200,  # 12 hours
     refresh_timeout=30,
     max_retry_attempts=3,
@@ -414,44 +413,6 @@ def cleanup_empty_directory(directory: Path):
         logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
 
 
-def create_zip_file(files, base_dir: Path) -> io.BytesIO:
-    """Create a ZIP file in memory from multiple files."""
-    memory_file = io.BytesIO()
-
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for file_path in files:
-            # Ensure path is a Path object
-            file_path = Path(file_path)
-            full_path = base_dir / file_path.name
-
-            if full_path.exists():
-                # Add file to zip with just its name (no path)
-                zf.write(full_path, file_path.name)
-
-    # Seek to start of file for reading
-    memory_file.seek(0)
-    return memory_file
-
-
-def cleanup_files_after_zip(files: List[Path], timestamp_dir: Path):
-    """Clean up files after they've been zipped."""
-    try:
-        # Remove individual files
-        for file_path in files:
-            full_path = timestamp_dir / file_path.name
-            if full_path.exists():
-                full_path.unlink()
-                logger.info(f"Removed file after zipping: {full_path}")
-
-        # Check if directory is empty and remove if it is
-        if not any(timestamp_dir.iterdir()):
-            timestamp_dir.rmdir()
-            logger.info(f"Removed empty directory: {timestamp_dir}")
-
-    except Exception as e:
-        logger.error(f"Error during file cleanup: {e}")
-        # Don't raise the exception - cleanup failure shouldn't affect download
-
 
 
 @app.route('/api/reports/download', methods=['GET'])
@@ -553,28 +514,124 @@ def end_session():
 @app.route('/api/cache/status', methods=['GET'])
 @catch_exceptions
 def cache_status():
-    """Endpoint to check cache status"""
-    stats = cache.get_stats()
-    return jsonify({
-        "status": "healthy",
-        "cache": stats,
-        "last_refresh_age_hours": (
-            (datetime.now() - cache._last_refresh).total_seconds() / 3600
-            if cache._last_refresh else None
-        )
-    })
+    """Enhanced endpoint to check cache status and update patterns"""
+    try:
+        stats = cache.get_stats()
+        now = datetime.now()
+
+        # Calculate time until next expected update
+        expected_time = datetime.strptime(cache.config.expected_update_time, "%H:%M").time()
+        expected_datetime = datetime.combine(now.date(), expected_time)
+
+        if now.time() > expected_time:
+            # If we're past today's update time, look at tomorrow
+            expected_datetime = datetime.combine(now.date() + timedelta(days=1), expected_time)
+
+        time_until_update = (expected_datetime - now).total_seconds()
+
+        # Enhanced status response
+        response = {
+            "status": "healthy",
+            "cache": stats,
+            "update_info": {
+                "last_refresh": cache._last_refresh.isoformat() if cache._last_refresh else None,
+                "last_data_change": cache._last_data_change.isoformat() if cache._last_data_change else None,
+                "last_refresh_age_hours": (
+                    (now - cache._last_refresh).total_seconds() / 3600
+                    if cache._last_refresh else None
+                ),
+                "next_check_in_seconds": cache._next_check_interval,
+                "expected_update_time": cache.config.expected_update_time,
+                "time_until_update_seconds": time_until_update,
+                "is_update_window": (
+                        abs(time_until_update) <= cache.config.update_window
+                ),
+                "update_detected_today": cache._update_detected_today
+            },
+            "version_info": {
+                "current_version": cache._current_version,
+                "record_count": len(cache._current_data) if cache._current_data else 0,
+                "stale_record_count": len(cache._stale_data) if cache._stale_data else 0
+            },
+            "refresh_state": {
+                "is_refreshing": cache._refresh_state.is_refreshing,
+                "refresh_started": (
+                    cache._refresh_state.refresh_started.isoformat()
+                    if cache._refresh_state.refresh_started else None
+                ),
+                "refresh_completed": (
+                    cache._refresh_state.refresh_completed.isoformat()
+                    if cache._refresh_state.refresh_completed else None
+                ),
+                "current_waiters": cache._refresh_state.waiters,
+                "last_error": cache._refresh_state.error
+            },
+            "performance_metrics": {
+                "access_count": stats["performance"]["access_count"],
+                "refresh_count": stats["performance"]["refresh_count"],
+                "failed_refreshes": stats["performance"]["failed_refreshes"],
+                "stale_data_served_count": stats["performance"]["stale_data_served_count"],
+                "avg_refresh_time": stats["performance"].get("avg_refresh_time"),
+                "avg_wait_time": stats["performance"].get("avg_wait_time")
+            },
+            "configuration": {
+                "base_refresh_interval": cache.config.base_refresh_interval,
+                "max_refresh_interval": cache.config.max_refresh_interval,
+                "force_refresh_interval": cache.config.force_refresh_interval,
+                "update_window_seconds": cache.config.update_window,
+                "stale_if_error": cache.config.stale_if_error,
+                "max_retry_attempts": cache.config.max_retry_attempts
+            }
+        }
+
+        # Add warning flags
+        warnings = []
+        if cache.is_stale:
+            warnings.append("Cache is stale")
+        if cache.needs_force_refresh:
+            warnings.append("Cache needs force refresh")
+        if cache._refresh_state.error:
+            warnings.append(f"Last refresh error: {cache._refresh_state.error}")
+        if not cache._update_detected_today and now.time() > expected_time:
+            warnings.append("No update detected today")
+
+        if warnings:
+            response["warnings"] = warnings
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting cache status: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Error retrieving cache status",
+            "error": str(e)
+        }), 500
 
 
 def schedule_data_refresh():
-    """Schedule data refresh tasks"""
+    """Enhanced dynamic scheduling for data refresh"""
     from apscheduler.schedulers.background import BackgroundScheduler
-
     def refresh_data_task():
         """Wrapper for async refresh task"""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            # Get current check interval from cache
+            interval = cache._next_check_interval
+
+            # Perform refresh
             loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
+
+            # Schedule next check based on new interval
+            scheduler.reschedule_job(
+                'dynamic_refresh',
+                trigger='interval',
+                seconds=cache._next_check_interval
+            )
+
+            logger.info(f"Next refresh scheduled in {cache._next_check_interval} seconds")
+
         finally:
             loop.close()
 
@@ -588,22 +645,12 @@ def schedule_data_refresh():
         id='session_cleanup'
     )
 
-    # Add daily refresh at 10 AM
-    scheduler.add_job(
-        refresh_data_task,
-        'cron',
-        hour=10,
-        minute=0,
-        id='daily_refresh'
-    )
-
-    # Add backup refresh every 12 hours
+    # Add dynamic refresh job
     scheduler.add_job(
         refresh_data_task,
         'interval',
-        hours=12,
-        misfire_grace_time=3600,
-        id='backup_refresh'
+        seconds=cache_config.base_refresh_interval,
+        id='dynamic_refresh'
     )
 
     scheduler.start()

@@ -166,3 +166,18 @@ LEFT JOIN dbo.FactOperationalKPI fo ON wm.PropertyKey = fo.PropertyKey
 ORDER BY wm.PropertyName;
 
 """
+
+VERSION_CHECK_QUERY = """
+         SELECT 
+            MAX(PostDate) as last_modified,
+            COUNT(DISTINCT PropertyKey) as record_count
+        FROM dbo.FactOperationalKPI
+        WHERE PropertyKey IN (
+            SELECT DISTINCT PropertyKey 
+            FROM dbo.DimProperty 
+            WHERE PropertyStatus = 'ACTIVE'
+                AND IsDeleted = 'N'
+                AND RowIsCurrent = 'Y'
+                AND PropertyName NOT LIKE 'Historical%'
+         )
+"""

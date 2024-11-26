@@ -74,7 +74,7 @@ class AuthMiddleware:
             # Update last login
             user_ref = self.users_ref.document(user['uid'])
             user_ref.update({
-                'lastLogin': datetime.now(datetime.UTC).isoformat()
+                'lastLogin': datetime.utcnow().isoformat()
             })
 
             # Calculate token expiration time
@@ -124,7 +124,7 @@ class AuthMiddleware:
                 'salt': salt,
                 'name': name,
                 'isActive': True,
-                'createdAt': datetime.now(datetime.UTC).isoformat(),
+                'createdAt': datetime.utcnow().isoformat(),
                 'lastLogin': None,
                 'role': role  # Add role to user data
             }
