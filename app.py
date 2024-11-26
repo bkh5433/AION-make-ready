@@ -231,6 +231,7 @@ def search_properties():
 # In app.py
 
 @app.route('/api/reports/generate', methods=['POST'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def generate_report():
@@ -454,6 +455,7 @@ def cleanup_files_after_zip(files: List[Path], timestamp_dir: Path):
 
 
 @app.route('/api/reports/download', methods=['GET'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def download_report():
@@ -774,6 +776,100 @@ def update_user_role(email):
     return jsonify({
         'message': 'User not found'
     }), 404
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_auth
+@require_role('admin')
+def get_users():
+    """Get all users"""
+    try:
+        users = auth.users_ref.stream()
+        user_list = [{
+            'email': user.get('email'),
+            'name': user.get('name'),
+            'username': user.get('username'),
+            'role': user.get('role'),
+            'lastLogin': user.get('lastLogin'),
+            'isActive': user.get('isActive'),
+            'createdAt': user.get('createdAt')
+        } for user in (doc.to_dict() for doc in users)]
+
+        return jsonify({
+            'success': True,
+            'users': user_list
+        })
+    except Exception as e:
+        logger.error(f"Error fetching users: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching users'
+        }), 500
+
+
+@app.route('/api/admin/users/<user_id>', methods=['PUT'])
+@require_auth
+@require_role('admin')
+def update_user(user_id):
+    """Update user details"""
+    try:
+        data = request.get_json()
+
+        # Don't allow role change to admin for non-admin users
+        if data.get('role') == 'admin' and request.user['role'] != 'admin':
+            return jsonify({
+                'success': False,
+                'message': 'Unauthorized to assign admin role'
+            }), 403
+
+        updates = {
+            'name': data.get('name'),
+            'role': data.get('role'),
+            'isActive': data.get('isActive', True)
+        }
+
+        if data.get('password'):
+            password_hash, salt = auth._hash_password(data['password'])
+            updates['password_hash'] = password_hash
+            updates['salt'] = salt
+
+        auth.users_ref.document(user_id).update(updates)
+
+        return jsonify({
+            'success': True,
+            'message': 'User updated successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error updating user: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error updating user'
+        }), 500
+
+
+@app.route('/api/admin/logs', methods=['GET'])
+@require_auth
+@require_role('admin')
+def get_logs():
+    """Get system logs"""
+    try:
+        log_type = request.args.get('type', 'all')
+        limit = int(request.args.get('limit', 100))
+
+        # Implementation depends on your logging setup
+        # This is a placeholder that you'll need to implement
+        logs = log_config.get_recent_logs(log_type, limit)
+
+        return jsonify({
+            'success': True,
+            'logs': logs
+        })
+    except Exception as e:
+        logger.error(f"Error fetching logs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching logs'
+        }), 500
 
 if __name__ == '__main__':
     logger.info("Starting application and updating initial cache.")

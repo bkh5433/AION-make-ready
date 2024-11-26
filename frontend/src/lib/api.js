@@ -239,5 +239,29 @@ export const api = {
             console.error('Error in forceRefreshData:', error);
             throw error;
         }
+    },
+
+    // Admin endpoints
+    getUsers: async () => {
+        const response = await authenticatedFetch('/api/admin/users');
+        return response.json();
+    },
+
+    updateUser: async (userId, userData) => {
+        const response = await authenticatedFetch(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(userData)
+        });
+        return response.json();
+    },
+
+    getActivityLogs: async (filter = 'all') => {
+        const response = await authenticatedFetch(`/api/admin/logs?type=${filter}`);
+        return response.json();
+    },
+
+    getCacheStatus: async () => {
+        const response = await authenticatedFetch('/api/cache/status');
+        return response.json();
     }
 };

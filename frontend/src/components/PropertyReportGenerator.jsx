@@ -1,6 +1,17 @@
 import React, {useState, useEffect, useRef} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from './ui/card';
-import {Search, Download, FileDown, CheckCircle, X, Plus, AlertTriangle, Moon, Sun, RefreshCw} from 'lucide-react';
+import {
+    Search,
+    Download,
+    FileDown,
+    CheckCircle,
+    X,
+    Plus,
+    AlertTriangle,
+    Moon,
+    Sun,
+    RefreshCw
+} from 'lucide-react';
 import {useTheme} from "../lib/theme.jsx";
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
@@ -11,8 +22,8 @@ import {getSessionId} from '../lib/session';
 import {Tooltip} from './ui/tooltip';
 import PropertyRow from './PropertyRow';
 import {useAuth} from '../lib/auth';
+import DataFreshnessIndicator from './DataFreshnessIndicator';
 
-// Add this helper function at the top of the file, outside the component
 const parseAPIDate = (dateStr) => {
     if (!dateStr) return null;
 
@@ -155,6 +166,15 @@ const PropertyReportGenerator = () => {
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     useEffect(() => {
+        // Handle dark mode class
+        if (isDarkMode) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    }, [isDarkMode]);
+
+    useEffect(() => {
         const handleKeyPress = (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                 e.preventDefault();
@@ -167,12 +187,6 @@ const PropertyReportGenerator = () => {
     }, []);
 
     useEffect(() => {
-        if (isDarkMode) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-
         const fetchData = async () => {
             let attempts = 0;
             let success = false;
@@ -268,7 +282,7 @@ const PropertyReportGenerator = () => {
         }, 500);
 
         return () => clearTimeout(delayDebounceFn);
-    }, [searchTerm, isDarkMode]);
+    }, [searchTerm]);
 
     // Debug properties before filtering
     // console.log('Properties before filtering:', properties);
@@ -686,7 +700,7 @@ const PropertyReportGenerator = () => {
 
     return (
         <div className="container mx-auto space-y-8 px-4 py-6 max-w-[90rem]">
-            {/* Notifications Container - Add scale transition */}
+            {/* Notifications Container */}
             <div className="fixed top-4 right-4 z-50 space-y-3">
                 {notifications.map(notification => (
                     <div
@@ -714,146 +728,77 @@ const PropertyReportGenerator = () => {
             </div>
 
             <Card
-                className="bg-white dark:bg-[#1f2937] shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-200">
-                <CardContent className="space-y-10 p-8">
-                    {/* Data Age Status Message - Add hover effect */}
-                    {isDataUpToDate !== null && (
-                        <div
-                            className={`flex items-center gap-3 p-4 rounded-lg transition-all duration-300 animate-scale-in ${
-                                isDataUpToDate
-                                    ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700'
-                                    : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700'
-                            }`}
-                        >
-                            <div className="flex-shrink-0">
-                                {isDataUpToDate ? (
-                                    <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400"/>
-                                ) : (
-                                    <AlertTriangle className="w-6 h-6 text-yellow-600 dark:text-yellow-400"/>
-                                )}
-                            </div>
-                            <div className="flex-grow">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <h3 className={`font-semibold ${
-                                            isDataUpToDate
-                                                ? 'text-green-900 dark:text-green-100'
-                                                : 'text-yellow-900 dark:text-yellow-100'
-                                        }`}>
-                                            {isDataUpToDate ? 'Data is Current (as of yesterday)' : 'Data Status Warning'}
-                                        </h3>
-                                        <span
-                                            className="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
-                                            {properties.length} Properties
-                                        </span>
-                                    </div>
-                                    {!isDataUpToDate && user?.role === 'admin' && (
-                                        <button
-                                            onClick={handleForceRefresh}
-                                            disabled={isRefreshing}
-                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium 
-                                            transition-all duration-200 transform hover:scale-105 active:scale-95
-                                            ${isRefreshing
-                                                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-                                                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
-                                            }`}
-                                        >
-                                            {isRefreshing ? (
-                                                <>
-                                                    <div
-                                                        className="animate-spin h-4 w-4 border-2 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full"/>
-                                                    <span>Refreshing...</span>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <RefreshCw className="h-4 w-4"/>
-                                                    <span>Force Refresh</span>
-                                                </>
-                                            )}
-                                        </button>
-                                    )}
-                                </div>
-                                <div className="mt-1 space-y-1">
-                                    <p className={`text-sm ${
-                                        isDataUpToDate
-                                            ? 'text-green-700 dark:text-green-300'
-                                            : 'text-yellow-700 dark:text-yellow-300'
-                                    }`}>
-                                        {isDataUpToDate
-                                            ? 'All property data is complete through yesterday and ready for report generation.'
-                                            : 'Property data may be outdated. Reports may not reflect the most recent changes.'}
-                                    </p>
-                                    {periodStartDate && periodEndDate && (
-                                        <div
-                                            className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
-                                            <div className="flex items-center gap-1">
-                                                <span className="font-medium">30-Day Period:</span>
-                                                <span>
-                                                    {formatDate(periodStartDate)}
-                                                    {' - '}
-                                                    {formatDate(periodEndDate)}
-                                                    <span className="ml-1 text-xs text-gray-500">
-                                                        (Data complete through end of day)
-                                                    </span>
-                                                </span>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
+                className="bg-white dark:bg-[#1f2937] shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-200 overflow-hidden">
+                <CardContent className="space-y-10 p-0">
+                    {/* Data Age Status Message */}
+                    {isDataUpToDate !== null ? (
+                        <DataFreshnessIndicator
+                            isDataUpToDate={isDataUpToDate}
+                            properties={properties}
+                            periodStartDate={periodStartDate}
+                            periodEndDate={periodEndDate}
+                            onRefresh={handleForceRefresh}
+                            isRefreshing={isRefreshing}
+                            isAdmin={user?.role === 'admin'}
+                            formatDate={formatDate}
+                        />
+                    ) : (
+                        // Add a spacer div when the indicator is not visible
+                        <div className="h-8"/> // This maintains top padding
                     )}
 
-                    {/* Search and Generate Section - Improve spacing and button feedback */}
-                    <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
-                        <div className="relative flex-grow animate-slide-up">
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <Search className="h-5 w-5 text-gray-400"/>
+                    {/* Search and Generate Section */}
+                    <div className="px-8 pb-8 pt-8"> {/* Add pt-8 for consistent top padding */}
+                        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
+                            <div className="relative flex-grow animate-slide-up">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Search className="h-5 w-5 text-gray-400"/>
+                                </div>
+                                <input
+                                    ref={searchInputRef}
+                                    type="text"
+                                    placeholder="Search properties..."
+                                    className="pl-10 pr-10 py-3 w-full rounded-lg bg-gray-50 dark:bg-[#2d3748] border-gray-200 dark:border-gray-700 
+                                    text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 
+                                    focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200
+                                    hover:border-gray-300 dark:hover:border-gray-600"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                                {searchTerm && (
+                                    <button
+                                        onClick={() => setSearchTerm('')}
+                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                    >
+                                        <X className="h-5 w-5"/>
+                                    </button>
+                                )}
                             </div>
-                            <input
-                                ref={searchInputRef}
-                                type="text"
-                                placeholder="Search properties..."
-                                className="pl-10 pr-10 py-3 w-full rounded-lg bg-gray-50 dark:bg-[#2d3748] border-gray-200 dark:border-gray-700 
-                                text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 
-                                focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200
-                                hover:border-gray-300 dark:hover:border-gray-600"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
-                            {searchTerm && (
-                                <button
-                                    onClick={() => setSearchTerm('')}
-                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                                >
-                                    <X className="h-5 w-5"/>
-                                </button>
-                            )}
+                            <button
+                                className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white 
+                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
+                                ${isGenerating ? 'animate-pulse-shadow' : ''} ${
+                                    isGenerating || selectedProperties.length === 0
+                                        ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-75'
+                                        : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'
+                                }`}
+                                onClick={handleGenerateReports}
+                                disabled={selectedProperties.length === 0 || isGenerating}
+                            >
+                                {isGenerating ? (
+                                    <>
+                                        <div
+                                            className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
+                                        <span>Generating...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Download className="h-5 w-5"/>
+                                        <span>Generate Reports {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
+                                    </>
+                                )}
+                            </button>
                         </div>
-                        <button
-                            className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white 
-                            transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
-                            ${isGenerating ? 'animate-pulse-shadow' : ''} ${
-                                isGenerating || selectedProperties.length === 0
-                                    ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-75'
-                                    : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'
-                            }`}
-                            onClick={handleGenerateReports}
-                            disabled={selectedProperties.length === 0 || isGenerating}
-                        >
-                            {isGenerating ? (
-                                <>
-                                    <div
-                                        className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
-                                    <span>Generating...</span>
-                                </>
-                            ) : (
-                                <>
-                                    <Download className="h-5 w-5"/>
-                                    <span>Generate Reports {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
-                                </>
-                            )}
-                        </button>
                     </div>
 
                     {/* Properties Table - Add better hover states and transitions */}

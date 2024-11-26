@@ -75,12 +75,15 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
         <tr
             onClick={handleClick}
             className={`
-        cursor-pointer transition-all duration-200 animate-slide-up
-        ${isSelected
+                cursor-pointer transition-all duration-200 animate-table-stagger
+                ${isSelected
                 ? 'bg-blue-50 dark:bg-blue-900/30'
                 : 'hover:bg-gray-50 dark:hover:bg-[#2d3748]'}
-      `}
-            style={animationDelay ? {animationDelay: `${animationDelay}ms`} : undefined}
+            `}
+            style={{
+                animationDelay: `${animationDelay * 2.5}ms`,
+                willChange: 'transform, opacity'
+            }}
             role="row"
         >
             {/* Checkbox Column */}
@@ -141,9 +144,9 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                         <div className="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
                             <div
                                 className={`h-2 rounded-full transform origin-left ${
-                                    percentage_completed >= 90 ? 'bg-green-500' :
-                                        percentage_completed >= 75 ? 'bg-yellow-500' :
-                                            'bg-red-500'
+                                    percentage_completed >= 90 ? 'bg-gradient-to-r from-emerald-600 via-green-500 to-emerald-400' :
+                                        percentage_completed >= 75 ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-400' :
+                                            'bg-gradient-to-r from-red-600 via-red-500 to-red-400'
                                 }`}
                                 style={{
                                     transform: 'scaleX(0)',
@@ -154,12 +157,12 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                             />
                         </div>
                         <span className={`text-sm font-medium ${
-                            percentage_completed >= 90 ? 'text-green-600 dark:text-green-400' :
-                                percentage_completed >= 75 ? 'text-yellow-600 dark:text-yellow-400' :
+                            percentage_completed >= 90 ? 'text-emerald-600 dark:text-emerald-400' :
+                                percentage_completed >= 75 ? 'text-amber-600 dark:text-amber-400' :
                                     'text-red-600 dark:text-red-400'
                         }`}>
-              {percentage_completed.toFixed(1)}%
-            </span>
+                            {percentage_completed.toFixed(1)}%
+                        </span>
                     </div>
                 </Tooltip>
                 <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
