@@ -2,6 +2,14 @@ import {getSessionId, setSessionId, clearSessionId} from './session';
 
 const API_BASE_URL = 'http://127.0.0.1:5000/api';
 
+// Add this helper function at the top of the file
+const getAuthHeaders = () => {
+    const token = localStorage.getItem('authToken');
+    return token ? {
+        'Authorization': `Bearer ${token}`
+    } : {};
+};
+
 export const isTokenExpired = () => {
     const expiresAt = localStorage.getItem('tokenExpiresAt');
     if (!expiresAt) return true;
@@ -216,5 +224,20 @@ export const api = {
             }
         );
         return response.json();
+    },
+
+    forceRefreshData: async () => {
+        try {
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/refresh`,
+                {
+                    method: 'POST'
+                }
+            );
+            return response.json();
+        } catch (error) {
+            console.error('Error in forceRefreshData:', error);
+            throw error;
+        }
     }
 };

@@ -38,8 +38,8 @@ log_config = LogConfig()
 logger = log_config.get_logger('api')
 
 cache_config = CacheConfig(
-    refresh_interval=43200,  # 12 hours
-    force_refresh_interval=86400,  # 24 hours
+    refresh_interval=10800,  # 3 hours
+    force_refresh_interval=43200,  # 12 hours
     refresh_timeout=30,
     max_retry_attempts=3,
     retry_delay=2,
@@ -370,19 +370,33 @@ def generate_report():
 
 
 @app.route('/api/refresh', methods=['POST'])
+@require_auth
+@require_role('admin')
 @catch_exceptions
 @log_exceptions(logger)
 def refresh_data():
-    logger.info("POST /api/refresh endpoint accessed. Refreshing data.")
+    logger.info("POST /api/refresh endpoint accessed. Force refreshing data.")
     try:
-        run_async(cache.refresh_data(fetch_make_ready_data))
+        # Start refresh in background thread to not block the response
+        def refresh_background():
+            try:
+                run_async(cache.refresh_data(fetch_make_ready_data))
+                logger.info("Background refresh completed successfully")
+            except Exception as e:
+                logger.error(f"Background refresh failed: {str(e)}")
+
+        thread = threading.Thread(target=refresh_background)
+        thread.daemon = True
+        thread.start()
+
+        # Return immediately with success status
         return jsonify({
             "status": "success",
-            "message": "Data refreshed successfully",
+            "message": "Data refresh initiated",
             "stats": cache.get_stats()
         })
     except Exception as e:
-        logger.error(f"Error refreshing data: {str(e)}")
+        logger.error(f"Error initiating refresh: {str(e)}")
         raise
 
 
@@ -649,6 +663,8 @@ def login():
 
 
 @app.route('/api/auth/register', methods=['POST'])
+@require_auth
+@require_role('admin')
 @catch_exceptions
 def register():
     """Register a new user"""

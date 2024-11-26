@@ -1,6 +1,6 @@
 import React, {useState, useEffect, useRef} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from './ui/card';
-import {Search, Download, FileDown, CheckCircle, X, Plus, AlertTriangle, Moon, Sun} from 'lucide-react';
+import {Search, Download, FileDown, CheckCircle, X, Plus, AlertTriangle, Moon, Sun, RefreshCw} from 'lucide-react';
 import {useTheme} from "../lib/theme.jsx";
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
@@ -10,6 +10,7 @@ import useSessionManager from '../lib/session';
 import {getSessionId} from '../lib/session';
 import {Tooltip} from './ui/tooltip';
 import PropertyRow from './PropertyRow';
+import {useAuth} from '../lib/auth';
 
 // Add this helper function at the top of the file, outside the component
 const parseAPIDate = (dateStr) => {
@@ -149,6 +150,9 @@ const PropertyReportGenerator = () => {
     // Add new state variables to hold the period start and end dates
     const [periodStartDate, setPeriodStartDate] = useState(null);
     const [periodEndDate, setPeriodEndDate] = useState(null);
+
+    const {user} = useAuth();
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
     useEffect(() => {
         const handleKeyPress = (e) => {
@@ -649,6 +653,37 @@ const PropertyReportGenerator = () => {
         }).format(date);
     };
 
+    const handleForceRefresh = async () => {
+        if (!user?.role === 'admin' || isRefreshing) return;
+
+        setIsRefreshing(true);
+        try {
+            // First initiate the refresh
+            const response = await api.forceRefreshData();
+            if (response.status === 'success') {
+                addNotification('info', 'Refresh initiated, this may take a few moments...');
+
+                // Wait for initial cache update
+                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                // Show success message before reload
+                addNotification('success', 'Data refresh complete. Reloading page...');
+
+                // Wait a moment for the notification to be visible
+                await new Promise(resolve => setTimeout(resolve, 1500));
+
+                // Reload the page
+                window.location.reload();
+            } else {
+                throw new Error(response.message || 'Failed to refresh data');
+            }
+        } catch (error) {
+            console.error('Error forcing refresh:', error);
+            addNotification('error', `Failed to refresh data: ${error.message}`);
+            setIsRefreshing(false);
+        }
+    };
+
     return (
         <div className="container mx-auto space-y-8 px-4 py-6 max-w-[90rem]">
             {/* Notifications Container - Add scale transition */}
@@ -698,18 +733,45 @@ const PropertyReportGenerator = () => {
                                 )}
                             </div>
                             <div className="flex-grow">
-                                <div className="flex items-center gap-2">
-                                    <h3 className={`font-semibold ${
-                                        isDataUpToDate
-                                            ? 'text-green-900 dark:text-green-100'
-                                            : 'text-yellow-900 dark:text-yellow-100'
-                                    }`}>
-                                        {isDataUpToDate ? 'Data is Current (as of yesterday)' : 'Data Status Warning'}
-                                    </h3>
-                                    <span
-                                        className="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
-                                        {properties.length} Properties
-                                    </span>
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <h3 className={`font-semibold ${
+                                            isDataUpToDate
+                                                ? 'text-green-900 dark:text-green-100'
+                                                : 'text-yellow-900 dark:text-yellow-100'
+                                        }`}>
+                                            {isDataUpToDate ? 'Data is Current (as of yesterday)' : 'Data Status Warning'}
+                                        </h3>
+                                        <span
+                                            className="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
+                                            {properties.length} Properties
+                                        </span>
+                                    </div>
+                                    {!isDataUpToDate && user?.role === 'admin' && (
+                                        <button
+                                            onClick={handleForceRefresh}
+                                            disabled={isRefreshing}
+                                            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium 
+                                            transition-all duration-200 transform hover:scale-105 active:scale-95
+                                            ${isRefreshing
+                                                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                                                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
+                                            }`}
+                                        >
+                                            {isRefreshing ? (
+                                                <>
+                                                    <div
+                                                        className="animate-spin h-4 w-4 border-2 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full"/>
+                                                    <span>Refreshing...</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <RefreshCw className="h-4 w-4"/>
+                                                    <span>Force Refresh</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="mt-1 space-y-1">
                                     <p className={`text-sm ${
