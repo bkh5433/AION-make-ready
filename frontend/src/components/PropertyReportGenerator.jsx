@@ -248,21 +248,15 @@ const PropertyReportGenerator = () => {
                         latest_post_date: property.latest_post_date
                     }));
 
-                    // Only show success notification on first load
-                    if (isFirstLoad) {
-                        setTimeout(() => {
-                            setProperties(formattedProperties);
-                            setIsLoading(false);
+                    setTimeout(() => {
+                        setProperties(formattedProperties);
+                        setIsLoading(false);
+
+                        if (isFirstLoad) {
                             addNotification('success', 'Successfully fetched properties');
                             setIsFirstLoad(false);
-                        }, 1000);
-                    } else {
-                        // Regular update without notification
-                        setTimeout(() => {
-                            setProperties(formattedProperties);
-                            setIsLoading(false);
-                        }, 1000);
-                    }
+                        }
+                    }, 1000);
 
                     setPrevSearchTerm(term);
                     break; // Exit the loop on success
