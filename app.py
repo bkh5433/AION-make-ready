@@ -19,13 +19,14 @@ from session import get_session_path, cleanup_session, run_session_cleanup, gene
     setup_session_directory
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
+from auth_middleware import AuthMiddleware, require_auth, require_role
 
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
         "origins": ["http://localhost:5173"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie"],
+        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie", "Authorization"],
         "supports_credentials": True,
         "expose_headers": ["Set-Cookie"],
         "max_age": 3600
@@ -37,8 +38,7 @@ log_config = LogConfig()
 logger = log_config.get_logger('api')
 
 cache_config = CacheConfig(
-    refresh_interval=43200,  # 12 hours
-    force_refresh_interval=86400,  # 24 hours
+    force_refresh_interval=43200,  # 12 hours
     refresh_timeout=30,
     max_retry_attempts=3,
     retry_delay=2,
@@ -47,6 +47,8 @@ cache_config = CacheConfig(
 )
 
 cache = ConcurrentSQLCache(cache_config)
+
+auth = AuthMiddleware()
 
 
 def catch_exceptions(func):
@@ -96,6 +98,7 @@ def run_async(coro):
 
 
 @app.route('/api/data', methods=['GET'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def get_make_ready_data():
@@ -139,6 +142,7 @@ def health_check():
 
 
 @app.route('/api/properties/search', methods=['GET'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def search_properties():
@@ -159,12 +163,10 @@ def search_properties():
         data, is_stale = run_async(cache.get_data())
 
         if not data:
-            # Initial cache population
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
             data, is_stale = run_async(cache.get_data())
         elif is_stale:
-            # Trigger background refresh if data is stale
             logger.info("Data is stale, triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
@@ -172,15 +174,6 @@ def search_properties():
             )
             thread.daemon = True
             thread.start()
-
-        logger.debug(
-            f"Cache status - size: {len(data) if data else 0}, is_stale: {is_stale}")
-
-        # Calculate period dates
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)  # Default 30-day period
-
-        logger.debug(f"Period dates - start: {start_date}, end: {end_date}")
 
         # Initialize searcher
         logger.info("Initializing PropertySearch")
@@ -190,19 +183,29 @@ def search_properties():
         logger.info("Executing search")
         result = searcher.get_search_result(
             search_term=search_term,
-            last_updated=cache._last_refresh,  # Use the cache's last refresh time
+            last_updated=cache._last_refresh,
             period_info={
-                'start_date': start_date,
-                'end_date': end_date
+                'start_date': datetime.now() - timedelta(days=30),
+                'end_date': datetime.now()
             }
         )
 
         logger.info(f"Search complete - found {result.count} properties")
 
-        # Convert to response and include staleness
-        logger.debug("Converting result to JSON")
-        response_data = result.model_dump()
-        response_data['is_stale'] = is_stale
+        # Convert Pydantic models to dict
+        response_data = {
+            'count': result.count,
+            'data': [property.model_dump() for property in result.data],  # Convert Property objects to dict
+            'is_stale': is_stale,
+            'last_updated': result.last_updated.isoformat() if result.last_updated else None,
+            'period_info': {
+                'start_date': result.period_info[
+                    'start_date'].isoformat() if result.period_info and result.period_info.get('start_date') else None,
+                'end_date': result.period_info['end_date'].isoformat() if result.period_info and result.period_info.get(
+                    'end_date') else None
+            } if result.period_info else None,
+            'data_issues': result.data_issues
+        }
 
         # Add cache statistics if needed
         if include_metrics:
@@ -226,6 +229,7 @@ def search_properties():
 # In app.py
 
 @app.route('/api/reports/generate', methods=['POST'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def generate_report():
@@ -284,11 +288,19 @@ def generate_report():
             include_analytics=True
         )
 
+        # Check for data issues
+        if searcher.data_issues:
+            logger.warning(f"Found {len(searcher.data_issues)} data issues during report generation")
+            warnings = [f"Data quality issues found in {len(searcher.data_issues)} properties"]
+        else:
+            warnings = []
+
         if not properties:
-            logger.warning(f"No properties found for keys: {report_request.properties}")
+            logger.warning(f"No valid properties found for keys: {report_request.properties}")
             return {
                 "success": False,
-                "message": "No properties found matching the request"
+                "message": "No valid properties found matching the request",
+                "data_issues": searcher.data_issues  # Include data issues in error response
             }, 404
 
         try:
@@ -315,11 +327,6 @@ def generate_report():
 
             logger.info(f"Generated file: {files}")
 
-            # Create warnings list only if there are actual warnings
-            warnings = []
-            if is_stale:
-                warnings.append("Using stale data")
-
             response_data = ReportGenerationResponse(
                 success=True,
                 message=f"Report generated successfully with {len(properties)} property sheets",
@@ -333,7 +340,8 @@ def generate_report():
                         'end_date': report_request.end_date or datetime.now()
                     }
                 ),
-                warnings=warnings if warnings else None,  # Only include warnings if there are any
+                warnings=warnings if warnings else None,
+                data_issues=searcher.data_issues if searcher.data_issues else None,  # Include data issues
                 session_id=session_id
             ).model_dump()
 
@@ -365,19 +373,33 @@ def generate_report():
 
 
 @app.route('/api/refresh', methods=['POST'])
+@require_auth
+@require_role('admin')
 @catch_exceptions
 @log_exceptions(logger)
 def refresh_data():
-    logger.info("POST /api/refresh endpoint accessed. Refreshing data.")
+    logger.info("POST /api/refresh endpoint accessed. Force refreshing data.")
     try:
-        run_async(cache.refresh_data(fetch_make_ready_data))
+        # Start refresh in background thread to not block the response
+        def refresh_background():
+            try:
+                run_async(cache.refresh_data(fetch_make_ready_data))
+                logger.info("Background refresh completed successfully")
+            except Exception as e:
+                logger.error(f"Background refresh failed: {str(e)}")
+
+        thread = threading.Thread(target=refresh_background)
+        thread.daemon = True
+        thread.start()
+
+        # Return immediately with success status
         return jsonify({
             "status": "success",
-            "message": "Data refreshed successfully",
+            "message": "Data refresh initiated",
             "stats": cache.get_stats()
         })
     except Exception as e:
-        logger.error(f"Error refreshing data: {str(e)}")
+        logger.error(f"Error initiating refresh: {str(e)}")
         raise
 
 
@@ -394,47 +416,10 @@ def cleanup_empty_directory(directory: Path):
         logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
 
 
-def create_zip_file(files, base_dir: Path) -> io.BytesIO:
-    """Create a ZIP file in memory from multiple files."""
-    memory_file = io.BytesIO()
-
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for file_path in files:
-            # Ensure path is a Path object
-            file_path = Path(file_path)
-            full_path = base_dir / file_path.name
-
-            if full_path.exists():
-                # Add file to zip with just its name (no path)
-                zf.write(full_path, file_path.name)
-
-    # Seek to start of file for reading
-    memory_file.seek(0)
-    return memory_file
-
-
-def cleanup_files_after_zip(files: List[Path], timestamp_dir: Path):
-    """Clean up files after they've been zipped."""
-    try:
-        # Remove individual files
-        for file_path in files:
-            full_path = timestamp_dir / file_path.name
-            if full_path.exists():
-                full_path.unlink()
-                logger.info(f"Removed file after zipping: {full_path}")
-
-        # Check if directory is empty and remove if it is
-        if not any(timestamp_dir.iterdir()):
-            timestamp_dir.rmdir()
-            logger.info(f"Removed empty directory: {timestamp_dir}")
-
-    except Exception as e:
-        logger.error(f"Error during file cleanup: {e}")
-        # Don't raise the exception - cleanup failure shouldn't affect download
-
 
 
 @app.route('/api/reports/download', methods=['GET'])
+@require_auth
 @catch_exceptions
 @log_exceptions(logger)
 def download_report():
@@ -532,28 +517,124 @@ def end_session():
 @app.route('/api/cache/status', methods=['GET'])
 @catch_exceptions
 def cache_status():
-    """Endpoint to check cache status"""
-    stats = cache.get_stats()
-    return jsonify({
-        "status": "healthy",
-        "cache": stats,
-        "last_refresh_age_hours": (
-            (datetime.now() - cache._last_refresh).total_seconds() / 3600
-            if cache._last_refresh else None
-        )
-    })
+    """Enhanced endpoint to check cache status and update patterns"""
+    try:
+        stats = cache.get_stats()
+        now = datetime.now()
+
+        # Calculate time until next expected update
+        expected_time = datetime.strptime(cache.config.expected_update_time, "%H:%M").time()
+        expected_datetime = datetime.combine(now.date(), expected_time)
+
+        if now.time() > expected_time:
+            # If we're past today's update time, look at tomorrow
+            expected_datetime = datetime.combine(now.date() + timedelta(days=1), expected_time)
+
+        time_until_update = (expected_datetime - now).total_seconds()
+
+        # Enhanced status response
+        response = {
+            "status": "healthy",
+            "cache": stats,
+            "update_info": {
+                "last_refresh": cache._last_refresh.isoformat() if cache._last_refresh else None,
+                "last_data_change": cache._last_data_change.isoformat() if cache._last_data_change else None,
+                "last_refresh_age_hours": (
+                    (now - cache._last_refresh).total_seconds() / 3600
+                    if cache._last_refresh else None
+                ),
+                "next_check_in_seconds": cache._next_check_interval,
+                "expected_update_time": cache.config.expected_update_time,
+                "time_until_update_seconds": time_until_update,
+                "is_update_window": (
+                        abs(time_until_update) <= cache.config.update_window
+                ),
+                "update_detected_today": cache._update_detected_today
+            },
+            "version_info": {
+                "current_version": cache._current_version,
+                "record_count": len(cache._current_data) if cache._current_data else 0,
+                "stale_record_count": len(cache._stale_data) if cache._stale_data else 0
+            },
+            "refresh_state": {
+                "is_refreshing": cache._refresh_state.is_refreshing,
+                "refresh_started": (
+                    cache._refresh_state.refresh_started.isoformat()
+                    if cache._refresh_state.refresh_started else None
+                ),
+                "refresh_completed": (
+                    cache._refresh_state.refresh_completed.isoformat()
+                    if cache._refresh_state.refresh_completed else None
+                ),
+                "current_waiters": cache._refresh_state.waiters,
+                "last_error": cache._refresh_state.error
+            },
+            "performance_metrics": {
+                "access_count": stats["performance"]["access_count"],
+                "refresh_count": stats["performance"]["refresh_count"],
+                "failed_refreshes": stats["performance"]["failed_refreshes"],
+                "stale_data_served_count": stats["performance"]["stale_data_served_count"],
+                "avg_refresh_time": stats["performance"].get("avg_refresh_time"),
+                "avg_wait_time": stats["performance"].get("avg_wait_time")
+            },
+            "configuration": {
+                "base_refresh_interval": cache.config.base_refresh_interval,
+                "max_refresh_interval": cache.config.max_refresh_interval,
+                "force_refresh_interval": cache.config.force_refresh_interval,
+                "update_window_seconds": cache.config.update_window,
+                "stale_if_error": cache.config.stale_if_error,
+                "max_retry_attempts": cache.config.max_retry_attempts
+            }
+        }
+
+        # Add warning flags
+        warnings = []
+        if cache.is_stale:
+            warnings.append("Cache is stale")
+        if cache.needs_force_refresh:
+            warnings.append("Cache needs force refresh")
+        if cache._refresh_state.error:
+            warnings.append(f"Last refresh error: {cache._refresh_state.error}")
+        if not cache._update_detected_today and now.time() > expected_time:
+            warnings.append("No update detected today")
+
+        if warnings:
+            response["warnings"] = warnings
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting cache status: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Error retrieving cache status",
+            "error": str(e)
+        }), 500
 
 
 def schedule_data_refresh():
-    """Schedule data refresh tasks"""
+    """Enhanced dynamic scheduling for data refresh"""
     from apscheduler.schedulers.background import BackgroundScheduler
-
     def refresh_data_task():
         """Wrapper for async refresh task"""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            # Get current check interval from cache
+            interval = cache._next_check_interval
+
+            # Perform refresh
             loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
+
+            # Schedule next check based on new interval
+            scheduler.reschedule_job(
+                'dynamic_refresh',
+                trigger='interval',
+                seconds=cache._next_check_interval
+            )
+
+            logger.info(f"Next refresh scheduled in {cache._next_check_interval} seconds")
+
         finally:
             loop.close()
 
@@ -567,22 +648,12 @@ def schedule_data_refresh():
         id='session_cleanup'
     )
 
-    # Add daily refresh at 10 AM
-    scheduler.add_job(
-        refresh_data_task,
-        'cron',
-        hour=10,
-        minute=0,
-        id='daily_refresh'
-    )
-
-    # Add backup refresh every 12 hours
+    # Add dynamic refresh job
     scheduler.add_job(
         refresh_data_task,
         'interval',
-        hours=12,
-        misfire_grace_time=3600,
-        id='backup_refresh'
+        seconds=cache_config.base_refresh_interval,
+        id='dynamic_refresh'
     )
 
     scheduler.start()
@@ -591,6 +662,264 @@ def schedule_data_refresh():
 
 app.scheduler = schedule_data_refresh()
 
+
+@app.route('/api/auth/login', methods=['POST'])
+@catch_exceptions
+def login():
+    """Login endpoint"""
+    try:
+        data = request.get_json()
+        logger.debug(f"Login attempt with data: {data}")  # Add debug logging
+
+        if not data:
+            logger.warning("Login attempt with no data")
+            return jsonify({
+                'success': False,
+                'message': 'No data provided'
+            }), 400
+
+        username = data.get('username')
+        password = data.get('password')
+
+        logger.debug(f"Login attempt for username: {username}")  # Add debug logging
+
+        if not username or not password:
+            logger.warning(
+                f"Login attempt missing credentials - username: {bool(username)}, password: {bool(password)}")
+            return jsonify({
+                'success': False,
+                'message': 'Username and password required'
+            }), 400
+
+        result = auth.authenticate(username, password)
+        if result:
+            logger.info(f"Successful login for user: {username}")  # Add success logging
+            return jsonify({
+                'success': True,
+                'message': 'Login successful',
+                **result
+            }), 200
+
+        logger.warning(f"Failed login attempt for user: {username}")  # Add failure logging
+        return jsonify({
+            'success': False,
+            'message': 'Invalid credentials'
+        }), 401
+
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred during login'
+        }), 500
+
+
+@app.route('/api/auth/register', methods=['POST'])
+@require_auth
+@require_role('admin')
+@catch_exceptions
+def register():
+    """Register a new user"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'message': 'No data provided'
+            }), 400
+
+        username = data.get('username')
+        password = data.get('password')
+        name = data.get('name')
+        role = data.get('role', 'user')  # Default to 'user' if not specified
+
+        if not all([username, password, name]):
+            return jsonify({
+                'success': False,
+                'message': 'Username, password, and name are required'
+            }), 400
+
+        if role not in ['user', 'admin']:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid role'
+            }), 400
+
+        user_data = auth.create_user(username, password, name, role)
+
+        return jsonify({
+            'success': True,
+            'message': 'User created successfully',
+            'user': user_data
+        }), 201
+
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 400
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred during registration'
+        }), 500
+
+
+@app.route('/api/auth/me', methods=['GET'])
+@require_auth
+def get_current_user():
+    """Get current user information"""
+    return jsonify({
+        'user': request.user
+    })
+
+
+@app.route('/api/users', methods=['GET'])
+@require_auth
+@require_role('admin')
+def list_users():
+    """List all users (admin only)"""
+    try:
+        users = auth.users_ref.stream()
+        user_list = [{
+            'email': user.get('email'),
+            'name': user.get('name'),
+            'role': user.get('role'),
+            'lastLogin': user.get('lastLogin'),
+            'isActive': user.get('isActive')
+        } for user in (doc.to_dict() for doc in users)]
+
+        return jsonify({
+            'users': user_list
+        })
+    except Exception as e:
+        return jsonify({
+            'message': f'Error fetching users: {str(e)}'
+        }), 500
+
+
+@app.route('/api/users/<email>/role', methods=['PUT'])
+@require_auth
+@require_role('admin')
+def update_user_role(email):
+    """Update user role (admin only)"""
+    data = request.get_json()
+    new_role = data.get('role')
+
+    if not new_role:
+        return jsonify({
+            'message': 'Role is required'
+        }), 400
+
+    if new_role not in ['user', 'admin']:
+        return jsonify({
+            'message': 'Invalid role'
+        }), 400
+
+    success = auth.update_user_role(email, new_role)
+    if success:
+        return jsonify({
+            'message': f'Role updated for {email}'
+        })
+
+    return jsonify({
+        'message': 'User not found'
+    }), 404
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_auth
+@require_role('admin')
+def get_users():
+    """Get all users"""
+    try:
+        users = auth.users_ref.stream()
+        user_list = [{
+            'email': user.get('email'),
+            'name': user.get('name'),
+            'username': user.get('username'),
+            'role': user.get('role'),
+            'lastLogin': user.get('lastLogin'),
+            'isActive': user.get('isActive'),
+            'createdAt': user.get('createdAt')
+        } for user in (doc.to_dict() for doc in users)]
+
+        return jsonify({
+            'success': True,
+            'users': user_list
+        })
+    except Exception as e:
+        logger.error(f"Error fetching users: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching users'
+        }), 500
+
+
+@app.route('/api/admin/users/<user_id>', methods=['PUT'])
+@require_auth
+@require_role('admin')
+def update_user(user_id):
+    """Update user details"""
+    try:
+        data = request.get_json()
+
+        # Don't allow role change to admin for non-admin users
+        if data.get('role') == 'admin' and request.user['role'] != 'admin':
+            return jsonify({
+                'success': False,
+                'message': 'Unauthorized to assign admin role'
+            }), 403
+
+        updates = {
+            'name': data.get('name'),
+            'role': data.get('role'),
+            'isActive': data.get('isActive', True)
+        }
+
+        if data.get('password'):
+            password_hash, salt = auth._hash_password(data['password'])
+            updates['password_hash'] = password_hash
+            updates['salt'] = salt
+
+        auth.users_ref.document(user_id).update(updates)
+
+        return jsonify({
+            'success': True,
+            'message': 'User updated successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error updating user: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error updating user'
+        }), 500
+
+
+@app.route('/api/admin/logs', methods=['GET'])
+@require_auth
+@require_role('admin')
+def get_logs():
+    """Get system logs"""
+    try:
+        log_type = request.args.get('type', 'all')
+        limit = int(request.args.get('limit', 100))
+
+        # Implementation depends on your logging setup
+        # This is a placeholder that you'll need to implement
+        logs = log_config.get_recent_logs(log_type, limit)
+
+        return jsonify({
+            'success': True,
+            'logs': logs
+        })
+    except Exception as e:
+        logger.error(f"Error fetching logs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error fetching logs'
+        }), 500
 
 if __name__ == '__main__':
     logger.info("Starting application and updating initial cache.")

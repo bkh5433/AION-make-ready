@@ -2,41 +2,53 @@ import {getSessionId, setSessionId, clearSessionId} from './session';
 
 const API_BASE_URL = 'http://127.0.0.1:5000/api';
 
+// Add this helper function at the top of the file
+const getAuthHeaders = () => {
+    const token = localStorage.getItem('authToken');
+    return token ? {
+        'Authorization': `Bearer ${token}`
+    } : {};
+};
+
+export const isTokenExpired = () => {
+    const expiresAt = localStorage.getItem('tokenExpiresAt');
+    if (!expiresAt) return true;
+
+    const expirationDate = new Date(expiresAt);
+    const now = new Date();
+
+    return now >= expirationDate;
+};
+
 // Common fetch wrapper with error handling and session management
 const fetchWithErrorHandling = async (url, options = {}) => {
     try {
-        const sessionId = getSessionId();
-        console.debug('Current session ID:', sessionId);
+        if (isTokenExpired()) {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('tokenExpiresAt');
+            localStorage.removeItem('tokenExpiresIn');
+            window.location.href = '/login';
+            throw new Error('Session expired');
+        }
 
-        // Don't set empty cookies
+        const token = localStorage.getItem('authToken');
         const headers = {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            ...(sessionId && {'Cookie': `session_id=${sessionId}`}),
+            ...(token && {'Authorization': `Bearer ${token}`}),
             ...options.headers
         };
 
         const response = await fetch(url, {
             ...options,
-            credentials: 'include', // Important for cookie handling
+            credentials: 'include',
             headers
         });
 
-        // Handle session cookie from response
-        const setCookieHeader = response.headers.get('Set-Cookie');
-        if (setCookieHeader) {
-            const sessionMatch = setCookieHeader.match(/session_id=([^;]+)/);
-            if (sessionMatch) {
-                const newSessionId = sessionMatch[1];
-                setSessionId(newSessionId);
-                console.debug('New session ID set:', newSessionId);
-            }
-        }
-
         if (!response.ok) {
             if (response.status === 401) {
-                // Clear session and throw specific error
-                clearSessionId();
+                localStorage.removeItem('authToken');
+                window.location.href = '/login';
                 throw new Error('Session expired or invalid');
             }
             const errorData = await response.json().catch(() => null);
@@ -146,5 +158,110 @@ export const api = {
             console.error('Health check failed:', error);
             return false;
         }
+    },
+
+    async login({username, password}) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({username, password})
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Login failed');
+            }
+
+            const data = await response.json();
+
+            // Store token and expiration
+            localStorage.setItem('authToken', data.token);
+            localStorage.setItem('tokenExpiresAt', data.expires_at);
+            localStorage.setItem('tokenExpiresIn', data.expires_in);
+
+            return data;
+        } catch (error) {
+            console.error('Login error:', error);
+            throw error;
+        }
+    },
+
+    async register({username, password, name, role = 'user'}) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/auth/register`,
+            {
+                method: 'POST',
+                body: JSON.stringify({username, password, name, role})
+            }
+        );
+        return response.json();
+    },
+
+    async getCurrentUser() {
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/auth/me`);
+        return response.json();
+    },
+
+    logout() {
+        localStorage.removeItem('authToken');
+        window.location.href = '/login';
+    },
+
+    async listUsers() {
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/users`);
+        return response.json();
+    },
+
+    async updateUserRole(email, role) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/users/${email}/role`,
+            {
+                method: 'PUT',
+                body: JSON.stringify({role})
+            }
+        );
+        return response.json();
+    },
+
+    forceRefreshData: async () => {
+        try {
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/refresh`,
+                {
+                    method: 'POST'
+                }
+            );
+            return response.json();
+        } catch (error) {
+            console.error('Error in forceRefreshData:', error);
+            throw error;
+        }
+    },
+
+    // Admin endpoints
+    getUsers: async () => {
+        const response = await authenticatedFetch('/api/admin/users');
+        return response.json();
+    },
+
+    updateUser: async (userId, userData) => {
+        const response = await authenticatedFetch(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(userData)
+        });
+        return response.json();
+    },
+
+    getActivityLogs: async (filter = 'all') => {
+        const response = await authenticatedFetch(`/api/admin/logs?type=${filter}`);
+        return response.json();
+    },
+
+    getCacheStatus: async () => {
+        const response = await authenticatedFetch('/api/cache/status');
+        return response.json();
     }
 };

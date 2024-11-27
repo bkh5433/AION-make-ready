@@ -117,7 +117,7 @@
 @keyframes slide-up {
     from {
         opacity: 0;
-        transform: translateY(10px);
+        transform: translateY(8px);
     }
     to {
         opacity: 1;
@@ -164,6 +164,40 @@
     }
 }
 
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-table-row {
+    opacity: 0;
+    animation: fade-in-up 0.3s ease-out forwards;
+    animation-fill-mode: both;
+}
+
+/* Add a new stagger animation that's more subtle */
+@keyframes table-stagger {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-table-stagger {
+    opacity: 0;
+    animation: table-stagger 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
 /* Animation Utility Classes */
 .animate-indeterminate {
     animation: indeterminate 1.5s infinite;
@@ -186,7 +220,7 @@
 }
 
 .animate-slide-up {
-    animation: slide-up 0.3s ease-out;
+    animation: slide-up 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .animate-pulse-shadow {
@@ -202,4 +236,20 @@
     );
     background-size: 1000px 100%;
     animation: shimmer 2s infinite linear;
+}
+
+@keyframes fade-in-stagger {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-stagger {
+    opacity: 0;
+    animation: fade-in-stagger 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
