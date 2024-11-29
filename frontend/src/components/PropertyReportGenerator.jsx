@@ -9,8 +9,7 @@ import {
     Plus,
     AlertTriangle,
     Moon,
-    Sun,
-    RefreshCw
+    Sun
 } from 'lucide-react';
 import {useTheme} from "../lib/theme.jsx";
 import {api} from '../lib/api';
@@ -24,6 +23,7 @@ import PropertyRow from './PropertyRow';
 import {useAuth} from '../lib/auth';
 import DataFreshnessIndicator from './DataFreshnessIndicator';
 import {debounce} from '../lib/utils';
+import {searchCache} from '../lib/cache';
 
 const parseAPIDate = (dateStr) => {
     if (!dateStr) return null;
@@ -170,113 +170,136 @@ const PropertyReportGenerator = () => {
 
     const [dataIssues, setDataIssues] = useState([]);
 
-    // Create a memoized debounced search function
+    const [isCachedResult, setIsCachedResult] = useState(false);
+
+    const checkDataAge = (data) => {
+        if (data.length > 0) {
+            const firstItem = data[0];
+            const latestPostDateStr = firstItem.latest_post_date;
+            console.log('Latest Post Date String:', latestPostDateStr);
+
+            const latestPostDate = parseAPIDate(latestPostDateStr);
+            console.log('Parsed Latest Post Date:', latestPostDate);
+
+            if (!latestPostDate) {
+                throw new Error('Invalid latest_post_date format');
+            }
+
+            // Get yesterday's date at midnight GMT
+            const now = new Date();
+            const yesterday = new Date(Date.UTC(
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate() - 1
+            ));
+            console.log('Yesterday\'s Date:', yesterday);
+
+            const isUpToDate = latestPostDate.getTime() === yesterday.getTime();
+            setIsDataUpToDate(isUpToDate);
+            console.log('Data is up-to-date:', isUpToDate);
+        } else {
+            setIsDataUpToDate(null);
+            console.log('No data available');
+        }
+    };
+
+    // Memoized debounced search function with caching
     const debouncedSearch = React.useCallback(
-        debounce(async (term) => {
+        debounce(async (term, page = 1, perPage = 20) => {
             // Only check for duplicate searches if there is a search term
             if (term.length > 0 && term === prevSearchTerm) {
                 return;
             }
 
-            let attempts = 0;
-            const MAX_ATTEMPTS = 5;
+            try {
+                setIsLoading(true);
+                setError(null);
 
-            while (attempts < MAX_ATTEMPTS) {
-                try {
-                    setIsLoading(true);
-                    setError(null);
+                // TODO: Enable client side cache
 
-                    const response = await api.searchProperties(term);
-                    console.log('API Response:', response);
+                // Check cache first
+                // const cachedResult = searchCache.get(term, page, perPage);
+                // if (cachedResult) {
+                //     console.log('Using cached results for:', term);
+                //
+                //     setProperties(cachedResult.data);
+                //     setDataIssues(cachedResult.data_issues || []);
+                //     const isUpToDate = checkDataAge(cachedResult.data);
+                //     setIsDataUpToDate(isUpToDate);
+                //     setIsLoading(false);
+                //     setPrevSearchTerm(term);
+                //
+                //     // Update period dates if available
+                //     if (cachedResult.period_info) {
+                //         setPeriodStartDate(parseAPIDate(cachedResult.period_info.start_date));
+                //         setPeriodEndDate(parseAPIDate(cachedResult.period_info.end_date));
+                //     }
+                //
+                //     return;
+                // }
 
-                    if (!Array.isArray(response.data)) {
-                        throw new Error('Invalid response format');
-                    }
+                // If not in cache, fetch from API
+                const response = await api.searchProperties(term, page, perPage);
+                console.log('API Response:', response);
 
-                    // Handle data issues if present
-                    if (response.data_issues && response.data_issues.length > 0) {
-                        setDataIssues(response.data_issues);
-                    } else {
-                        setDataIssues([]);
-                    }
-
-                    // Check data age
-                    if (response.data.length > 0) {
-                        const firstItem = response.data[0];
-                        const latestPostDateStr = firstItem.latest_post_date;
-                        console.log('Latest Post Date String:', latestPostDateStr);
-
-                        // Parse latest_post_date as a GMT date
-                        const latestPostDate = new Date(latestPostDateStr);
-                        console.log('Parsed Latest Post Date:', latestPostDate);
-
-                        if (isNaN(latestPostDate)) {
-                            throw new Error('Invalid latest_post_date format');
-                        }
-
-                        // Get yesterday's date at midnight GMT
-                        const now = new Date();
-                        const yesterday = new Date(Date.UTC(
-                            now.getUTCFullYear(),
-                            now.getUTCMonth(),
-                            now.getUTCDate() - 1
-                        ));
-                        console.log('Yesterday\'s Date:', yesterday);
-
-                        // Compare dates directly
-                        if (latestPostDate.getTime() === yesterday.getTime()) {
-                            setIsDataUpToDate(true);
-                            console.log('Data is up-to-date');
-                        } else {
-                            setIsDataUpToDate(false);
-                            console.log('Data is not up-to-date');
-                        }
-                    } else {
-                        setIsDataUpToDate(null);
-                        console.log('No data available');
-                    }
-
-                    // Map properties with all necessary fields including dates
-                    const formattedProperties = response.data.map(property => ({
-                        PropertyKey: property.property_key,
-                        PropertyName: property.property_name,
-                        metrics: property.metrics,
-                        status: property.status,
-                        unitCount: property.total_unit_count,
-                        period_start_date: property.period_start_date,
-                        period_end_date: property.period_end_date,
-                        latest_post_date: property.latest_post_date
-                    }));
-
-                    setTimeout(() => {
-                        setProperties(formattedProperties);
-                        setIsLoading(false);
-
-                        if (isFirstLoad) {
-                            addNotification('success', 'Successfully fetched properties');
-                            setIsFirstLoad(false);
-                        }
-                    }, 1000);
-
-                    setPrevSearchTerm(term);
-                    break; // Exit the loop on success
-
-                } catch (error) {
-                    console.error(`Error fetching properties (Attempt ${attempts + 1}):`, error);
-                    attempts++;
-
-                    if (attempts === MAX_ATTEMPTS) {
-                        setError('Unable to connect to the server. Please refresh the page and try again.');
-                        setProperties([]);
-                        setIsLoading(false);
-                        addNotification('error', 'Connection failed. Please refresh the page and try again.');
-                        break;
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+                if (!Array.isArray(response.data)) {
+                    throw new Error('Invalid response format');
                 }
+
+                // Handle data issues if present
+                if (response.data_issues && response.data_issues.length > 0) {
+                    setDataIssues(response.data_issues);
+                } else {
+                    setDataIssues([]);
+                }
+
+
+                // Use the function for response data
+                checkDataAge(response.data);
+
+                // Map properties with all necessary fields including dates
+                const formattedProperties = response.data.map(property => ({
+                    PropertyKey: property.property_key,
+                    PropertyName: property.property_name,
+                    metrics: property.metrics,
+                    status: property.status,
+                    unitCount: property.total_unit_count,
+                    period_start_date: property.period_start_date,
+                    period_end_date: property.period_end_date,
+                    latest_post_date: property.latest_post_date
+                }));
+
+                // TODO: Enable client side cache
+                // Cache the formatted results
+                // const cacheData = {
+                //     data: formattedProperties,
+                //     data_issues: response.data_issues,
+                //     is_data_up_to_date: isDataUpToDate,
+                //     period_info: response.period_info,
+                //     timestamp: Date.now()
+                // };
+                // searchCache.set(term, page, perPage, cacheData);
+
+                setTimeout(() => {
+                    setProperties(formattedProperties);
+                    setIsLoading(false);
+
+                    if (isFirstLoad) {
+                        addNotification('success', 'Successfully fetched properties');
+                        setIsFirstLoad(false);
+                    }
+                }, 1000);
+
+                setPrevSearchTerm(term);
+
+            } catch (error) {
+                console.error(`Error fetching properties:`, error);
+                setError('Unable to connect to the server. Please refresh the page and try again.');
+                setProperties([]);
+                setIsLoading(false);
+                addNotification('error', 'Connection failed. Please refresh the page and try again.');
             }
-        }, 800),
+        }, 600),
         []
     );
 
@@ -672,12 +695,15 @@ const PropertyReportGenerator = () => {
         }).format(date);
     };
 
+    // Add cache invalidation on force refresh
     const handleForceRefresh = async () => {
         if (!user?.role === 'admin' || isRefreshing) return;
 
+        // Clear the search cache before refreshing
+        searchCache.clear();
+        
         setIsRefreshing(true);
         try {
-            // First initiate the refresh
             const response = await api.forceRefreshData();
             if (response.status === 'success') {
                 addNotification('info', 'Refresh initiated, this may take a few moments...');
@@ -703,7 +729,15 @@ const PropertyReportGenerator = () => {
         }
     };
 
-    // Update the DataIssuesAlert component to be more subtle
+    // Add effect to clear cache when component unmounts
+    useEffect(() => {
+        return () => {
+            // Clear the search cache when component unmounts
+            searchCache.clear();
+        };
+    }, []);
+
+    // Update the DataIssuesAlert component
     const DataIssuesAlert = () => {
         if (dataIssues.length === 0) return null;
 
@@ -737,6 +771,16 @@ const PropertyReportGenerator = () => {
                 </details>
             </div>
         );
+    };
+
+    // Add this function to your component
+    const handleClearCache = () => {
+        searchCache.clear();
+        addNotification('info', 'Search cache cleared');
+        // Optionally refresh the current search
+        if (searchTerm) {
+            debouncedSearch(searchTerm);
+        }
     };
 
     return (
@@ -979,7 +1023,7 @@ const PropertyReportGenerator = () => {
                         </table>
                     </div>
 
-                    {/* Selection Counter - Add better visibility */}
+                    {/* Selection Counter*/}
                     <div className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2 px-2">
                         <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded">
                             {selectedProperties.length}
@@ -1026,6 +1070,13 @@ const PropertyReportGenerator = () => {
                               d="M5 10l7-7m0 0l7 7m-7-7v18"/>
                     </svg>
                 </button>
+            )}
+
+            {isCachedResult && (
+                <div className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 bg-blue-500 rounded-full"></span>
+                    Showing cached results
+                </div>
             )}
 
         </div>

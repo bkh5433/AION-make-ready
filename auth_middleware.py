@@ -11,13 +11,14 @@ import secrets
 
 from logger_config import LogConfig
 from utils.path_resolver import PathResolver
+from config import Config
 
 # Initialize Firebase
 cred = credentials.Certificate(PathResolver.resolve_template_path('firebase-admin.json'))
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-SECRET_KEY = os.getenv('JWT_SECRET_KEY', secrets.token_hex(32))
+SECRET_KEY = Config.JWT_SECRET_KEY
 
 logger_config = LogConfig()
 logger = logger_config.get_logger("auth_middleware")

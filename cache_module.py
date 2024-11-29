@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 from functools import wraps
@@ -8,7 +9,7 @@ import asyncio
 import time
 from data_retrieval import sql_queries
 
-log_config = LogConfig()
+log_config = LogConfig(default_level=logging.DEBUG)
 logger = log_config.get_logger('cache_module')
 
 
@@ -73,29 +74,50 @@ class ConcurrentSQLCache:
         """Dynamically calculate the next check interval based on patterns"""
         now = datetime.now()
         expected_time = datetime.strptime(self.config.expected_update_time, "%H:%M").time()
-
-        # Convert expected_time to today's datetime
         expected_datetime = datetime.combine(now.date(), expected_time)
-
-        # Calculate time until expected update
         time_until_update = (expected_datetime - now).total_seconds()
+
         if time_until_update < 0:
-            # If we're past today's expected time, look at tomorrow
             expected_datetime = datetime.combine(now.date() + timedelta(days=1), expected_time)
             time_until_update = (expected_datetime - now).total_seconds()
 
-        # Reset the update detection flag at midnight
-        if now.hour == 0 and now.minute < 30:
-            self._update_detected_today = False
+        # If we have version info, use it to optimize check frequency
+        if self._current_version and self._current_version['last_modified']:
+            last_modified = self._current_version['last_modified']
+            # Convert string to datetime if needed
+            if isinstance(last_modified, str):
+                last_modified = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
 
-        # If we're within the update window
+            last_mod_date = last_modified.date()
+
+            # If last modification was today
+            if last_mod_date == now.date():
+                # If we're past the expected update time, use max interval
+                if time_until_update < 0:
+                    logger.debug("Today's update detected and past update window, using max interval")
+                    return self.config.max_refresh_interval
+
+            # If last modification was from a previous day
+            else:
+                # If we're approaching the update window
+                if 0 < time_until_update <= self.config.update_window:
+                    logger.debug("Approaching update window, using shorter interval")
+                    return min(300, self.config.base_refresh_interval)  # 5 minutes or base interval
+
+                # If we're in the update window but no update yet
+                if -self.config.update_window <= time_until_update <= 0:
+                    logger.debug("In update window, using minimum interval")
+                    return 300  # Check every 5 minutes during update window
+
+                # If we're well past the update window with no update
+                if time_until_update < -self.config.update_window:
+                    logger.debug("Past update window with no update, using base interval")
+                    return self.config.base_refresh_interval
+
+        # If we're within the update window (fallback behavior)
         if abs(time_until_update) <= self.config.update_window:
-            # Check more frequently during the update window
-            return min(300, self.config.base_refresh_interval)  # 5 minutes or base interval
-
-        # If we've detected today's update, use longer interval
-        if self._update_detected_today:
-            return self.config.max_refresh_interval
+            logger.debug("In general update window, using shorter interval")
+            return min(300, self.config.base_refresh_interval)
 
         # Default to base interval
         return self.config.base_refresh_interval
@@ -109,10 +131,8 @@ class ConcurrentSQLCache:
         now = datetime.now()
         age = now - self._last_refresh
 
-        # Calculate the current appropriate interval
-        current_interval = self._calculate_next_check_interval()
-
-        return age.total_seconds() > current_interval
+        # Use the already calculated next check interval
+        return age.total_seconds() > self._next_check_interval
 
     @property
     def needs_force_refresh(self) -> bool:
@@ -170,31 +190,50 @@ class ConcurrentSQLCache:
                 logger.warning("Could not fetch version info")
                 return True
 
+            # Convert string to datetime if needed
+            last_modified = version_info['last_modified']
+            if isinstance(last_modified, str):
+                last_modified = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
+
             current_version = {
-                'last_modified': version_info['last_modified'],
+                'last_modified': last_modified,
                 'record_count': version_info['record_count']
             }
 
             if not self._current_version:
                 logger.info(f"Initial version info - PostDate: {current_version['last_modified']}")
                 self._current_version = current_version
+                self._update_detected_today = (
+                        datetime.now().date() == current_version['last_modified'].date()
+                )
                 return True
 
+            # Normalize dates for comparison
+            current_last_modified = current_version['last_modified']
+            previous_last_modified = self._current_version['last_modified']
+            if isinstance(previous_last_modified, str):
+                previous_last_modified = datetime.fromisoformat(previous_last_modified.replace('Z', '+00:00'))
+
+            # Compare normalized dates and record counts
             needs_update = (
-                    current_version['last_modified'] != self._current_version['last_modified'] or
+                    current_last_modified.date() != previous_last_modified.date() or
                     current_version['record_count'] != self._current_version['record_count']
             )
 
             if needs_update:
                 logger.info(
-                    f"Update detected - New PostDate: {current_version['last_modified']}, "
-                    f"Previous PostDate: {self._current_version['last_modified']}, "
+                    f"Update detected - New PostDate: {current_last_modified}, "
+                    f"Previous PostDate: {previous_last_modified}, "
                     f"Record count change: {self._current_version['record_count']} -> "
                     f"{current_version['record_count']}"
                 )
+                self._update_detected_today = (
+                        datetime.now().date() == current_last_modified.date()
+                )
+                self._current_version = current_version
             else:
                 logger.debug(
-                    f"No updates detected - Current PostDate: {current_version['last_modified']}"
+                    f"No updates detected - Current PostDate: {current_last_modified}"
                 )
 
             return needs_update

@@ -62,11 +62,11 @@ class PathResolver:
         ]
 
         # Log the search process
-        logger.debug(f"Searching for template '{template_name}' in:")
+        logger.debug(f"Searching for file '{template_name}' in:")
         for path in search_paths:
             logger.debug(f"  - {path}")
             if path.exists():
-                logger.info(f"Found template at: {path}")
+                logger.info(f"Found file at: {path}")
                 return path
 
         # If we get here, we couldn't find the template

@@ -4,6 +4,7 @@ import configparser
 from . import sql_queries
 from typing import Dict
 from logger_config import LogConfig
+from decouple import config
 
 logger_config = LogConfig()
 logger = logger_config.get_logger('db_connection')
@@ -18,21 +19,17 @@ class DatabaseConnection:
     def _get_engine(self):
         """Create engine only when needed"""
         if not self._engine:
-            config = configparser.ConfigParser()
-            config.read('config.ini')
-
             connection_url = (
-                f"mssql+pyodbc://{config['DATABASE']['USER']}:"
-                f"{config['DATABASE']['PASSWORD']}@"
-                f"{config['DATABASE']['SERVER']}/"
-                f"{config['DATABASE']['DATABASE']}?"
+                f"mssql+pyodbc://{config('DB_USER')}:"
+                f"{config('DB_PASSWORD')}@"
+                f"{config('DB_SERVER')}/"
+                f"{config('DB_NAME')}?"
                 f"driver=ODBC+Driver+18+for+SQL+Server&"
                 f"TrustServerCertificate=yes"
             )
 
             self._engine = create_engine(
                 connection_url,
-                # Basic settings for single-use connection
                 pool_size=1,
                 max_overflow=0,
                 pool_timeout=30,

@@ -1,8 +1,6 @@
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 import shutil
-import io
-import zipfile
 import threading
 import asyncio
 from flask_cors import CORS
@@ -10,7 +8,6 @@ from models.ReportGenerationRequest import ReportGenerationRequest
 from models.ReportGenerationResponse import ReportGenerationResponse
 from models.ReportOutput import ReportOutput
 from datetime import datetime, timedelta
-from functools import wraps
 from typing import List
 from pydantic import ValidationError
 from property_search import PropertySearch
@@ -20,16 +17,18 @@ from session import get_session_path, cleanup_session, run_session_cleanup, gene
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
 from auth_middleware import AuthMiddleware, require_auth, require_role
-
+from config import Config
+from queue_manager import queue_manager, queue_requests
+from utils.catch_exceptions import catch_exceptions
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:5173"],
+        "origins": Config.CORS_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Cookie", "Set-Cookie", "Authorization"],
         "supports_credentials": True,
         "expose_headers": ["Set-Cookie"],
-        "max_age": 3600
+        "max_age": Config.CORS_MAX_AGE
     }
 })
 
@@ -37,33 +36,13 @@ CORS(app, resources={
 log_config = LogConfig()
 logger = log_config.get_logger('api')
 
-cache_config = CacheConfig(
-    force_refresh_interval=43200,  # 12 hours
-    refresh_timeout=30,
-    max_retry_attempts=3,
-    retry_delay=2,
-    enable_monitoring=True,
-    stale_if_error=True
-)
-
+# Initialize cache with configuration from Config
+cache_config = CacheConfig(**Config.CACHE_CONFIG)
 cache = ConcurrentSQLCache(cache_config)
 
+# Initialize authentication middleware
 auth = AuthMiddleware()
 
-
-def catch_exceptions(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"Error occurred: {str(e)}", exc_info=True)
-            return jsonify({
-                "status": "error",
-                "message": "An internal error occurred. Please try again later."
-            }), 500
-
-    return wrapper
 
 
 def fetch_make_ready_data_sync():
@@ -80,12 +59,10 @@ def fetch_make_ready_data_sync():
         logger.error(f"Error fetching make ready data: {str(e)}")
         raise
 
-
 async def fetch_make_ready_data():
     """Async wrapper for the synchronous fetch function"""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, fetch_make_ready_data_sync)
-
 
 def run_async(coro):
     """Run an async function in a new event loop"""
@@ -95,7 +72,6 @@ def run_async(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
-
 
 @app.route('/api/data', methods=['GET'])
 @require_auth
@@ -134,17 +110,32 @@ def get_make_ready_data():
         logger.error(f"Error in get_make_ready_data: {str(e)}")
         raise
 
-
 @app.route('/api/health', methods=['GET'])
 def health_check():
     logger.info("GET /api/health endpoint accessed.")
-    return jsonify({"status": "healthy"}), 200
+    stats = {
+        'status': 'healthy',
+        'queues': {}
+    }
 
+    # Get stats for all active queues
+    for route in queue_manager.queues:
+        queue_stats = queue_manager.get_stats(route)
+        if queue_stats:
+            stats['queues'][route] = {
+                'active_requests': queue_stats.active_requests,
+                'total_processed': queue_stats.total_processed,
+                'avg_processing_time': f"{queue_stats.avg_processing_time:.3f}s",
+                'last_processed': queue_stats.last_processed.isoformat() if queue_stats.last_processed else None
+            }
+
+    return jsonify(stats)
 
 @app.route('/api/properties/search', methods=['GET'])
 @require_auth
 @catch_exceptions
 @log_exceptions(logger)
+# @queue_requests(max_concurrent=20)
 def search_properties():
     """
     Search properties by name.
@@ -224,9 +215,6 @@ def search_properties():
     except Exception as e:
         logger.error(f"Error in search endpoint: {str(e)}", exc_info=True)
         raise
-
-
-# In app.py
 
 @app.route('/api/reports/generate', methods=['POST'])
 @require_auth
@@ -371,7 +359,6 @@ def generate_report():
             "message": f"Error generating report: {str(e)}"
         }, 500
 
-
 @app.route('/api/refresh', methods=['POST'])
 @require_auth
 @require_role('admin')
@@ -402,7 +389,6 @@ def refresh_data():
         logger.error(f"Error initiating refresh: {str(e)}")
         raise
 
-
 def cleanup_empty_directory(directory: Path):
     """Clean up directory if empty after file removal."""
     try:
@@ -414,9 +400,6 @@ def cleanup_empty_directory(directory: Path):
                 logger.info(f"Cleaned up empty directory: {directory}")
     except Exception as e:
         logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
-
-
-
 
 @app.route('/api/reports/download', methods=['GET'])
 @require_auth
@@ -489,7 +472,6 @@ def download_report():
             "message": "Error processing download request"
         }), 500
 
-
 @app.route('/api/session/end', methods=['POST'])
 @catch_exceptions
 @log_exceptions(logger)
@@ -513,8 +495,8 @@ def end_session():
             "message": "Error ending session"
         }), 500
 
-
 @app.route('/api/cache/status', methods=['GET'])
+@require_auth
 @catch_exceptions
 def cache_status():
     """Enhanced endpoint to check cache status and update patterns"""
@@ -532,6 +514,10 @@ def cache_status():
 
         time_until_update = (expected_datetime - now).total_seconds()
 
+        # Calculate next check datetime
+        next_check_datetime = now + timedelta(seconds=cache._next_check_interval)
+        expected_update_datetime = expected_datetime
+
         # Enhanced status response
         response = {
             "status": "healthy",
@@ -543,9 +529,13 @@ def cache_status():
                     (now - cache._last_refresh).total_seconds() / 3600
                     if cache._last_refresh else None
                 ),
-                "next_check_in_seconds": cache._next_check_interval,
+                "next_check_interval_seconds": cache._next_check_interval,
+                "next_check_datetime": next_check_datetime.isoformat(),
                 "expected_update_time": cache.config.expected_update_time,
+                "expected_update_datetime": expected_update_datetime.isoformat(),
                 "time_until_update_seconds": time_until_update,
+                "time_until_update_hours": time_until_update / 3600,
+                
                 "is_update_window": (
                         abs(time_until_update) <= cache.config.update_window
                 ),
@@ -611,7 +601,6 @@ def cache_status():
             "error": str(e)
         }), 500
 
-
 def schedule_data_refresh():
     """Enhanced dynamic scheduling for data refresh"""
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -659,9 +648,7 @@ def schedule_data_refresh():
     scheduler.start()
     return scheduler
 
-
 app.scheduler = schedule_data_refresh()
-
 
 @app.route('/api/auth/login', methods=['POST'])
 @catch_exceptions
@@ -712,7 +699,6 @@ def login():
             'success': False,
             'message': 'An error occurred during login'
         }), 500
-
 
 @app.route('/api/auth/register', methods=['POST'])
 @require_auth
@@ -765,7 +751,6 @@ def register():
             'message': 'An error occurred during registration'
         }), 500
 
-
 @app.route('/api/auth/me', methods=['GET'])
 @require_auth
 def get_current_user():
@@ -773,7 +758,6 @@ def get_current_user():
     return jsonify({
         'user': request.user
     })
-
 
 @app.route('/api/users', methods=['GET'])
 @require_auth
@@ -797,7 +781,6 @@ def list_users():
         return jsonify({
             'message': f'Error fetching users: {str(e)}'
         }), 500
-
 
 @app.route('/api/users/<email>/role', methods=['PUT'])
 @require_auth
@@ -827,7 +810,6 @@ def update_user_role(email):
         'message': 'User not found'
     }), 404
 
-
 @app.route('/api/admin/users', methods=['GET'])
 @require_auth
 @require_role('admin')
@@ -855,7 +837,6 @@ def get_users():
             'success': False,
             'message': 'Error fetching users'
         }), 500
-
 
 @app.route('/api/admin/users/<user_id>', methods=['PUT'])
 @require_auth
@@ -896,7 +877,6 @@ def update_user(user_id):
             'message': 'Error updating user'
         }), 500
 
-
 @app.route('/api/admin/logs', methods=['GET'])
 @require_auth
 @require_role('admin')
@@ -920,6 +900,22 @@ def get_logs():
             'success': False,
             'message': 'Error fetching logs'
         }), 500
+
+
+# @app.route('/api/some_endpoint', methods=['GET'])
+# @require_auth
+# @catch_exceptions
+# @log_exceptions(logger)
+# def some_endpoint():
+#     # Construct dynamic URL using Config
+#     dynamic_url = f"http://{Config.API_HOST}:{Config.API_PORT}/api/some_other_endpoint"
+
+#     # Use dynamic_url as needed
+#     response = {
+#         "message": "This is a dynamically constructed URL.",
+#         "url": dynamic_url
+#     }
+#     return jsonify(response), 200
 
 if __name__ == '__main__':
     logger.info("Starting application and updating initial cache.")
