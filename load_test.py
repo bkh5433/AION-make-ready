@@ -59,6 +59,7 @@ class APILoadTester:
         self.results: List[Dict] = []
         self.session = None
         self.request_queue = RequestQueue(max_concurrent=20)
+        self.semaphore = asyncio.Semaphore(20)
 
     async def initialize_session(self):
         """Initialize aiohttp session"""
@@ -80,12 +81,16 @@ class APILoadTester:
         result = {
             'timestamp': datetime.now(),
             'endpoint': endpoint,
-            'queued_at': start_time
+            'queued_at': start_time,
+            'status_code': None
         }
 
         try:
             async with self.semaphore:
-                async with self.session.get(f"{self.base_url}{endpoint}") as response:
+                async with self.session.get(
+                        f"{self.base_url}{endpoint}",
+                        headers=getattr(self, 'headers', {})
+                ) as response:
                     await response.json()
                     result.update({
                         'status_code': response.status,
@@ -97,7 +102,8 @@ class APILoadTester:
             result.update({
                 'success': False,
                 'error': str(e),
-                'duration': time.time() - start_time
+                'duration': time.time() - start_time,
+                'status_code': 500
             })
             logger.error(f"Request error: {e}")
 
@@ -158,6 +164,9 @@ class APILoadTester:
         df = pd.DataFrame(self.results)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df = df.sort_values('timestamp')
+
+        # Ensure status_code exists and has a valid value
+        df['status_code'] = df['status_code'].fillna(0).astype(int)
 
         # Calculate rolling averages and other metrics
         df['rolling_avg'] = df['duration'].rolling(window=10).mean()
@@ -321,9 +330,10 @@ class APILoadTester:
                 f.write("- 95th percentile response time exceeds 1 second. Consider performance optimization.\n")
 
 
-async def run_load_test(endpoint: str, num_requests: int, concurrent_users: int, delay: float = 0):
+async def run_load_test(endpoint: str, num_requests: int, concurrent_users: int, delay: float = 0, token: str = None):
     """Run a complete load test"""
     tester = APILoadTester()
+    tester.headers = {'Authorization': f'Bearer {token}'} if token else {}
 
     logger.info(f"Starting load test with {num_requests} total requests, "
                 f"{concurrent_users} concurrent users")
@@ -371,6 +381,8 @@ def main():
                         help='Number of concurrent users')
     parser.add_argument('--delay', type=float, default=1,
                         help='Delay between requests (seconds)')
+    parser.add_argument('--token', type=str, required=True,
+                        help='Authentication token')
 
     args = parser.parse_args()
 
@@ -378,7 +390,8 @@ def main():
         args.endpoint,
         args.requests,
         args.users,
-        args.delay
+        args.delay,
+        args.token
     ))
 
 

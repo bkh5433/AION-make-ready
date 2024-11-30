@@ -20,6 +20,7 @@ from auth_middleware import AuthMiddleware, require_auth, require_role
 from config import Config
 from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
+from monitoring import SystemMonitor
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
@@ -43,7 +44,8 @@ cache = ConcurrentSQLCache(cache_config)
 # Initialize authentication middleware
 auth = AuthMiddleware()
 
-
+# Initialize SystemMonitor with other initializations
+system_monitor = SystemMonitor()
 
 def fetch_make_ready_data_sync():
     """Synchronous function to fetch data from SQL"""
@@ -901,6 +903,27 @@ def get_logs():
             'message': 'Error fetching logs'
         }), 500
 
+
+@app.route('/api/system/metrics', methods=['GET'])
+@require_auth
+@require_role('admin')
+@catch_exceptions
+@log_exceptions(logger)
+def get_system_metrics():
+    """Get system metrics for monitoring"""
+    try:
+        metrics = system_monitor.get_all_metrics()
+        return jsonify({
+            "success": True,
+            "metrics": metrics
+        })
+    except Exception as e:
+        logger.error(f"Error getting system metrics: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Error retrieving system metrics",
+            "error": str(e)
+        }), 500
 
 # @app.route('/api/some_endpoint', methods=['GET'])
 # @require_auth
