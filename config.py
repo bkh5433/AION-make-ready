@@ -1,6 +1,6 @@
 from decouple import config
 from datetime import timedelta
-
+import os
 
 class Config:
     # Database
@@ -29,7 +29,7 @@ class Config:
     }
 
     # Security
-    JWT_SECRET_KEY = config('JWT_SECRET_KEY')
+    JWT_SECRET_KEY = config('JWT_SECRET_KEY', default=os.urandom(32).hex(), cast=str)
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
         seconds=config('JWT_ACCESS_TOKEN_EXPIRES', default=86400, cast=int)
     )

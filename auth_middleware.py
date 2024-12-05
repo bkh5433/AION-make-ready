@@ -14,7 +14,18 @@ from utils.path_resolver import PathResolver
 from config import Config
 
 # Initialize Firebase
-cred = credentials.Certificate(PathResolver.resolve_template_path('firebase-admin.json'))
+cred = credentials.Certificate({
+    "type": "service_account",
+    "project_id": Config.FIREBASE_CONFIG['project_id'],
+    "private_key_id": Config.FIREBASE_CONFIG['private_key_id'],
+    "private_key": Config.FIREBASE_CONFIG['private_key'].replace('\\n', '\n'),
+    "client_email": Config.FIREBASE_CONFIG['client_email'],
+    "client_id": Config.FIREBASE_CONFIG['client_id'],
+    "auth_uri": Config.FIREBASE_CONFIG['auth_uri'],
+    "token_uri": Config.FIREBASE_CONFIG['token_uri'],
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{Config.FIREBASE_CONFIG['client_email']}"
+})
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 

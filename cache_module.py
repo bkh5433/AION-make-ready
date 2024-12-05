@@ -8,6 +8,7 @@ import threading
 import asyncio
 import time
 from data_retrieval import sql_queries
+from decouple import config
 
 log_config = LogConfig(default_level=logging.DEBUG)
 logger = log_config.get_logger('cache_module')
@@ -16,17 +17,17 @@ logger = log_config.get_logger('cache_module')
 @dataclass
 class CacheConfig:
     """Configuration for SQL data cache"""
-    base_refresh_interval: int = 1800  # 30 minutes for checking updates
-    max_refresh_interval: int = 43200  # 12 hours
-    force_refresh_interval: int = 86400  # 24 hours
-    refresh_timeout: int = 30
-    max_retry_attempts: int = 3
-    retry_delay: int = 1
-    enable_monitoring: bool = True
-    log_refreshes: bool = True
-    stale_if_error: bool = True
-    expected_update_time: str = "10:00"  # Expected daily update time
-    update_window: int = 7200  # 2-hour window around expected time (±1 hour)
+    base_refresh_interval: int = config('CACHE_REFRESH_INTERVAL', cast=int)
+    max_refresh_interval: int = config('CACHE_FORCE_REFRESH', cast=int)
+    force_refresh_interval: int = config('CACHE_FORCE_REFRESH', cast=int)
+    refresh_timeout: int = config('CACHE_REFRESH_TIMEOUT', cast=int)
+    max_retry_attempts: int = config('CACHE_MAX_RETRY_ATTEMPTS', cast=int)
+    retry_delay: int = config('CACHE_RETRY_DELAY', cast=int)
+    enable_monitoring: bool = config('CACHE_ENABLE_MONITORING', cast=bool, default=True)
+    log_refreshes: bool = config('CACHE_LOG_REFRESHES', cast=bool, default=True)
+    stale_if_error: bool = config('CACHE_STALE_IF_ERROR', cast=bool, default=True)
+    expected_update_time: str = config('CACHE_EXPECTED_UPDATE_TIME', cast=str, default="10:00")
+    update_window: int = config('CACHE_UPDATE_WINDOW', cast=int, default=7200)
     version_check_query: str = sql_queries.VERSION_CHECK_QUERY
 
 
