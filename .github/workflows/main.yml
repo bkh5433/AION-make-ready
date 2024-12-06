@@ -1,4 +1,4 @@
-name: Deploy Backend and Frontend
+name: Deploy Backend
 
 on:
   push:
@@ -86,14 +86,3 @@ jobs:
             # Cleanup old images
             docker image prune -f
           EOF
-
-      # Deploy frontend to Amplify
-      - name: Deploy Frontend to Dev
-        if: github.ref == 'refs/heads/dev'
-        run: |
-          aws amplify start-job --app-id ${{ secrets.AMPLIFY_APP_ID }} --branch-name dev --job-type RELEASE
-
-      - name: Deploy Frontend to Production
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          aws amplify start-job --app-id ${{ secrets.AMPLIFY_APP_ID }} --branch-name prod --job-type RELEASE
