@@ -1,6 +1,6 @@
 import {getSessionId, setSessionId, clearSessionId} from './session';
 
-// Ensure the base URL always ends with /api
+// Ensure the base URL always uses HTTPS and ends with /api
 const API_BASE_URL = (() => {
     const baseUrl = import.meta.env.VITE_API_BASE_URL;
     console.log('API Base URL from env:', baseUrl);
@@ -13,9 +13,17 @@ const API_BASE_URL = (() => {
         }
     }
 
-    const finalUrl = baseUrl || 'http://127.0.0.1:5000';
-    console.log('Using API Base URL:', finalUrl);
-    return finalUrl.endsWith('/api') ? finalUrl : `${finalUrl}/api`;
+    // Convert HTTP to HTTPS if needed
+    let finalUrl = baseUrl || 'http://127.0.0.1:5000';
+    if (import.meta.env.PROD && finalUrl.startsWith('http://')) {
+        finalUrl = 'https://' + finalUrl.substring(7);
+        console.log('Converted to HTTPS URL:', finalUrl);
+    }
+
+    // Add /api if needed
+    finalUrl = finalUrl.endsWith('/api') ? finalUrl : `${finalUrl}/api`;
+    console.log('Final API URL:', finalUrl);
+    return finalUrl;
 })();
 
 // Add this helper function at the top of the file
