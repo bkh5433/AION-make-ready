@@ -127,6 +127,31 @@ jobs:
                 -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
                 aion-api:$GITHUB_SHA
+
+              # Wait for container to be healthy
+              echo "⏳ Waiting for container to start..."
+              sleep 5
+          
+              # Check container logs
+              echo "📋 Container logs:"
+              docker logs aion-api
+          
+              # Check if container is still running
+              if ! docker ps | grep -q aion-api; then
+                echo "❌ Container failed to start. Showing last logs:"
+                docker logs aion-api
+                exit 1
+              fi
+          
+              # Check if API is responding
+              echo "🔍 Checking API health..."
+              if curl -f http://localhost:5000/health 2>/dev/null; then
+                echo "✅ API is healthy"
+              else
+                echo "❌ API is not responding. Showing logs:"
+                docker logs aion-api
+                exit 1
+              fi
             else
               echo "🔧 Using production environment variables..."
               docker run -d \
@@ -142,21 +167,33 @@ jobs:
                 -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.PROD_CORS_ORIGINS }}' \
                 aion-api:$GITHUB_SHA
-            fi
 
-            echo "✅ Verifying container status..."
-            docker ps | grep aion-api
-            if ! docker ps | grep -q aion-api; then
-              echo "❌ Error: Container failed to start!"
+              # Wait for container to be healthy
+              echo "⏳ Waiting for container to start..."
+              sleep 5
+          
+              # Check container logs
               echo "📋 Container logs:"
               docker logs aion-api
-              exit 1
+          
+              # Check if container is still running
+              if ! docker ps | grep -q aion-api; then
+                echo "❌ Container failed to start. Showing last logs:"
+                docker logs aion-api
+                exit 1
+              fi
+          
+              # Check if API is responding
+              echo "🔍 Checking API health..."
+              if curl -f http://localhost:5000/health 2>/dev/null; then
+                echo "✅ API is healthy"
+              else
+                echo "❌ API is not responding. Showing logs:"
+                docker logs aion-api
+                exit 1
+              fi
             fi
-          
-            echo "🔍 Checking container health..."
-            sleep 5  # Wait for container to initialize
-            docker logs aion-api
-          
+
             echo "🧹 Cleaning up old images..."
             echo "Before cleanup:"
             docker image ls
