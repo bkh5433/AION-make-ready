@@ -29,30 +29,88 @@ jobs:
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           GITHUB_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${GITHUB_REF##*/}
         run: |
+          echo "🚀 Starting deployment process..."
+          echo "Branch: ${GITHUB_REF##*/}"
+          echo "Commit: $GITHUB_SHA"
+          
+          echo "📝 Setting up SSH key..."
           echo "$SSH_PRIVATE_KEY" > private_key && chmod 600 private_key
+          
           ssh -o StrictHostKeyChecking=no -i private_key $EC2_USERNAME@$EC2_HOST << EOF
-            # Stop existing container
-            docker stop aion-api || true
-            docker rm aion-api || true
+            set -e  # Exit on any error
+          
+            echo "🔍 Checking system status..."
+            df -h
+            docker system df
+            echo "Memory usage:"
+            free -h
+          
+            echo "📂 Setting up deployment directory..."
+            mkdir -p ~/aion-api
+            cd ~/aion-api
 
-            # Clone/pull latest code
-            if [ ! -d "aion-api" ]; then
-              git clone https://github.com/${{ github.repository }}.git aion-api
+            echo "🐳 Checking Docker status..."
+            docker ps
+          
+            echo "🛑 Stopping existing container..."
+            if docker ps -a | grep -q aion-api; then
+              echo "Found existing container. Stopping and removing..."
+              docker stop aion-api || true
+              docker rm aion-api || true
             else
-              cd aion-api
-              git fetch
-              git reset --hard origin/${GITHUB_REF##*/}
+              echo "No existing container found."
             fi
 
-            cd aion-api
+            # Determine which branch to use
+            DEPLOY_BRANCH="${GITHUB_REF##*/}"
+            echo "🌿 Deploying branch: $DEPLOY_BRANCH"
+
+            echo "📥 Setting up repository..."
+            if [ -d ".git" ]; then
+              echo "Updating existing repository..."
+              git fetch origin
+              echo "Checking out branch: $DEPLOY_BRANCH"
+              git checkout $DEPLOY_BRANCH || git checkout -b $DEPLOY_BRANCH origin/$DEPLOY_BRANCH
+              git pull origin $DEPLOY_BRANCH
+              git reset --hard origin/$DEPLOY_BRANCH
+              echo "Current git status:"
+              git status
+            else
+              echo "Cloning fresh repository..."
+              git clone -b $DEPLOY_BRANCH https://github.com/${{ github.repository }}.git .
+            fi
           
-            # Build new Docker image
+            echo "✅ Verifying branch..."
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+            if [ "$CURRENT_BRANCH" != "$DEPLOY_BRANCH" ]; then
+              echo "❌ Error: Wrong branch! Expected $DEPLOY_BRANCH, got $CURRENT_BRANCH"
+              exit 1
+            fi
+            echo "Current commit: $(git rev-parse HEAD)"
+          
+            echo "🔍 Checking repository structure..."
+            ls -la
+            if [ ! -d "backend" ]; then
+              echo "❌ Error: backend directory not found!"
+              exit 1
+            fi
+          
+            echo "📦 Checking backend directory contents..."
+            ls -la backend/
+          
+            echo "🏗️ Building Docker image..."
+            echo "Using Dockerfile at: backend/Dockerfile"
+            cat backend/Dockerfile
             docker build -t aion-api:$GITHUB_SHA -f backend/Dockerfile backend/
           
-            # Run new container with environment based on branch
-            if [ "${GITHUB_REF##*/}" = "dev" ]; then
-              # Development environment variables
+            echo "✅ Verifying built image..."
+            docker images | grep aion-api
+          
+            echo "🚀 Starting container..."
+            if [ "$DEPLOY_BRANCH" = "dev" ]; then
+              echo "🔧 Using development environment variables..."
               docker run -d \
                 --name aion-api \
                 --restart always \
@@ -67,7 +125,7 @@ jobs:
                 -e CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
                 aion-api:$GITHUB_SHA
             else
-              # Production environment variables
+              echo "🔧 Using production environment variables..."
               docker run -d \
                 --name aion-api \
                 --restart always \
@@ -83,6 +141,32 @@ jobs:
                 aion-api:$GITHUB_SHA
             fi
 
-            # Cleanup old images
-            docker image prune -f
+            echo "✅ Verifying container status..."
+            docker ps | grep aion-api
+            if ! docker ps | grep -q aion-api; then
+              echo "❌ Error: Container failed to start!"
+              echo "📋 Container logs:"
+              docker logs aion-api
+              exit 1
+            fi
+          
+            echo "🔍 Checking container health..."
+            sleep 5  # Wait for container to initialize
+            docker logs aion-api
+          
+            echo "🧹 Cleaning up old images..."
+            echo "Before cleanup:"
+            docker image ls
+            docker image prune -a --force --filter "until=72h"
+            echo "After cleanup:"
+            docker image ls
+          
+            echo "📊 Final system status:"
+            df -h
+            docker system df
+          
+            echo "✅ Deployment completed successfully!"
+            echo "Branch: $DEPLOY_BRANCH"
+            echo "Commit: $GITHUB_SHA"
+            echo "Container ID: $(docker ps -q -f name=aion-api)"
           EOF
