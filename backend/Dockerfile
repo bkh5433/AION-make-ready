@@ -21,5 +21,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Run gunicorn
-CMD ["gunicorn", "--workers=4", "--bind=0.0.0.0:5000", "app:app"]
+# Run gunicorn with 1 worker since we have concurrent cache
+CMD ["gunicorn", "--workers=1", "--bind=0.0.0.0:5000", "app:app"]
