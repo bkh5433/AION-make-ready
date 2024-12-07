@@ -3,6 +3,8 @@ import {getSessionId, setSessionId, clearSessionId} from './session';
 // Ensure the base URL always ends with /api
 const API_BASE_URL = (() => {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
+    console.log('API Base URL from env:', import.meta.env.VITE_API_BASE_URL);
+    console.log('Using API Base URL:', baseUrl);
     return baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`;
 })();
 
@@ -166,18 +168,17 @@ export const api = {
 
     async login({username, password}) {
         try {
-            const response = await fetch(`${API_BASE_URL}/auth/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({username, password})
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.message || 'Login failed');
-            }
+            console.log('Attempting login with API URL:', `${API_BASE_URL}/auth/login`);
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/auth/login`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({username, password})
+                }
+            );
 
             const data = await response.json();
 
