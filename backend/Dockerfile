@@ -29,9 +29,8 @@ COPY .. .
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 RUN rm /etc/nginx/sites-enabled/default
 
-# Set up supervisor
-RUN mkdir -p /var/log/supervisor
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:app"]
 
 # Set Python path
 ENV PYTHONPATH=/app
