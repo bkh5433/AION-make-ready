@@ -28,4 +28,4 @@ frontend:
   cache:
     paths:
       - frontend/node_modules/**/*
-      - /root/.npm/**/* 
+      - /root/.npm/**/*
