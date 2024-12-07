@@ -459,7 +459,17 @@ const PropertyReportGenerator = () => {
                 total: 1
             });
 
-            await api.downloadFile(file.path);
+            const blob = await api.downloadReport(file.path);
+
+            // Create and trigger download
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(url);
+            document.body.removeChild(a);
 
             // Update file status
             setDownloadManagerState(prev => ({
