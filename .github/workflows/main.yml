@@ -96,6 +96,13 @@ jobs:
             echo "🔍 Verifying app.py location..."
             ls -la backend/app.py
           
+            echo "🏗 Setting up nginx..."
+            sudo apt-get update
+            sudo apt-get install -y nginx
+            sudo cp backend/nginx.conf /etc/nginx/conf.d/default.conf
+            sudo rm /etc/nginx/sites-enabled/default
+            sudo systemctl restart nginx
+          
             echo "🏗️ Building Docker image..."
             echo "Using Dockerfile at: backend/Dockerfile"
             cat backend/Dockerfile
