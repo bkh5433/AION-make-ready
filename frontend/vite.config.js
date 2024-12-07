@@ -11,12 +11,11 @@ export default defineConfig({
             output: {
                 manualChunks: {
                     vendor: ['react', 'react-dom', 'react-router-dom'],
-                    ui: ['lucide-react', '@radix-ui/react-alert-dialog', '@radix-ui/react-tabs']
+                    ui: ['lucide-react', '@radix-ui/react-alert-dialog']
                 }
             },
             external: [
-                'jszip',
-                '@radix-ui/react-tabs'
+                'jszip'
             ]
         }
     },
