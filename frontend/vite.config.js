@@ -8,6 +8,7 @@ export default defineConfig({
     build: {
         sourcemap: true,
         rollupOptions: {
+            external: ['jszip'],
             output: {
                 manualChunks: {
                     vendor: ['react', 'react-dom', 'react-router-dom'],
