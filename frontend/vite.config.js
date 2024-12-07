@@ -8,13 +8,16 @@ export default defineConfig({
     build: {
         sourcemap: true,
         rollupOptions: {
-            external: ['jszip'],
             output: {
                 manualChunks: {
                     vendor: ['react', 'react-dom', 'react-router-dom'],
                     ui: ['lucide-react', '@radix-ui/react-alert-dialog', '@radix-ui/react-tabs']
                 }
-            }
+            },
+            external: [
+                'jszip',
+                '@radix-ui/react-tabs'
+            ]
         }
     },
     server: {
