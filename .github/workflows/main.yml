@@ -126,6 +126,13 @@ jobs:
                 -e AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
                 -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
+                -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
+                -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
+                -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
+                -e FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}' \
+                -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
+                -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
+                -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
                 aion-api:$GITHUB_SHA
 
               # Wait for container to be healthy
@@ -166,6 +173,13 @@ jobs:
                 -e AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
                 -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.PROD_CORS_ORIGINS }}' \
+                -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
+                -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
+                -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
+                -e FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}' \
+                -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
+                -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
+                -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
                 aion-api:$GITHUB_SHA
 
               # Wait for container to be healthy
