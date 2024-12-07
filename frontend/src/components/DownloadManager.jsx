@@ -1,11 +1,10 @@
 import React, {useState} from 'react';
-import {FileDown, CheckCircle, X, Download, Archive, Trash2} from 'lucide-react';
+import {FileDown, CheckCircle, X, Download} from 'lucide-react';
 import {Card, CardContent} from './ui/card';
 
 const DownloadManager = ({
                              files = [],
                              onDownload,
-                             onDownloadAll,
                              onClose,
                              isVisible,
                              downloadProgress = null
@@ -29,8 +28,6 @@ const DownloadManager = ({
         return new Date(timestamp).toLocaleString();
     };
 
-    const shouldZip = pendingFiles.length > 3;
-
     // Helper to render progress bar
     const renderProgress = () => {
         if (!downloadProgress) return null;
@@ -38,9 +35,6 @@ const DownloadManager = ({
         const getProgressPercent = () => {
             if (downloadProgress.type === 'progress') {
                 return (downloadProgress.completed / downloadProgress.total) * 100;
-            }
-            if (downloadProgress.type === 'compressing') {
-                return downloadProgress.progress || 0;
             }
             return 0;
         };

@@ -15,7 +15,6 @@ import {useTheme} from "../lib/theme.jsx";
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
 import FloatingDownloadButton from './FloatingDownloadButton';
-import {ZipDownloader, createTimestampedZipName, formatFileSize} from '../lib/zipUtility';
 import useSessionManager from '../lib/session';
 import {getSessionId} from '../lib/session';
 import {Tooltip} from './ui/tooltip';
@@ -453,199 +452,28 @@ const PropertyReportGenerator = () => {
 
     const handleDownload = async (file) => {
         try {
-            const currentSessionId = getSessionId();
-            if (!currentSessionId) {
-                throw new Error('No active session. Please regenerate the reports.');
-            }
+            setDownloadProgress({
+                type: 'progress',
+                message: 'Downloading file...',
+                completed: 0,
+                total: 1
+            });
 
+            await api.downloadFile(file.path);
+
+            // Update file status
             setDownloadManagerState(prev => ({
                 ...prev,
                 files: prev.files.map(f =>
-                    f.path === file.path
-                        ? {...f, downloading: true}
-                        : f
+                    f.path === file.path ? {...f, downloaded: true} : f
                 )
             }));
 
-            const blob = await api.downloadReport(file.path);
-
-            // Create and trigger download
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = file.name;
-            document.body.appendChild(a);
-            a.click();
-            URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-
-            setDownloadManagerState(prev => ({
-                ...prev,
-                files: prev.files.map(f =>
-                    f.path === file.path
-                        ? {...f, downloading: false, downloaded: true}
-                        : f
-                )
-            }));
-
-            addNotification('success', `Successfully downloaded ${file.name}`);
+            setDownloadProgress(null);
         } catch (error) {
-            console.error('Download error:', error);
-
-            if (error.message.includes('session')) {
-                // Session-specific error handling
-                addNotification('error', 'Session expired. Please regenerate the reports.');
-                // Optionally clear the download manager
-                setDownloadManagerState(prev => ({
-                    ...prev,
-                    isVisible: false,
-                    files: []
-                }));
-            } else {
-                addNotification('error', `Failed to download ${file.name}: ${error.message}`);
-            }
-
-            setDownloadManagerState(prev => ({
-                ...prev,
-                files: prev.files.map(f =>
-                    f.path === file.path
-                        ? {...f, downloading: false, failed: true}
-                        : f
-                )
-            }));
-        }
-    };
-
-    // Add this function to handle downloading all files
-    const handleDownloadAll = async (files) => {
-        if (files.length > 3) {
-            // Initialize ZipDownloader with callbacks
-            const zipDownloader = new ZipDownloader({
-                api,
-                onProgress: (progress) => {
-                    setDownloadProgress(progress);
-                    if (progress.type === 'start') {
-                        addNotification('info', progress.message);
-                    }
-                },
-                onFileComplete: ({file}) => {
-                    // Update individual file status in download manager
-                    setDownloadManagerState(prev => ({
-                        ...prev,
-                        files: prev.files.map(f =>
-                            f.path === file.path
-                                ? {...f, downloading: false, downloaded: true}
-                                : f
-                        )
-                    }));
-                },
-                onError: ({file, error}) => {
-                    const message = file
-                        ? `Failed to download ${file.name}: ${error}`
-                        : `Download error: ${error}`;
-                    addNotification('error', message);
-
-                    // Reset file status if there was an error
-                    if (file) {
-                        setDownloadManagerState(prev => ({
-                            ...prev,
-                            files: prev.files.map(f =>
-                                f.path === file.path
-                                    ? {...f, downloading: false}
-                                    : f
-                            )
-                        }));
-                    }
-                },
-                onSuccess: ({fileCount, size}) => {
-                    addNotification('success',
-                        `Successfully downloaded ${fileCount} files (${formatFileSize(size)})`
-                    );
-                    setDownloadProgress(null);
-                }
-            });
-
-            try {
-                // Update all files to downloading state
-                setDownloadManagerState(prev => ({
-                    ...prev,
-                    files: prev.files.map(f =>
-                        files.some(df => df.path === f.path)
-                            ? {...f, downloading: true}
-                            : f
-                    )
-                }));
-
-                // Start the zip download
-                const zipName = createTimestampedZipName();
-                await zipDownloader.downloadAsZip(files, zipName);
-
-            } catch (error) {
-                console.error('Failed to download files as ZIP:', error);
-                // Reset all downloading states
-                setDownloadManagerState(prev => ({
-                    ...prev,
-                    files: prev.files.map(f =>
-                        files.some(df => df.path === f.path)
-                            ? {...f, downloading: false}
-                            : f
-                    )
-                }));
-            } finally {
-                setDownloadProgress(null);
-            }
-        } else {
-            // Original sequential download logic for 3 or fewer files
-            addNotification('info', `Starting download of ${files.length} files...`);
-
-            for (const file of files) {
-                try {
-                    if (file.downloaded || file.downloading) continue;
-
-                    setDownloadManagerState(prev => ({
-                        ...prev,
-                        files: prev.files.map(f =>
-                            f.path === file.path
-                                ? {...f, downloading: true}
-                                : f
-                        )
-                    }));
-
-                    await api.downloadReport(file.path);
-
-                    setDownloadManagerState(prev => ({
-                        ...prev,
-                        files: prev.files.map(f =>
-                            f.path === file.path
-                                ? {...f, downloading: false, downloaded: true}
-                                : f
-                        )
-                    }));
-
-                    await new Promise(resolve => setTimeout(resolve, 500));
-
-                } catch (error) {
-                    console.error(`Error downloading ${file.name}:`, error);
-                    addNotification('error', `Failed to download ${file.name}`);
-
-                    setDownloadManagerState(prev => ({
-                        ...prev,
-                        files: prev.files.map(f =>
-                            f.path === file.path
-                                ? {...f, downloading: false}
-                                : f
-                        )
-                    }));
-                }
-            }
-
-            setDownloadManagerState(prev => {
-                const allDownloaded = prev.files.every(f => f.downloaded);
-                if (allDownloaded) {
-                    addNotification('success', 'All files downloaded successfully!');
-                }
-                return prev;
-            });
+            console.error('Error downloading file:', error);
+            setError('Failed to download file. Please try again.');
+            setDownloadProgress(null);
         }
     };
 
@@ -1036,11 +864,10 @@ const PropertyReportGenerator = () => {
             {downloadManagerState.files.length > 0 && (
                 <DownloadManager
                     files={downloadManagerState.files}
-                    isVisible={downloadManagerState.isVisible}
                     onDownload={handleDownload}
-                    onDownloadAll={handleDownloadAll}
-                    onClose={hideDownloadManager}
-                    downloadProgress={downloadProgress}  // Add the downloadProgress prop
+                    onClose={() => setDownloadManagerState(prev => ({...prev, isVisible: false}))}
+                    isVisible={downloadManagerState.isVisible}
+                    downloadProgress={downloadProgress}
                 />
             )}
 
