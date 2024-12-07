@@ -89,8 +89,12 @@ jobs:
             echo "📦 Checking backend directory contents..."
             ls -la backend/
           
-            echo "📄 Copying requirements.txt to backend directory..."
+            echo "📄 Copying requirements.txt and app.py to backend directory..."
             cp requirements.txt backend/
+            cp app.py backend/
+          
+            echo "🔍 Verifying app.py location..."
+            ls -la backend/app.py
           
             echo "🏗️ Building Docker image..."
             echo "Using Dockerfile at: backend/Dockerfile"

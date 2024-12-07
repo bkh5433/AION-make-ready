@@ -22,5 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Make sure app.py is in the Python path
+ENV PYTHONPATH=/app
+
 # Run gunicorn with 1 worker since we have concurrent cache
-CMD ["gunicorn", "--workers=1", "--bind=0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "--workers=1", "--bind=0.0.0.0:5000", "--chdir=/app", "app:app"]
