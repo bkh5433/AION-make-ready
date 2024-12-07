@@ -48,9 +48,15 @@ jobs:
             free -h
           
             echo "📂 Setting up deployment directory..."
-            mkdir -p ~/aion-api
-            cd ~/aion-api
-
+            DEPLOY_DIR=~/aion-api
+            DEPLOY_BRANCH="${GITHUB_REF##*/}"
+          
+            # Create fresh deployment directory
+            echo "Removing old deployment directory if it exists..."
+            rm -rf \$DEPLOY_DIR
+            mkdir -p \$DEPLOY_DIR
+            cd \$DEPLOY_DIR
+          
             echo "🐳 Checking Docker status..."
             docker ps
           
@@ -63,37 +69,20 @@ jobs:
               echo "No existing container found."
             fi
 
-            # Determine which branch to use
-            DEPLOY_BRANCH="${GITHUB_REF##*/}"
-            echo "🌿 Deploying branch: $DEPLOY_BRANCH"
-
-            echo "📥 Setting up repository..."
-            if [ -d ".git" ]; then
-              echo "Updating existing repository..."
-              git fetch origin
-              echo "Checking out branch: $DEPLOY_BRANCH"
-              git checkout $DEPLOY_BRANCH || git checkout -b $DEPLOY_BRANCH origin/$DEPLOY_BRANCH
-              git pull origin $DEPLOY_BRANCH
-              git reset --hard origin/$DEPLOY_BRANCH
-              echo "Current git status:"
-              git status
-            else
-              echo "Cloning fresh repository..."
-              git clone -b $DEPLOY_BRANCH https://github.com/${{ github.repository }}.git .
-            fi
+            echo "📥 Cloning repository..."
+            echo "Branch: \$DEPLOY_BRANCH"
+            git clone -b \$DEPLOY_BRANCH https://github.com/${{ github.repository }}.git .
           
-            echo "✅ Verifying branch..."
-            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-            if [ "$CURRENT_BRANCH" != "$DEPLOY_BRANCH" ]; then
-              echo "❌ Error: Wrong branch! Expected $DEPLOY_BRANCH, got $CURRENT_BRANCH"
-              exit 1
-            fi
+            echo "✅ Verifying repository..."
+            git status
             echo "Current commit: $(git rev-parse HEAD)"
           
             echo "🔍 Checking repository structure..."
             ls -la
             if [ ! -d "backend" ]; then
               echo "❌ Error: backend directory not found!"
+              pwd
+              ls -la
               exit 1
             fi
           
@@ -109,7 +98,7 @@ jobs:
             docker images | grep aion-api
           
             echo "🚀 Starting container..."
-            if [ "$DEPLOY_BRANCH" = "dev" ]; then
+            if [ "\$DEPLOY_BRANCH" = "dev" ]; then
               echo "🔧 Using development environment variables..."
               docker run -d \
                 --name aion-api \
@@ -166,7 +155,7 @@ jobs:
             docker system df
           
             echo "✅ Deployment completed successfully!"
-            echo "Branch: $DEPLOY_BRANCH"
+            echo "Branch: \$DEPLOY_BRANCH"
             echo "Commit: $GITHUB_SHA"
             echo "Container ID: $(docker ps -q -f name=aion-api)"
           EOF
