@@ -112,26 +112,15 @@ def get_make_ready_data():
         logger.error(f"Error in get_make_ready_data: {str(e)}")
         raise
 
-@app.route('/api/health', methods=['GET'])
+
+@app.route('/api/health')
 def health_check():
-    logger.info("GET /api/health endpoint accessed.")
-    stats = {
+    """Health check endpoint for monitoring"""
+    return jsonify({
         'status': 'healthy',
-        'queues': {}
-    }
-
-    # Get stats for all active queues
-    for route in queue_manager.queues:
-        queue_stats = queue_manager.get_stats(route)
-        if queue_stats:
-            stats['queues'][route] = {
-                'active_requests': queue_stats.active_requests,
-                'total_processed': queue_stats.total_processed,
-                'avg_processing_time': f"{queue_stats.avg_processing_time:.3f}s",
-                'last_processed': queue_stats.last_processed.isoformat() if queue_stats.last_processed else None
-            }
-
-    return jsonify(stats)
+        'timestamp': datetime.now().isoformat(),
+        'version': '1.0.0'
+    }), 200
 
 @app.route('/api/properties/search', methods=['GET'])
 @require_auth

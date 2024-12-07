@@ -152,13 +152,25 @@ jobs:
           
               # Check if API is responding
               echo "🔍 Checking API health..."
-              if curl -f http://localhost:5000/health 2>/dev/null; then
-                echo "✅ API is healthy"
-              else
-                echo "❌ API is not responding. Showing logs:"
-                docker logs aion-api
-                exit 1
-              fi
+              MAX_RETRIES=5
+              RETRY_COUNT=0
+              SLEEP_TIME=5
+          
+              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                if curl -s http://localhost:5000/api/health | grep -q "healthy"; then
+                  echo "✅ API is healthy"
+                  break
+                else
+                  echo "⏳ API not ready, waiting... (Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+                  RETRY_COUNT=$((RETRY_COUNT + 1))
+                  if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                    echo "❌ API failed to become healthy. Showing logs:"
+                    docker logs aion-api
+                    exit 1
+                  fi
+                  sleep $SLEEP_TIME
+                fi
+              done
             else
               echo "🔧 Using production environment variables..."
               docker run -d \
@@ -199,13 +211,25 @@ jobs:
           
               # Check if API is responding
               echo "🔍 Checking API health..."
-              if curl -f http://localhost:5000/health 2>/dev/null; then
-                echo "✅ API is healthy"
-              else
-                echo "❌ API is not responding. Showing logs:"
-                docker logs aion-api
-                exit 1
-              fi
+              MAX_RETRIES=5
+              RETRY_COUNT=0
+              SLEEP_TIME=5
+          
+              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                if curl -s http://localhost:5000/api/health | grep -q "healthy"; then
+                  echo "✅ API is healthy"
+                  break
+                else
+                  echo "⏳ API not ready, waiting... (Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+                  RETRY_COUNT=$((RETRY_COUNT + 1))
+                  if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                    echo "❌ API failed to become healthy. Showing logs:"
+                    docker logs aion-api
+                    exit 1
+                  fi
+                  sleep $SLEEP_TIME
+                fi
+              done
             fi
 
             echo "🧹 Cleaning up old images..."
