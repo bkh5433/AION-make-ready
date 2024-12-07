@@ -17,18 +17,11 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements and install dependencies
-COPY requirements.txt .
+COPY ../requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the backend package
-COPY src/aion /app/aion
-COPY app.py /app/
-COPY config.py /app/
-COPY auth_middleware.py /app/
-COPY cache_module.py /app/
-COPY logger_config.py /app/
-COPY monitoring.py /app/
-COPY queue_manager.py /app/
+# Copy all application files
+COPY .. .
 
 # Set Python path
 ENV PYTHONPATH=/app

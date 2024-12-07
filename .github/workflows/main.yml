@@ -99,9 +99,7 @@ jobs:
             echo "🏗️ Building Docker image..."
             echo "Using Dockerfile at: backend/Dockerfile"
             cat backend/Dockerfile
-            cd backend
-            docker build -t aion-api:$GITHUB_SHA .
-            cd ..
+            docker build -t aion-api:$GITHUB_SHA -f backend/Dockerfile .
           
             echo "✅ Verifying built image..."
             docker images | grep aion-api
