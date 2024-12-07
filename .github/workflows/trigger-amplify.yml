@@ -1,0 +1,38 @@
+name: Trigger Amplify Build
+
+on:
+  workflow_run:
+    workflows: [ "Deploy Backend" ]
+    types:
+      - completed
+
+env:
+  AWS_REGION: us-east-1
+  AMPLIFY_APP_ID: d2gprwz7nx272l
+  AMPLIFY_ENV: dev
+
+jobs:
+  trigger-amplify:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Trigger Amplify build
+        run: |
+          # Get the branch name from the triggering workflow
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          echo "Triggering Amplify build for branch: $BRANCH"
+          
+          # Start the Amplify build
+          aws amplify start-job \
+            --app-id $AMPLIFY_APP_ID \
+            --branch-name $BRANCH \
+            --job-type RELEASE
+          
+          echo "✅ Amplify build triggered successfully!" 
