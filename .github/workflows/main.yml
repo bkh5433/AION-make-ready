@@ -26,27 +26,6 @@ jobs:
         run: |
           echo "Setting up Amplify environment variables..."
           
-          # Set environment based on branch
-          if [ "${GITHUB_REF##*/}" = "dev" ]; then
-            echo "🔧 Using development environment..."
-            API_URL="${{ secrets.DEV_API_URL }}"
-            FIREBASE_API_KEY="${{ secrets.DEV_FIREBASE_API_KEY }}"
-            FIREBASE_AUTH_DOMAIN="${{ secrets.DEV_FIREBASE_AUTH_DOMAIN }}"
-            FIREBASE_PROJECT_ID="${{ secrets.DEV_FIREBASE_PROJECT_ID }}"
-            FIREBASE_STORAGE_BUCKET="${{ secrets.DEV_FIREBASE_STORAGE_BUCKET }}"
-            FIREBASE_MESSAGING_SENDER_ID="${{ secrets.DEV_FIREBASE_MESSAGING_SENDER_ID }}"
-            FIREBASE_APP_ID="${{ secrets.DEV_FIREBASE_APP_ID }}"
-          else
-            echo "🔧 Using production environment..."
-            API_URL="${{ secrets.PROD_API_URL }}"
-            FIREBASE_API_KEY="${{ secrets.PROD_FIREBASE_API_KEY }}"
-            FIREBASE_AUTH_DOMAIN="${{ secrets.PROD_FIREBASE_AUTH_DOMAIN }}"
-            FIREBASE_PROJECT_ID="${{ secrets.PROD_FIREBASE_PROJECT_ID }}"
-            FIREBASE_STORAGE_BUCKET="${{ secrets.PROD_FIREBASE_STORAGE_BUCKET }}"
-            FIREBASE_MESSAGING_SENDER_ID="${{ secrets.PROD_FIREBASE_MESSAGING_SENDER_ID }}"
-            FIREBASE_APP_ID="${{ secrets.PROD_FIREBASE_APP_ID }}"
-          fi
-          
           # Function to validate and create SSM parameter
           create_ssm_param() {
             local name=$1
@@ -70,43 +49,26 @@ jobs:
             fi
           }
           
-          # Validate all required variables are set
-          REQUIRED_VARS=(
-            "API_URL"
-            "FIREBASE_API_KEY"
-            "FIREBASE_AUTH_DOMAIN"
-            "FIREBASE_PROJECT_ID"
-            "FIREBASE_STORAGE_BUCKET"
-            "FIREBASE_MESSAGING_SENDER_ID"
-            "FIREBASE_APP_ID"
-          )
-          
-          MISSING_VARS=0
-          for var in "${REQUIRED_VARS[@]}"; do
-            var_value=${!var}
-            if [ -z "$var_value" ]; then
-              if [ "${GITHUB_REF##*/}" = "dev" ]; then
-                echo "❌ Error: Required variable DEV_${var} is not set in GitHub secrets"
-              else
-                echo "❌ Error: Required variable PROD_${var} is not set in GitHub secrets"
-              fi
-              MISSING_VARS=1
-            fi
-          done
-          
-          if [ $MISSING_VARS -eq 1 ]; then
-            echo "❌ Some required variables are missing. Please set them in GitHub repository settings."
-            exit 1
+          # Set environment based on branch
+          if [ "${GITHUB_REF##*/}" = "dev" ]; then
+            echo "🔧 Using development environment..."
+            API_URL="${{ secrets.DEV_API_URL }}"
+          else
+            echo "🔧 Using production environment..."
+            API_URL="${{ secrets.PROD_API_URL }}"
           fi
           
-          # Set up frontend environment variables with validation
+          # Set up environment variables
           create_ssm_param "API_URL" "$API_URL" || exit 1
-          create_ssm_param "FIREBASE_API_KEY" "$FIREBASE_API_KEY" || exit 1
-          create_ssm_param "FIREBASE_AUTH_DOMAIN" "$FIREBASE_AUTH_DOMAIN" || exit 1
-          create_ssm_param "FIREBASE_PROJECT_ID" "$FIREBASE_PROJECT_ID" || exit 1
-          create_ssm_param "FIREBASE_STORAGE_BUCKET" "$FIREBASE_STORAGE_BUCKET" || exit 1
-          create_ssm_param "FIREBASE_MESSAGING_SENDER_ID" "$FIREBASE_MESSAGING_SENDER_ID" || exit 1
-          create_ssm_param "FIREBASE_APP_ID" "$FIREBASE_APP_ID" || exit 1
+          
+          # Set up shared Firebase configuration
+          create_ssm_param "FIREBASE_PROJECT_ID" "${{ secrets.FIREBASE_PROJECT_ID }}" || exit 1
+          create_ssm_param "FIREBASE_PRIVATE_KEY_ID" "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" || exit 1
+          create_ssm_param "FIREBASE_PRIVATE_KEY" "${{ secrets.FIREBASE_PRIVATE_KEY }}" || exit 1
+          create_ssm_param "FIREBASE_CLIENT_EMAIL" "${{ secrets.FIREBASE_CLIENT_EMAIL }}" || exit 1
+          create_ssm_param "FIREBASE_CLIENT_ID" "${{ secrets.FIREBASE_CLIENT_ID }}" || exit 1
+          create_ssm_param "FIREBASE_AUTH_URI" "${{ secrets.FIREBASE_AUTH_URI }}" || exit 1
+          create_ssm_param "FIREBASE_TOKEN_URI" "${{ secrets.FIREBASE_TOKEN_URI }}" || exit 1
           
           echo "✅ Amplify environment variables set up successfully!"
 
@@ -235,43 +197,6 @@ jobs:
                 -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
                 -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
                 aion-api:$GITHUB_SHA
-
-              # Wait for container to be healthy
-              echo "⏳ Waiting for container to start..."
-              sleep 5
-          
-              # Check container logs
-              echo "📋 Container logs:"
-              docker logs aion-api
-          
-              # Check if container is still running
-              if ! docker ps | grep -q aion-api; then
-                echo "❌ Container failed to start. Showing last logs:"
-                docker logs aion-api
-                exit 1
-              fi
-          
-              # Check if API is responding
-              echo "🔍 Checking API health..."
-              MAX_RETRIES=5
-              RETRY_COUNT=0
-              SLEEP_TIME=5
-          
-              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                if curl -s http://localhost:5000/api/health | grep -q "healthy"; then
-                  echo "✅ API is healthy"
-                  break
-                else
-                  echo "⏳ API not ready, waiting... (Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-                  RETRY_COUNT=$((RETRY_COUNT + 1))
-                  if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                    echo "❌ API failed to become healthy. Showing logs:"
-                    docker logs aion-api
-                    exit 1
-                  fi
-                  sleep $SLEEP_TIME
-                fi
-              done
             else
               echo "🔧 Using production environment variables..."
               docker run -d \
@@ -294,44 +219,44 @@ jobs:
                 -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
                 -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
                 aion-api:$GITHUB_SHA
-
-              # Wait for container to be healthy
-              echo "⏳ Waiting for container to start..."
-              sleep 5
-          
-              # Check container logs
-              echo "📋 Container logs:"
-              docker logs aion-api
-          
-              # Check if container is still running
-              if ! docker ps | grep -q aion-api; then
-                echo "❌ Container failed to start. Showing last logs:"
-                docker logs aion-api
-                exit 1
-              fi
-          
-              # Check if API is responding
-              echo "🔍 Checking API health..."
-              MAX_RETRIES=5
-              RETRY_COUNT=0
-              SLEEP_TIME=5
-          
-              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                if curl -s http://localhost:5000/api/health | grep -q "healthy"; then
-                  echo "✅ API is healthy"
-                  break
-                else
-                  echo "⏳ API not ready, waiting... (Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-                  RETRY_COUNT=$((RETRY_COUNT + 1))
-                  if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                    echo "❌ API failed to become healthy. Showing logs:"
-                    docker logs aion-api
-                    exit 1
-                  fi
-                  sleep $SLEEP_TIME
-                fi
-              done
             fi
+
+            # Wait for container to be healthy
+            echo "⏳ Waiting for container to start..."
+            sleep 5
+          
+            # Check container logs
+            echo "📋 Container logs:"
+            docker logs aion-api
+          
+            # Check if container is still running
+            if ! docker ps | grep -q aion-api; then
+              echo "❌ Container failed to start. Showing last logs:"
+              docker logs aion-api
+              exit 1
+            fi
+          
+            # Check if API is responding
+            echo "🔍 Checking API health..."
+            MAX_RETRIES=5
+            RETRY_COUNT=0
+            SLEEP_TIME=5
+          
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if curl -s http://localhost:5000/api/health | grep -q "healthy"; then
+                echo "✅ API is healthy"
+                break
+              else
+                echo "⏳ API not ready, waiting... (Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                  echo "❌ API failed to become healthy. Showing logs:"
+                  docker logs aion-api
+                  exit 1
+                fi
+                sleep $SLEEP_TIME
+              fi
+            done
 
             echo "🧹 Cleaning up old images..."
             echo "Before cleanup:"
