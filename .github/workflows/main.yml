@@ -288,4 +288,4 @@ jobs:
             echo "Container ID: $(docker ps -q -f name=aion-api)"
           EOF
 
-  </rewritten_file>
+            echo "✅ Deployment process completed successfully!"
