@@ -13,17 +13,25 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy the backend package
+COPY src/aion /app/aion
+COPY app.py /app/
+COPY config.py /app/
+COPY auth_middleware.py /app/
+COPY cache_module.py /app/
+COPY logger_config.py /app/
+COPY monitoring.py /app/
+COPY queue_manager.py /app/
 
-# Make sure app.py is in the Python path
+# Set Python path
 ENV PYTHONPATH=/app
 
-# Run gunicorn with 1 worker since we have concurrent cache
-CMD ["gunicorn", "--workers=1", "--bind=0.0.0.0:5000", "--chdir=/app", "app:app"]
+# Run gunicorn
+CMD ["gunicorn", "--bind=0.0.0.0:5000", "--chdir=/app", "app:app"]
