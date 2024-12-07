@@ -10,7 +10,7 @@ frontend:
         # Create environment file
         - |
           cat << EOF > .env
-          VITE_API_URL=$API_URL
+          VITE_API_BASE_URL=$EC2_HOST
           VITE_FIREBASE_API_KEY=$FIREBASE_API_KEY
           VITE_FIREBASE_AUTH_DOMAIN=$FIREBASE_AUTH_DOMAIN
           VITE_FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID

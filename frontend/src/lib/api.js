@@ -1,6 +1,10 @@
 import {getSessionId, setSessionId, clearSessionId} from './session';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000/api';
+// Ensure the base URL always ends with /api
+const API_BASE_URL = (() => {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
+    return baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`;
+})();
 
 // Add this helper function at the top of the file
 const getAuthHeaders = () => {
