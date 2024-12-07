@@ -2,10 +2,20 @@ import {getSessionId, setSessionId, clearSessionId} from './session';
 
 // Ensure the base URL always ends with /api
 const API_BASE_URL = (() => {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
-    console.log('API Base URL from env:', import.meta.env.VITE_API_BASE_URL);
-    console.log('Using API Base URL:', baseUrl);
-    return baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`;
+    const baseUrl = import.meta.env.VITE_API_BASE_URL;
+    console.log('API Base URL from env:', baseUrl);
+
+    if (!baseUrl) {
+        console.error('VITE_API_BASE_URL environment variable is not set. Please set EC2_HOST in your Amplify environment variables.');
+        // In production, we want to make it obvious that the environment is not configured correctly
+        if (import.meta.env.PROD) {
+            alert('API URL is not configured. Please contact the administrator.');
+        }
+    }
+
+    const finalUrl = baseUrl || 'http://127.0.0.1:5000';
+    console.log('Using API Base URL:', finalUrl);
+    return finalUrl.endsWith('/api') ? finalUrl : `${finalUrl}/api`;
 })();
 
 // Add this helper function at the top of the file
@@ -27,9 +37,9 @@ export const isTokenExpired = () => {
 };
 
 // Common fetch wrapper with error handling and session management
-const fetchWithErrorHandling = async (url, options = {}) => {
+const fetchWithErrorHandling = async (url, options = {}, skipTokenCheck = false) => {
     try {
-        if (isTokenExpired()) {
+        if (!skipTokenCheck && isTokenExpired()) {
             localStorage.removeItem('authToken');
             localStorage.removeItem('tokenExpiresAt');
             localStorage.removeItem('tokenExpiresIn');
@@ -41,7 +51,7 @@ const fetchWithErrorHandling = async (url, options = {}) => {
         const headers = {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            ...(token && {'Authorization': `Bearer ${token}`}),
+            ...(token && !skipTokenCheck && {'Authorization': `Bearer ${token}`}),
             ...options.headers
         };
 
@@ -52,7 +62,7 @@ const fetchWithErrorHandling = async (url, options = {}) => {
         });
 
         if (!response.ok) {
-            if (response.status === 401) {
+            if (response.status === 401 && !skipTokenCheck) {
                 localStorage.removeItem('authToken');
                 window.location.href = '/login';
                 throw new Error('Session expired or invalid');
@@ -177,10 +187,16 @@ export const api = {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({username, password})
-                }
+                },
+                true // Skip token check for login
             );
 
             const data = await response.json();
+            console.log('Login response:', data);
+
+            if (!data.token) {
+                throw new Error('No token received from server');
+            }
 
             // Store token and expiration
             localStorage.setItem('authToken', data.token);
@@ -190,6 +206,7 @@ export const api = {
             return data;
         } catch (error) {
             console.error('Login error:', error);
+            // Don't redirect on login error, let the component handle it
             throw error;
         }
     },
