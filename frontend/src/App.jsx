@@ -4,6 +4,7 @@ import {ThemeProvider} from './lib/theme';
 import ThemeToggle from './components/ui/theme-toggle';
 import PropertyReportGenerator from './components/PropertyReportGenerator';
 import LoginPage from './components/auth/LoginPage';
+import ChangePasswordPage from './components/auth/ChangePasswordPage';
 import {LogOut, Settings} from 'lucide-react';
 import {AuthProvider, useAuth} from './lib/auth';
 import AdminDashboard from './components/admin/AdminDashboard';
@@ -45,7 +46,7 @@ const AuthenticatedLayout = () => {
                   className="w-8 h-8 object-contain"
               />
               <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                Break Even Report Generator
+                  AION Vista
               </h1>
             </div>
 
@@ -92,6 +93,11 @@ function App() {
             <div className="min-h-screen bg-gray-50 dark:bg-[#1a1b1e]">
               <Routes>
                 <Route path="/login" element={<LoginPage/>}/>
+                  <Route path="/change-password" element={
+                      <ProtectedRoute>
+                          <ChangePasswordPage/>
+                      </ProtectedRoute>
+                  }/>
                 <Route
                     path="/"
                     element={
@@ -107,11 +113,11 @@ function App() {
                         <AdminDashboard/>
                       </ProtectedRoute>
                     }
-              />
-            </Routes>
-          </div>
-        </ThemeProvider>
-      </BrowserRouter>
+                />
+              </Routes>
+            </div>
+          </ThemeProvider>
+        </BrowserRouter>
       </AuthProvider>
   );
 }

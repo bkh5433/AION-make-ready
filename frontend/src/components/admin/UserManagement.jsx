@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from 'react';
-import {Plus, Edit2, Save, X, RefreshCw, Lock, UserX, UserCheck, Clock} from 'lucide-react';
+import {Plus, Edit2, Save, X, RefreshCw, Lock, UserX, UserCheck, Clock, Trash2} from 'lucide-react';
 import {api} from '../../lib/api';
 
 // Helper function to parse UTC timestamp
@@ -90,32 +90,37 @@ const Tooltip = ({children, text}) => (
 );
 
 const UserManagement = () => {
-    const [users, setUsers] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [editingUser, setEditingUser] = useState(null);
-    const [newUser, setNewUser] = useState({
+    const AVAILABLE_ROLES = ['admin', 'manager', 'user'];
+
+    const initialNewUserState = {
         username: '',
         name: '',
-        password: '',
         role: 'user',
-        is_active: true
-    });
+        is_active: true,
+        password: 'aion'  // Default password
+    };
+
+    const [users, setUsers] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
     const [showNewUserForm, setShowNewUserForm] = useState(false);
+    const [editingUser, setEditingUser] = useState(null);
     const [error, setError] = useState(null);
     const [successMessage, setSuccessMessage] = useState(null);
+    const [newUser, setNewUser] = useState(initialNewUserState);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
         fetchUsers();
     }, []);
 
-    const showSuccess = (message) => {
-        setSuccessMessage(message);
-        setTimeout(() => setSuccessMessage(null), 3000);
-    };
-
     const showError = (message) => {
         setError(message);
-        setTimeout(() => setError(null), 3000);
+        setTimeout(() => setError(null), 5000);
+    };
+
+    const showSuccess = (message) => {
+        setSuccessMessage(message);
+        setTimeout(() => setSuccessMessage(null), 5000);
     };
 
     const validateUser = (user) => {
@@ -161,22 +166,45 @@ const UserManagement = () => {
 
     const handleCreateUser = async (e) => {
         e.preventDefault();
+
+        // Validate required fields
+        if (!newUser.username?.trim()) {
+            showError('Username is required');
+            return;
+        }
+        if (!newUser.name?.trim()) {
+            showError('Name is required');
+            return;
+        }
+
+        // Prevent double submission
+        if (isSubmitting) {
+            return;
+        }
+
+        setIsSubmitting(true);
+
         try {
             const response = await api.createUser({
-                ...newUser,
-                email: newUser.username // Use username as email if needed
+                username: newUser.username.trim(),
+                name: newUser.name.trim(),
+                password: 'aion',  // Default password
+                role: newUser.role || 'user',
+                isActive: newUser.is_active
             });
 
             if (response.success) {
-                showSuccess('User created successfully!');
+                showSuccess('User created successfully! Default password is "aion"');
+                setNewUser(initialNewUserState);
                 setShowNewUserForm(false);
-                setNewUser({username: '', name: '', password: '', role: 'user', is_active: true});
-                fetchUsers();
+                await fetchUsers();  // Refresh user list
             } else {
                 showError(response.message || 'Failed to create user');
             }
         } catch (error) {
             showError('Error creating user: ' + (error.message || 'Unknown error'));
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -238,7 +266,28 @@ const UserManagement = () => {
         }
     };
 
-    const roles = ['admin', 'manager', 'user'];
+    const handleDeleteUser = async (user) => {
+        if (!user?.id) {
+            showError('Invalid user');
+            return;
+        }
+
+        if (!window.confirm(`Are you sure you want to delete user ${user.email || user.username}? This action cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            const response = await api.deleteUser(user.id);
+            if (response.success) {
+                showSuccess('User deleted successfully!');
+                fetchUsers();
+            } else {
+                showError(response.message || 'Failed to delete user');
+            }
+        } catch (error) {
+            showError('Error deleting user: ' + (error.message || 'Unknown error'));
+        }
+    };
 
     if (isLoading) {
         return (
@@ -258,104 +307,142 @@ const UserManagement = () => {
     }
 
     return (
-        <div className="space-y-6 p-6">
-            {/* Notifications */}
-            {error && (
-                <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-                    {error}
-                </div>
-            )}
-            {successMessage && (
-                <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative">
-                    {successMessage}
-                </div>
-            )}
-
+        <div className="container mx-auto px-4 py-8">
             {/* Header */}
-            <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">User Management</h2>
-                <div className="flex gap-2">
-                    <button
-                        onClick={fetchUsers}
-                        className="flex items-center gap-2 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors dark:bg-gray-700 dark:text-gray-200"
-                    >
-                        <RefreshCw className="h-4 w-4"/>
-                        Refresh
-                    </button>
-                    <button
-                        onClick={() => setShowNewUserForm(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                        <Plus className="h-4 w-4"/>
-                        Add New User
-                    </button>
+            <div className="mb-6">
+                <div className="flex justify-between items-center">
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white">User Management</h1>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={fetchUsers}
+                            className="flex items-center gap-2 px-4 py-2 text-gray-700 bg-white rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200"
+                        >
+                            <RefreshCw className="h-4 w-4"/>
+                            Refresh
+                        </button>
+                        <button
+                            onClick={() => setShowNewUserForm(!showNewUserForm)}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                            <Plus className="h-4 w-4"/>
+                            Add User
+                        </button>
+                    </div>
                 </div>
+                {error && (
+                    <div className="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                        {error}
+                    </div>
+                )}
+                {successMessage && (
+                    <div className="mt-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded-lg">
+                        {successMessage}
+                    </div>
+                )}
             </div>
 
             {/* New User Form */}
             {showNewUserForm && (
-                <form onSubmit={handleCreateUser} className="space-y-4 p-6 bg-white dark:bg-gray-800 rounded-lg shadow">
+                <form
+                    onSubmit={handleCreateUser}
+                    className="space-y-4 p-6 bg-white dark:bg-gray-800 rounded-lg shadow mb-6"
+                    autoComplete="off"
+                    data-form-type="userdata"
+                >
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label
-                                className="block text-sm font-medium text-gray-700 dark:text-gray-200">Username</label>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                                Username/Email <span className="text-red-500">*</span>
+                            </label>
                             <input
                                 type="text"
+                                name="username"
+                                autoComplete="off"
+                                data-form-type="username"
                                 value={newUser.username}
-                                onChange={(e) => setNewUser(prev => ({...prev, username: e.target.value}))}
+                                onChange={(e) => setNewUser(prev => ({
+                                    ...prev,
+                                    username: e.target.value.trim()
+                                }))}
                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                 required
+                                placeholder="Enter username or email"
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Full
-                                Name</label>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
+                                Full Name <span className="text-red-500">*</span>
+                            </label>
                             <input
                                 type="text"
+                                name="fullname"
+                                autoComplete="off"
+                                data-form-type="name"
                                 value={newUser.name}
-                                onChange={(e) => setNewUser(prev => ({...prev, name: e.target.value}))}
+                                onChange={(e) => setNewUser(prev => ({
+                                    ...prev,
+                                    name: e.target.value
+                                }))}
                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                 required
+                                placeholder="Enter full name"
                             />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">Role</label>
                             <select
+                                name="role"
                                 value={newUser.role}
-                                onChange={(e) => setNewUser(prev => ({...prev, role: e.target.value}))}
+                                onChange={(e) => setNewUser(prev => ({
+                                    ...prev,
+                                    role: e.target.value
+                                }))}
                                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                data-form-type="other"
                             >
-                                {roles.map(role => (
-                                    <option key={role}
-                                            value={role}>{role.charAt(0).toUpperCase() + role.slice(1)}</option>
+                                {AVAILABLE_ROLES.map(role => (
+                                    <option key={role} value={role}>
+                                        {role.charAt(0).toUpperCase() + role.slice(1)}
+                                    </option>
                                 ))}
                             </select>
                         </div>
-                        <div>
-                            <label
-                                className="block text-sm font-medium text-gray-700 dark:text-gray-200">Password</label>
+                        <div className="flex items-center mt-7">
                             <input
-                                type="password"
-                                value={newUser.password}
-                                onChange={(e) => setNewUser(prev => ({...prev, password: e.target.value}))}
-                                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                                required
+                                type="checkbox"
+                                id="is_active"
+                                name="is_active"
+                                checked={newUser.is_active}
+                                onChange={(e) => setNewUser(prev => ({
+                                    ...prev,
+                                    is_active: e.target.checked
+                                }))}
+                                className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                data-form-type="other"
                             />
+                            <label htmlFor="is_active" className="ml-2 block text-sm text-gray-900 dark:text-gray-100">
+                                Active
+                            </label>
                         </div>
                     </div>
                     <div className="flex justify-end gap-2">
                         <button
                             type="button"
-                            onClick={() => setShowNewUserForm(false)}
+                            onClick={() => {
+                                setNewUser(initialNewUserState);
+                                setShowNewUserForm(false);
+                            }}
                             className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200"
+                            disabled={isSubmitting}
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={isSubmitting || !newUser.username.trim() || !newUser.name.trim()}
                         >
-                            Create User
+                            {isSubmitting ? 'Creating...' : 'Create User'}
                         </button>
                     </div>
                 </form>
@@ -404,7 +491,7 @@ const UserManagement = () => {
                                             onChange={(e) => setEditingUser(prev => ({...prev, role: e.target.value}))}
                                             className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                                         >
-                                            {roles.map(role => (
+                                            {AVAILABLE_ROLES.map(role => (
                                                 <option key={role} value={role}>
                                                     {role.charAt(0).toUpperCase() + role.slice(1)}
                                                 </option>
@@ -478,6 +565,12 @@ const UserManagement = () => {
                                                 >
                                                     {validUser.is_active ? <UserX className="h-4 w-4"/> :
                                                         <UserCheck className="h-4 w-4"/>}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteUser(validUser)}
+                                                    className="text-red-600 hover:text-red-900"
+                                                >
+                                                    <Trash2 className="h-4 w-4"/>
                                                 </button>
                                             </>
                                         )}

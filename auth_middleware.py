@@ -107,10 +107,11 @@ class AuthMiddleware:
                     'username': user['username'],
                     'name': user['name'],
                     'role': user['role'],
-                    'email': user['email']
+                    'email': user['email'],
+                    'requirePasswordChange': user.get('requirePasswordChange', False)
                 },
-                'expires_at': expiration_time.isoformat(),  # Add expiration time to response
-                'expires_in': int(timedelta(hours=24).total_seconds())  # Add seconds until expiration
+                'expires_at': expiration_time.isoformat(),
+                'expires_in': int(timedelta(hours=24).total_seconds())
             }
         except Exception as e:
             logger.warning(f"Authentication error: {e}, username: {username}")

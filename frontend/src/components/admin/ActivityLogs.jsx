@@ -13,14 +13,30 @@ const ActivityLogs = () => {
     const fetchLogs = async () => {
         try {
             setIsLoading(true);
-            const response = await api.getActivityLogs(filter);
-            setLogs(response.logs);
+            const response = await api.getActivityLogs();
+            if (response?.logs) {
+                const filteredLogs = filter === 'all'
+                    ? response.logs
+                    : response.logs.filter(log => log.level.toLowerCase() === filter);
+                setLogs(filteredLogs);
+            } else {
+                setLogs([]);
+            }
         } catch (error) {
             console.error('Error fetching logs:', error);
+            setLogs([]);
         } finally {
             setIsLoading(false);
         }
     };
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -52,7 +68,23 @@ const ActivityLogs = () => {
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                     {logs.map(log => (
                         <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                            {/* Log data cells */}
+                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">
+                                {new Date(log.timestamp).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 text-sm">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                    ${log.level === 'ERROR' ? 'bg-red-100 text-red-800' :
+                                    log.level === 'WARNING' ? 'bg-yellow-100 text-yellow-800' :
+                                        'bg-blue-100 text-blue-800'}`}>
+                                    {log.level}
+                                </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">
+                                {log.message}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">
+                                {log.user || 'System'}
+                            </td>
                         </tr>
                     ))}
                     </tbody>

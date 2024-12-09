@@ -34,24 +34,28 @@ const LoginPage = () => {
         setError(null);
 
         try {
-            const response = await api.login(formData);
+            const response = await api.login({
+                username: formData.username.trim(),
+                password: formData.password
+            });
 
-            // Store the token
-            localStorage.setItem('authToken', response.token);
+            if (response.success) {
+                // Store the auth token
+                localStorage.setItem('authToken', response.token);
 
-            // Show success notification
-            addNotification('success', 'Successfully logged in!');
-
-            // Navigate immediately instead of using setTimeout
-            navigate('/', {replace: true});
-
-            // Force a page reload to ensure all auth states are updated
-            window.location.reload();
-
-        } catch (err) {
-            const errorMessage = err.message === 'Invalid email or password'
-                ? 'The username or password you entered is incorrect. Please try again.'
-                : err.message || 'Unable to sign in. Please try again or contact support.';
+                if (response.user.requirePasswordChange || formData.password === 'aion') {
+                    addNotification('info', 'Please change your password before continuing');
+                    navigate('/change-password');
+                } else {
+                    addNotification('success', 'Successfully logged in!');
+                    navigate('/');
+                }
+            } else {
+                setError(response.message || 'Login failed');
+                addNotification('error', response.message || 'Login failed');
+            }
+        } catch (error) {
+            const errorMessage = error.message || 'An error occurred during login';
             setError(errorMessage);
             addNotification('error', errorMessage);
         } finally {

@@ -833,8 +833,9 @@ def get_users():
             'role': user.get('role'),
             'lastLogin': user.get('lastLogin'),
             'isActive': user.get('isActive'),
-            'createdAt': user.get('createdAt')
-        } for user in (doc.to_dict() for doc in users)]
+            'createdAt': user.get('createdAt'),
+            'uid': doc.id  # Include the document ID as uid
+        } for doc, user in ((doc, doc.to_dict()) for doc in users)]
 
         return jsonify({
             'success': True,
@@ -847,43 +848,64 @@ def get_users():
             'message': 'Error fetching users'
         }), 500
 
-@app.route('/api/admin/users/<user_id>', methods=['PUT'])
+
+@app.route('/api/admin/users/<user_id>', methods=['PUT', 'DELETE'])
 @require_auth
 @require_role('admin')
-def update_user(user_id):
-    """Update user details"""
+def manage_user(user_id):
+    """Update or delete user details"""
     try:
-        data = request.get_json()
-
-        # Don't allow role change to admin for non-admin users
-        if data.get('role') == 'admin' and request.user['role'] != 'admin':
+        # Get user document
+        user_doc = auth.users_ref.document(user_id).get()
+        if not user_doc.exists:
             return jsonify({
                 'success': False,
-                'message': 'Unauthorized to assign admin role'
-            }), 403
+                'message': 'User not found'
+            }), 404
 
-        updates = {
-            'name': data.get('name'),
-            'role': data.get('role'),
-            'isActive': data.get('isActive', True)
-        }
+        if request.method == 'DELETE':
+            # Delete the user
+            user_doc.reference.delete()
+            return jsonify({
+                'success': True,
+                'message': 'User deleted successfully'
+            })
 
-        if data.get('password'):
-            password_hash, salt = auth._hash_password(data['password'])
-            updates['password_hash'] = password_hash
-            updates['salt'] = salt
+        elif request.method == 'PUT':
+            data = request.get_json()
 
-        auth.users_ref.document(user_id).update(updates)
+            # Don't allow role change to admin for non-admin users
+            if data.get('role') == 'admin' and request.user['role'] != 'admin':
+                return jsonify({
+                    'success': False,
+                    'message': 'Unauthorized to assign admin role'
+                }), 403
 
-        return jsonify({
-            'success': True,
-            'message': 'User updated successfully'
-        })
+            updates = {
+                'name': data.get('name'),
+                'role': data.get('role'),
+                'isActive': data.get('isActive', True)
+            }
+
+            # Remove None values
+            updates = {k: v for k, v in updates.items() if v is not None}
+
+            if data.get('password'):
+                password_hash, salt = auth._hash_password(data['password'])
+                updates['password_hash'] = password_hash
+                updates['salt'] = salt
+
+            user_doc.reference.update(updates)
+
+            return jsonify({
+                'success': True,
+                'message': 'User updated successfully'
+            })
     except Exception as e:
-        logger.error(f"Error updating user: {str(e)}")
+        logger.error(f"Error managing user: {str(e)}")
         return jsonify({
             'success': False,
-            'message': 'Error updating user'
+            'message': f'Error managing user: {str(e)}'
         }), 500
 
 @app.route('/api/admin/logs', methods=['GET'])
@@ -974,6 +996,61 @@ def update_user_status(user_id):
         return jsonify({
             'success': False,
             'message': 'Error updating user status'
+        }), 500
+
+
+@app.route('/api/auth/change-password', methods=['POST'])
+@require_auth
+def change_password():
+    """Change user password"""
+    try:
+        data = request.get_json()
+        current_password = data.get('currentPassword')
+        new_password = data.get('newPassword')
+
+        if not current_password or not new_password:
+            return jsonify({
+                'success': False,
+                'message': 'Current and new passwords are required'
+            }), 400
+
+        # Get user from Firestore
+        user_doc = auth.users_ref.where('email', '==', request.user['email']).limit(1).stream()
+        user = next((doc.to_dict() for doc in user_doc), None)
+
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+
+        # Verify current password
+        hashed_input, _ = auth._hash_password(current_password, user['salt'])
+        if hashed_input != user['password_hash']:
+            return jsonify({
+                'success': False,
+                'message': 'Current password is incorrect'
+            }), 400
+
+        # Update password
+        new_hash, new_salt = auth._hash_password(new_password)
+        user_ref = auth.users_ref.document(user['uid'])
+        user_ref.update({
+            'password_hash': new_hash,
+            'salt': new_salt,
+            'requirePasswordChange': False
+        })
+
+        return jsonify({
+            'success': True,
+            'message': 'Password updated successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Error changing password: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred while changing password'
         }), 500
 
 # @app.route('/api/some_endpoint', methods=['GET'])
