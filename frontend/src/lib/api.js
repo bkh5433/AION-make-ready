@@ -241,7 +241,60 @@ export const api = {
     },
 
     async listUsers() {
-        const response = await fetchWithErrorHandling(`${API_BASE_URL}/users`);
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/admin/users`);
+        return response.json();
+    },
+
+    async createUser(userData) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/auth/register`,
+            {
+                method: 'POST',
+                body: JSON.stringify(userData)
+            }
+        );
+        return response.json();
+    },
+
+    async updateUser(userId, userData) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}`,
+            {
+                method: 'PUT',
+                body: JSON.stringify(userData)
+            }
+        );
+        return response.json();
+    },
+
+    async deleteUser(userId) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}`,
+            {
+                method: 'DELETE'
+            }
+        );
+        return response.json();
+    },
+
+    async resetUserPassword(userId) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}/reset-password`,
+            {
+                method: 'POST'
+            }
+        );
+        return response.json();
+    },
+
+    async toggleUserStatus(userId, isActive) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}/status`,
+            {
+                method: 'PUT',
+                body: JSON.stringify({isActive})
+            }
+        );
         return response.json();
     },
 

@@ -26,12 +26,30 @@ CORS(app, resources={
     r"/api/*": {
         "origins": Config.CORS_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie", "Authorization"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True,
-        "expose_headers": ["Set-Cookie"],
         "max_age": Config.CORS_MAX_AGE
     }
 })
+
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        response.headers.add('Access-Control-Max-Age', str(Config.CORS_MAX_AGE))
+
+    # Add CORS headers to all responses
+    origin = request.headers.get('Origin')
+    if origin in Config.CORS_ORIGINS:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+
+    return response
 
 # Setup logging
 log_config = LogConfig()
@@ -912,6 +930,50 @@ def get_system_metrics():
             "success": False,
             "message": "Error retrieving system metrics",
             "error": str(e)
+        }), 500
+
+
+@app.route('/api/admin/users/<user_id>/status', methods=['PUT', 'OPTIONS'])
+@require_auth
+@require_role('admin')
+def update_user_status(user_id):
+    """Update user active status"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+
+        data = request.get_json()
+        is_active = data.get('isActive')
+
+        if is_active is None:
+            return jsonify({
+                'success': False,
+                'message': 'isActive status is required'
+            }), 400
+
+        # Get user document directly by ID
+        user_doc = auth.users_ref.document(user_id).get()
+
+        if not user_doc.exists:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+
+        # Update the user's status
+        user_doc.reference.update({
+            'isActive': is_active
+        })
+
+        return jsonify({
+            'success': True,
+            'message': 'User status updated successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error updating user status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error updating user status'
         }), 500
 
 # @app.route('/api/some_endpoint', methods=['GET'])

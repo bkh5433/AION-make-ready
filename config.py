@@ -15,7 +15,8 @@ class Config:
     API_DEBUG = config('API_DEBUG', default=False, cast=bool)
 
     # CORS
-    CORS_ORIGINS = config('CORS_ORIGINS', default="http://localhost:5173").split(',')
+    CORS_ORIGINS = [origin.strip() for origin in
+                    config('CORS_ORIGINS', default="http://localhost:5173,http://127.0.0.1:5173").split(',')]
     CORS_MAX_AGE = config('CORS_MAX_AGE', default=3600, cast=int)
 
     # Cache

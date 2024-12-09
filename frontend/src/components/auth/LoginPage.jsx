@@ -49,8 +49,11 @@ const LoginPage = () => {
             window.location.reload();
 
         } catch (err) {
-            setError(err.message || 'Invalid email or password');
-            addNotification('error', err.message || 'Login failed');
+            const errorMessage = err.message === 'Invalid email or password'
+                ? 'The username or password you entered is incorrect. Please try again.'
+                : err.message || 'Unable to sign in. Please try again or contact support.';
+            setError(errorMessage);
+            addNotification('error', errorMessage);
         } finally {
             setIsLoading(false);
         }
@@ -96,10 +99,10 @@ const LoginPage = () => {
             <Card className="w-full max-w-md bg-card shadow-xl border border-border transition-all duration-200">
                 <CardHeader className="space-y-1 p-6">
                     <CardTitle className="text-2xl font-bold text-center text-foreground">
-                        Welcome back
+                        Welcome to AION Vista
                     </CardTitle>
                     <p className="text-center text-muted-foreground">
-                        Enter your credentials to access your account
+                        Sign in to access the dashboard
                     </p>
                 </CardHeader>
                 <CardContent className="p-6">
@@ -121,7 +124,7 @@ const LoginPage = () => {
                                 <input
                                     type="text"
                                     name="username"
-                                    placeholder="Enter your username"
+                                    placeholder="Username or email"
                                     value={formData.username}
                                     onChange={handleInputChange}
                                     disabled={isLoading}
@@ -141,7 +144,7 @@ const LoginPage = () => {
                                 <input
                                     type="password"
                                     name="password"
-                                    placeholder="Enter your password"
+                                    placeholder="Password"
                                     value={formData.password}
                                     onChange={handleInputChange}
                                     disabled={isLoading}
@@ -159,7 +162,7 @@ const LoginPage = () => {
                                 to="/forgot-password"
                                 className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
-                                Forgot password?
+                                Reset your password
                             </Link>
                         </div>
 
@@ -178,17 +181,17 @@ const LoginPage = () => {
                                     <span>Signing in...</span>
                                 </>
                             ) : (
-                                <span>Sign in</span>
+                                <span>Sign in to Dashboard</span>
                             )}
                         </button>
 
                         <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-                            Don't have an account?{' '}
+                            New to AION Vista?{' '}
                             <Link
                                 to="/register"
                                 className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
-                                Create an account
+                                Request an account
                             </Link>
                         </div>
                     </form>
