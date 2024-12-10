@@ -21,6 +21,8 @@ from config import Config
 from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
+import psutil
+
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
@@ -35,8 +37,21 @@ CORS(app, resources={
 
 
 # Add CORS headers to all responses
+@app.before_request
+def before_request():
+    """Record the start time of each request"""
+    request.start_time = system_monitor.record_request_start()
+
 @app.after_request
 def after_request(response):
+    """Record the end time and status of each request"""
+    if hasattr(request, 'start_time'):
+        system_monitor.record_request_end(
+            request.start_time,
+            error=response.status_code >= 400,
+            path=request.path
+        )
+
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
         response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -1053,6 +1068,50 @@ def change_password():
             'message': 'An error occurred while changing password'
         }), 500
 
+
+@app.route('/api/admin/system/status', methods=['GET'])
+@require_auth
+@require_role('admin')
+@catch_exceptions
+def system_status():
+    """Get comprehensive system status"""
+    try:
+        # Get system metrics
+        metrics = system_monitor.get_all_metrics()
+
+        # Add active users count
+        active_users = len(auth.get_active_sessions()) if hasattr(auth, 'get_active_sessions') else 0
+
+        # Get cache health
+        cache_healthy = cache.is_healthy() if hasattr(cache, 'is_healthy') else True
+        cache_details = cache.get_health_details() if hasattr(cache, 'get_health_details') else None
+
+        response = {
+            'healthy': cache_healthy,  # Overall health based on cache and system metrics
+            'timestamp': datetime.now().isoformat(),
+            'activeUsers': active_users,
+            'cpu': metrics['cpu'],
+            'memory': metrics['memory'],
+            'disk': metrics['disk'],
+            'network': metrics['network'],
+            'performance': metrics['performance'],
+            'details': cache_details
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting system status: {str(e)}")
+        return jsonify({
+            'healthy': False,
+            'error': str(e),
+            'details': 'Error retrieving system status'
+        }), 500
+
+if __name__ == '__main__':
+    logger.info("Starting application and updating initial cache.")
+    app.run(debug=True)
+
 # @app.route('/api/some_endpoint', methods=['GET'])
 # @require_auth
 # @catch_exceptions
@@ -1067,7 +1126,3 @@ def change_password():
 #         "url": dynamic_url
 #     }
 #     return jsonify(response), 200
-
-if __name__ == '__main__':
-    logger.info("Starting application and updating initial cache.")
-    app.run(debug=True)

@@ -318,21 +318,6 @@ export const api = {
         return response.json();
     },
 
-    forceRefreshData: async () => {
-        try {
-            const response = await fetchWithErrorHandling(
-                `${API_BASE_URL}/refresh`,
-                {
-                    method: 'POST'
-                }
-            );
-            return response.json();
-        } catch (error) {
-            console.error('Error in forceRefreshData:', error);
-            throw error;
-        }
-    },
-
     // Admin endpoints
     async getCacheStatus() {
         const response = await fetchWithErrorHandling(
