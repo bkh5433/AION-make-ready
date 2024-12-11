@@ -1089,23 +1089,28 @@ def system_status():
         # Get system metrics
         metrics = system_monitor.get_all_metrics()
 
-        # Add active users count
-        active_users = len(auth.get_active_sessions()) if hasattr(auth, 'get_active_sessions') else 0
+        # Get users who logged in within the last 12 hours
+        twelve_hours_ago = datetime.utcnow() - timedelta(hours=12)
+        active_users = 0
+
+        # Query Firestore for recent logins
+        users = auth.users_ref.where('lastLogin', '>=', twelve_hours_ago.strftime('%Y-%m-%dT%H:%M:%S.%fZ')).stream()
+        active_users = len(list(users))
 
         # Get cache health
         cache_healthy = cache.is_healthy() if hasattr(cache, 'is_healthy') else True
-        cache_details = cache.get_health_details() if hasattr(cache, 'get_health_details') else None
+        cache_stats = cache.get_stats()  # Use get_stats() instead of get_health_details()
 
         response = {
             'healthy': cache_healthy,  # Overall health based on cache and system metrics
             'timestamp': datetime.now().isoformat(),
-            'activeUsers': active_users,
+            'activeUsers': active_users,  # Now shows users active in last 12 hours
             'cpu': metrics['cpu'],
             'memory': metrics['memory'],
             'disk': metrics['disk'],
             'network': metrics['network'],
             'performance': metrics['performance'],
-            'details': cache_details
+            'cache': cache_stats  # Include cache stats in the response
         }
 
         return jsonify(response)
