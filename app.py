@@ -7,7 +7,7 @@ from flask_cors import CORS
 from models.ReportGenerationRequest import ReportGenerationRequest
 from models.ReportGenerationResponse import ReportGenerationResponse
 from models.ReportOutput import ReportOutput
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 from pydantic import ValidationError
 from property_search import PropertySearch
@@ -158,8 +158,6 @@ def health_check():
 @app.route('/api/properties/search', methods=['GET'])
 @require_auth
 @catch_exceptions
-@log_exceptions(logger)
-# @queue_requests(max_concurrent=20)
 def search_properties():
     """
     Search properties by name.
@@ -167,12 +165,20 @@ def search_properties():
     - q: Search term for property name (optional)
     - include_metrics: Whether to include full metrics (default: true)
     """
-    logger.info("Starting property search endpoint")
     try:
+        # Get search parameters
         search_term = request.args.get('q', None)
         include_metrics = request.args.get('include_metrics', 'true').lower() == 'true'
 
         logger.debug(f"Search parameters - term: {search_term}, include_metrics: {include_metrics}")
+
+        # Force refresh if needed
+        if cache.needs_force_refresh:
+            logger.info("Cache needs force refresh")
+            run_async(cache.refresh_data(fetch_make_ready_data))
+        elif cache.is_stale:
+            logger.info("Cache is stale, refreshing")
+            run_async(cache.refresh_data(fetch_make_ready_data))
 
         # Get data from cache
         data, is_stale = run_async(cache.get_data())
@@ -200,8 +206,8 @@ def search_properties():
             search_term=search_term,
             last_updated=cache._last_refresh,
             period_info={
-                'start_date': datetime.now() - timedelta(days=30),
-                'end_date': datetime.now()
+                'start_date': datetime.now(timezone.utc) - timedelta(days=30),
+                'end_date': datetime.now(timezone.utc)
             }
         )
 
@@ -228,7 +234,7 @@ def search_properties():
                 'last_refresh': cache._last_refresh.isoformat() if cache._last_refresh else None,
                 'is_refreshing': cache._refresh_state.is_refreshing,
                 'refresh_age': (
-                    (datetime.now() - cache._last_refresh).total_seconds()
+                    (datetime.now(timezone.utc) - cache._last_refresh).total_seconds()
                     if cache._last_refresh else None
                 )
             }
@@ -237,8 +243,11 @@ def search_properties():
         return jsonify(response_data)
 
     except Exception as e:
-        logger.error(f"Error in search endpoint: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Exception in search_properties", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
 
 @app.route('/api/reports/generate', methods=['POST'])
 @require_auth
@@ -526,15 +535,15 @@ def cache_status():
     """Enhanced endpoint to check cache status and update patterns"""
     try:
         stats = cache.get_stats()
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         # Calculate time until next expected update
         expected_time = datetime.strptime(cache.config.expected_update_time, "%H:%M").time()
-        expected_datetime = datetime.combine(now.date(), expected_time)
+        expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
 
         if now.time() > expected_time:
             # If we're past today's update time, look at tomorrow
-            expected_datetime = datetime.combine(now.date() + timedelta(days=1), expected_time)
+            expected_datetime = datetime.combine(now.date() + timedelta(days=1), expected_time, tzinfo=timezone.utc)
 
         time_until_update = (expected_datetime - now).total_seconds()
 
@@ -559,7 +568,6 @@ def cache_status():
                 "expected_update_datetime": expected_update_datetime.isoformat(),
                 "time_until_update_seconds": time_until_update,
                 "time_until_update_hours": time_until_update / 3600,
-                
                 "is_update_window": (
                         abs(time_until_update) <= cache.config.update_window
                 ),
@@ -628,44 +636,46 @@ def cache_status():
 def schedule_data_refresh():
     """Enhanced dynamic scheduling for data refresh"""
     from apscheduler.schedulers.background import BackgroundScheduler
+
+    async def calculate_interval():
+        """Get the next check interval from cache"""
+        interval = cache._calculate_next_check_interval()
+        logger.info(f"Calculated next check interval: {interval} seconds")
+        return interval
+    
     def refresh_data_task():
         """Wrapper for async refresh task"""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            # Get current check interval from cache
-            interval = cache._next_check_interval
-
-            # Perform refresh
+            # First refresh the data
             loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
 
-            # Schedule next check based on new interval
+            # Then calculate new interval
+            next_interval = loop.run_until_complete(calculate_interval())
+
+            # Update scheduler with new interval
+            logger.info(f"Rescheduling next refresh for {next_interval} seconds")
             scheduler.reschedule_job(
                 'dynamic_refresh',
                 trigger='interval',
-                seconds=cache._next_check_interval
+                seconds=next_interval
             )
 
-            logger.info(f"Next refresh scheduled in {cache._next_check_interval} seconds")
-
+        except Exception as e:
+            logger.error(f"Error in refresh task: {str(e)}")
         finally:
             loop.close()
 
     scheduler = BackgroundScheduler()
 
-    # Add session cleanup job
-    scheduler.add_job(
-        run_session_cleanup,
-        'interval',
-        hours=1,
-        id='session_cleanup'
-    )
-
-    # Add dynamic refresh job
+    # Start with initial interval from cache
+    initial_interval = run_async(calculate_interval())
+    
     scheduler.add_job(
         refresh_data_task,
         'interval',
-        seconds=cache_config.base_refresh_interval,
+        seconds=initial_interval,
         id='dynamic_refresh'
     )
 

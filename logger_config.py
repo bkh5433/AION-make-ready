@@ -77,7 +77,7 @@ class ContextFormatter(logging.Formatter):
 class LogConfig:
     """Centralized logging configuration with enhanced error tracking"""
 
-    def __init__(self, logs_dir: str = "logs", default_level: int = logging.INFO):
+    def __init__(self, logs_dir: str = "logs", default_level: int = logging.DEBUG):
         self.logs_dir = Path(logs_dir)
         self.default_level = default_level
         self._ensure_log_directory()

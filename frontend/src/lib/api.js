@@ -342,7 +342,7 @@ export const api = {
 
     async forceRefreshData() {
         const response = await fetchWithErrorHandling(
-            `${API_BASE_URL}/admin/cache/refresh`,
+            `${API_BASE_URL}/refresh`,
             {
                 method: 'POST'
             }

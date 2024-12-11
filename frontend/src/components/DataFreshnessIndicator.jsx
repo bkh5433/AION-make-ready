@@ -11,6 +11,19 @@ const DataFreshnessIndicator = ({
                                     isAdmin = false,
                                     formatDate
                                 }) => {
+    // Format the dates exactly as they come from the API
+    const formatExactDate = (date) => {
+        if (!date) return null;
+        // Keep the date in UTC/GMT format to match the report
+        const utcDate = new Date(date);
+        return new Intl.DateTimeFormat('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            timeZone: 'UTC'  // Force UTC to match backend dates
+        }).format(utcDate);
+    };
+
     return (
         <div className={`
       flex items-center gap-3 p-8 transition-all duration-300 animate-scale-in
@@ -83,13 +96,13 @@ const DataFreshnessIndicator = ({
                             <div className="flex items-center gap-1">
                                 <span className="font-medium">30-Day Period:</span>
                                 <span>
-                  {formatDate(periodStartDate)}
+                                    {formatExactDate(periodStartDate)}
                                     {' - '}
-                                    {formatDate(periodEndDate)}
+                                    {formatExactDate(periodEndDate)}
                                     <span className="ml-1 text-xs text-gray-500">
-                    (Data complete through end of day)
-                  </span>
-                </span>
+                                        (Data complete through end of day)
+                                    </span>
+                                </span>
                             </div>
                         </div>
                     )}

@@ -5,6 +5,7 @@ from . import sql_queries
 from typing import Dict
 from logger_config import LogConfig
 from decouple import config
+from datetime import datetime, timezone
 
 logger_config = LogConfig()
 logger = logger_config.get_logger('db_connection')
@@ -46,17 +47,40 @@ class DatabaseConnection:
         """Fetch version information from database"""
         try:
             engine = self._get_engine()
+            logger.debug(f"Executing version check query: {query}")
             df = pd.read_sql(query, engine)
+            logger.debug(f"Query result: {df.to_dict()}")
 
             if not df.empty:
-                return {
-                    'last_modified': df['last_modified'].iloc[0].isoformat() if pd.notnull(
-                        df['last_modified'].iloc[0]) else None,
+                last_modified = df['last_modified'].iloc[0]
+                logger.debug(f"Last modified raw value: {last_modified}, type: {type(last_modified)}")
+
+                if pd.notnull(last_modified):
+                    # Convert to datetime if it's not already
+                    if not isinstance(last_modified, datetime):
+                        if isinstance(last_modified, pd.Timestamp):
+                            last_modified = last_modified.to_pydatetime()
+                        else:
+                            # If it's a date, convert to datetime at midnight UTC
+                            last_modified = datetime.combine(last_modified, datetime.min.time())
+
+                    # Ensure UTC timezone
+                    if last_modified.tzinfo is None:
+                        last_modified = last_modified.astimezone(timezone.utc)
+
+                    logger.debug(f"Final last_modified with timezone: {last_modified}")
+
+                result = {
+                    'last_modified': last_modified,
                     'record_count': int(df['record_count'].iloc[0])
                 }
+                logger.debug(f"Returning version info: {result}")
+                return result
+
+            logger.warning("Query returned empty DataFrame")
             return None
         except Exception as e:
-            logger.error(f"Error fetching version info: {str(e)}")
+            logger.error(f"Error fetching version info: {str(e)}", exc_info=True)
             return None
 
     def execute_query(self, query: str) -> pd.DataFrame:

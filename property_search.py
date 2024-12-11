@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Union
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pydantic import ValidationError
 from logger_config import LogConfig
 from models.Property import Property, PropertyStatus
@@ -22,32 +22,37 @@ class PropertySearch:
 
     def _parse_date(self, date_value: Union[str, datetime, date]) -> datetime:
         """
-        Parse different date formats into datetime object.
+        Parse different date formats into UTC datetime object.
 
         Args:
             date_value: Can be string, datetime, or date object
 
         Returns:
-            datetime object
+            datetime object in UTC
         """
         if date_value is None:
             return None
 
         if isinstance(date_value, datetime):
-            return date_value
+            # Ensure datetime is UTC
+            return date_value.astimezone(timezone.utc)
         elif isinstance(date_value, date):
-            return datetime.combine(date_value, datetime.min.time())
+            # Convert date to UTC datetime
+            return datetime.combine(date_value, datetime.min.time(), tzinfo=timezone.utc)
         elif isinstance(date_value, str):
             try:
-                # Try parsing GMT format
-                return datetime.strptime(date_value, '%a, %d %b %Y %H:%M:%S GMT')
+                # Parse GMT format (already UTC)
+                return datetime.strptime(date_value, '%a, %d %b %Y %H:%M:%S GMT').replace(tzinfo=timezone.utc)
             except ValueError:
                 try:
-                    # Try parsing ISO format
-                    return datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+                    # Parse ISO format and convert to UTC
+                    dt = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+                    return dt.astimezone(timezone.utc)
                 except ValueError:
-                    # Try parsing date-only format
-                    return datetime.strptime(date_value, '%Y-%m-%d')
+                    # Parse date-only format as UTC
+                    return datetime.strptime(date_value, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+
+        raise ValueError(f"Unable to parse date value: {date_value}")
 
     def _convert_to_models(self, cache_data: List[Dict]) -> None:
         """Convert raw cache data to Property models with comprehensive error handling"""

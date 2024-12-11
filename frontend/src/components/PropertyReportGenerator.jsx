@@ -27,18 +27,18 @@ import {searchCache} from '../lib/cache';
 const parseAPIDate = (dateStr) => {
     if (!dateStr) return null;
 
-    // First try parsing as ISO string
+    // First try parsing as ISO string (API returns UTC dates)
     let date = new Date(dateStr);
     if (!isNaN(date.getTime())) {
         return date;
     }
 
-    // Try parsing YYYY-MM-DD format
+    // Try parsing YYYY-MM-DD format (as UTC)
     if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
         return new Date(dateStr + 'T00:00:00Z');
     }
 
-    // Try parsing the SQL format (YYYY-MM-DD HH:mm:ss)
+    // Try parsing the SQL format (YYYY-MM-DD HH:mm:ss) as UTC
     const sqlMatch = dateStr.match(/^(\d{4}-\d{2}-\d{2})\s(\d{2}:\d{2}:\d{2})$/);
     if (sqlMatch) {
         return new Date(sqlMatch[1] + 'T' + sqlMatch[2] + 'Z');
@@ -184,7 +184,7 @@ const PropertyReportGenerator = () => {
                 throw new Error('Invalid latest_post_date format');
             }
 
-            // Get yesterday's date at midnight GMT
+            // Get yesterday's date at midnight UTC
             const now = new Date();
             const yesterday = new Date(Date.UTC(
                 now.getUTCFullYear(),
