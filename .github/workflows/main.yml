@@ -122,14 +122,23 @@ jobs:
             echo "🐳 Checking Docker status..."
             docker ps
           
-            echo "🛑 Stopping existing container..."
-            if docker ps -a | grep -q aion-api; then
-              echo "Found existing container. Stopping and removing..."
-              docker stop aion-api || true
-              docker rm aion-api || true
-            else
-              echo "No existing container found."
-            fi
+            echo "🛑 Cleaning up old Docker resources..."
+            echo "Current Docker status:"
+            docker ps -a
+            docker images
+          
+            # Stop and remove all containers with name aion-api
+            echo "Stopping and removing old containers..."
+            docker ps -a --filter "name=aion-api" --format "{{.ID}}" | xargs -r docker stop
+            docker ps -a --filter "name=aion-api" --format "{{.ID}}" | xargs -r docker rm
+          
+            # Remove old images
+            echo "Removing old aion-api images..."
+            docker images "aion-api" --format "{{.ID}}" | xargs -r docker rmi
+          
+            echo "Docker status after cleanup:"
+            docker ps -a
+            docker images
 
             echo "📥 Cloning repository..."
             echo "Branch: \$DEPLOY_BRANCH"

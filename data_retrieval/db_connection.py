@@ -32,9 +32,10 @@ class DatabaseConnection:
             self._engine = create_engine(
                 connection_url,
                 pool_size=1,
-                max_overflow=0,
-                pool_timeout=30,
-                pool_pre_ping=True
+                max_overflow=2,
+                pool_timeout=60,
+                pool_pre_ping=True,
+                pool_recycle=3600
             )
         return self._engine
 
