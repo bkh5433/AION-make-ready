@@ -241,7 +241,69 @@ export const api = {
     },
 
     async listUsers() {
-        const response = await fetchWithErrorHandling(`${API_BASE_URL}/users`);
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/admin/users`);
+        return response.json();
+    },
+
+    async createUser(userData) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/auth/register`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    username: userData.username,
+                    password: userData.password || 'aion',  // Default password if not provided
+                    name: userData.name,
+                    role: userData.role || 'user',
+                    isActive: userData.isActive !== undefined ? userData.isActive : true
+                })
+            }
+        );
+        return response.json();
+    },
+
+    async updateUser(userId, userData) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}`,
+            {
+                method: 'PUT',
+                body: JSON.stringify(userData)
+            }
+        );
+        return response.json();
+    },
+
+    async deleteUser(userId) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}`,
+            {
+                method: 'DELETE'
+            }
+        );
+        return response.json();
+    },
+
+    async resetUserPassword(userId) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}/reset-password`,
+            {
+                method: 'POST'
+            }
+        );
+        return response.json();
+    },
+
+    async toggleUserStatus(userId, isActive) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/users/${userId}`,
+            {
+                method: 'PUT',
+                body: JSON.stringify({is_active: isActive})
+            }
+        );
         return response.json();
     },
 
@@ -256,42 +318,54 @@ export const api = {
         return response.json();
     },
 
-    forceRefreshData: async () => {
-        try {
-            const response = await fetchWithErrorHandling(
-                `${API_BASE_URL}/refresh`,
-                {
-                    method: 'POST'
-                }
-            );
-            return response.json();
-        } catch (error) {
-            console.error('Error in forceRefreshData:', error);
-            throw error;
-        }
-    },
-
     // Admin endpoints
-    getUsers: async () => {
-        const response = await authenticatedFetch('/api/admin/users');
+    async getCacheStatus() {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/cache/status`
+        );
         return response.json();
     },
 
-    updateUser: async (userId, userData) => {
-        const response = await authenticatedFetch(`/api/admin/users/${userId}`, {
-            method: 'PUT',
-            body: JSON.stringify(userData)
-        });
+    async getActivityLogs(filter = 'all', startDate = null, endDate = null) {
+        const params = new URLSearchParams();
+        if (filter !== 'all') params.append('level', filter);
+        if (startDate) params.append('start_date', startDate.toISOString());
+        if (endDate) params.append('end_date', endDate.toISOString());
+
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/logs?${params}`
+        );
         return response.json();
     },
 
-    getActivityLogs: async (filter = 'all') => {
-        const response = await authenticatedFetch(`/api/admin/logs?type=${filter}`);
+    async getSystemStatus() {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/system/status`
+        );
         return response.json();
     },
 
-    getCacheStatus: async () => {
-        const response = await authenticatedFetch('/api/cache/status');
+    async forceRefreshData() {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/refresh`,
+            {
+                method: 'POST'
+            }
+        );
+        return response.json();
+    },
+
+    async changePassword(currentPassword, newPassword) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/auth/change-password`,
+            {
+                method: 'POST',
+                body: JSON.stringify({
+                    currentPassword,
+                    newPassword
+                })
+            }
+        );
         return response.json();
     }
 };

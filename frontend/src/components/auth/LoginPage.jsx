@@ -34,23 +34,30 @@ const LoginPage = () => {
         setError(null);
 
         try {
-            const response = await api.login(formData);
+            const response = await api.login({
+                username: formData.username.trim(),
+                password: formData.password
+            });
 
-            // Store the token
-            localStorage.setItem('authToken', response.token);
+            if (response.success) {
+                // Store the auth token
+                localStorage.setItem('authToken', response.token);
 
-            // Show success notification
-            addNotification('success', 'Successfully logged in!');
-
-            // Navigate immediately instead of using setTimeout
-            navigate('/', {replace: true});
-
-            // Force a page reload to ensure all auth states are updated
-            window.location.reload();
-
-        } catch (err) {
-            setError(err.message || 'Invalid email or password');
-            addNotification('error', err.message || 'Login failed');
+                if (response.user.requirePasswordChange || formData.password === 'aion') {
+                    addNotification('info', 'Please change your password before continuing');
+                    navigate('/change-password');
+                } else {
+                    addNotification('success', 'Successfully logged in!');
+                    navigate('/');
+                }
+            } else {
+                setError(response.message || 'Login failed');
+                addNotification('error', response.message || 'Login failed');
+            }
+        } catch (error) {
+            const errorMessage = error.message || 'An error occurred during login';
+            setError(errorMessage);
+            addNotification('error', errorMessage);
         } finally {
             setIsLoading(false);
         }
@@ -96,10 +103,10 @@ const LoginPage = () => {
             <Card className="w-full max-w-md bg-card shadow-xl border border-border transition-all duration-200">
                 <CardHeader className="space-y-1 p-6">
                     <CardTitle className="text-2xl font-bold text-center text-foreground">
-                        Welcome back
+                        Welcome to AION Vista
                     </CardTitle>
                     <p className="text-center text-muted-foreground">
-                        Enter your credentials to access your account
+                        Sign in to access the dashboard
                     </p>
                 </CardHeader>
                 <CardContent className="p-6">
@@ -121,7 +128,7 @@ const LoginPage = () => {
                                 <input
                                     type="text"
                                     name="username"
-                                    placeholder="Enter your username"
+                                    placeholder="Username or email"
                                     value={formData.username}
                                     onChange={handleInputChange}
                                     disabled={isLoading}
@@ -141,7 +148,7 @@ const LoginPage = () => {
                                 <input
                                     type="password"
                                     name="password"
-                                    placeholder="Enter your password"
+                                    placeholder="Password"
                                     value={formData.password}
                                     onChange={handleInputChange}
                                     disabled={isLoading}
@@ -159,7 +166,7 @@ const LoginPage = () => {
                                 to="/forgot-password"
                                 className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
-                                Forgot password?
+                                Reset your password
                             </Link>
                         </div>
 
@@ -178,17 +185,17 @@ const LoginPage = () => {
                                     <span>Signing in...</span>
                                 </>
                             ) : (
-                                <span>Sign in</span>
+                                <span>Sign in to Dashboard</span>
                             )}
                         </button>
 
                         <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-                            Don't have an account?{' '}
+                            New to AION Vista?{' '}
                             <Link
                                 to="/register"
                                 className="text-blue-600 dark:text-blue-400 hover:underline"
                             >
-                                Create an account
+                                Request an account
                             </Link>
                         </div>
                     </form>

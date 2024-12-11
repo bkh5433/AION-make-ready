@@ -7,7 +7,7 @@ from flask_cors import CORS
 from models.ReportGenerationRequest import ReportGenerationRequest
 from models.ReportGenerationResponse import ReportGenerationResponse
 from models.ReportOutput import ReportOutput
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 from pydantic import ValidationError
 from property_search import PropertySearch
@@ -21,17 +21,50 @@ from config import Config
 from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
+import psutil
+
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
         "origins": Config.CORS_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Cookie", "Set-Cookie", "Authorization"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "expose_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True,
-        "expose_headers": ["Set-Cookie"],
         "max_age": Config.CORS_MAX_AGE
     }
 })
+
+
+# Add CORS headers to all responses
+@app.before_request
+def before_request():
+    """Record the start time of each request"""
+    request.start_time = system_monitor.record_request_start()
+
+@app.after_request
+def after_request(response):
+    """Record the end time and status of each request"""
+    if hasattr(request, 'start_time'):
+        system_monitor.record_request_end(
+            request.start_time,
+            error=response.status_code >= 400,
+            path=request.path
+        )
+
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        response.headers.add('Access-Control-Max-Age', str(Config.CORS_MAX_AGE))
+
+    # Add CORS headers to all responses
+    origin = request.headers.get('Origin')
+    if origin in Config.CORS_ORIGINS:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+
+    return response
 
 # Setup logging
 log_config = LogConfig()
@@ -125,8 +158,6 @@ def health_check():
 @app.route('/api/properties/search', methods=['GET'])
 @require_auth
 @catch_exceptions
-@log_exceptions(logger)
-# @queue_requests(max_concurrent=20)
 def search_properties():
     """
     Search properties by name.
@@ -134,12 +165,20 @@ def search_properties():
     - q: Search term for property name (optional)
     - include_metrics: Whether to include full metrics (default: true)
     """
-    logger.info("Starting property search endpoint")
     try:
+        # Get search parameters
         search_term = request.args.get('q', None)
         include_metrics = request.args.get('include_metrics', 'true').lower() == 'true'
 
         logger.debug(f"Search parameters - term: {search_term}, include_metrics: {include_metrics}")
+
+        # Force refresh if needed
+        if cache.needs_force_refresh:
+            logger.info("Cache needs force refresh")
+            run_async(cache.refresh_data(fetch_make_ready_data))
+        elif cache.is_stale:
+            logger.info("Cache is stale, refreshing")
+            run_async(cache.refresh_data(fetch_make_ready_data))
 
         # Get data from cache
         data, is_stale = run_async(cache.get_data())
@@ -167,8 +206,8 @@ def search_properties():
             search_term=search_term,
             last_updated=cache._last_refresh,
             period_info={
-                'start_date': datetime.now() - timedelta(days=30),
-                'end_date': datetime.now()
+                'start_date': datetime.now(timezone.utc) - timedelta(days=30),
+                'end_date': datetime.now(timezone.utc)
             }
         )
 
@@ -195,7 +234,7 @@ def search_properties():
                 'last_refresh': cache._last_refresh.isoformat() if cache._last_refresh else None,
                 'is_refreshing': cache._refresh_state.is_refreshing,
                 'refresh_age': (
-                    (datetime.now() - cache._last_refresh).total_seconds()
+                    (datetime.now(timezone.utc) - cache._last_refresh).total_seconds()
                     if cache._last_refresh else None
                 )
             }
@@ -204,8 +243,11 @@ def search_properties():
         return jsonify(response_data)
 
     except Exception as e:
-        logger.error(f"Error in search endpoint: {str(e)}", exc_info=True)
-        raise
+        logger.error(f"Exception in search_properties", exc_info=True)
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
 
 @app.route('/api/reports/generate', methods=['POST'])
 @require_auth
@@ -493,15 +535,15 @@ def cache_status():
     """Enhanced endpoint to check cache status and update patterns"""
     try:
         stats = cache.get_stats()
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         # Calculate time until next expected update
         expected_time = datetime.strptime(cache.config.expected_update_time, "%H:%M").time()
-        expected_datetime = datetime.combine(now.date(), expected_time)
+        expected_datetime = datetime.combine(now.date(), expected_time, tzinfo=timezone.utc)
 
         if now.time() > expected_time:
             # If we're past today's update time, look at tomorrow
-            expected_datetime = datetime.combine(now.date() + timedelta(days=1), expected_time)
+            expected_datetime = datetime.combine(now.date() + timedelta(days=1), expected_time, tzinfo=timezone.utc)
 
         time_until_update = (expected_datetime - now).total_seconds()
 
@@ -526,7 +568,6 @@ def cache_status():
                 "expected_update_datetime": expected_update_datetime.isoformat(),
                 "time_until_update_seconds": time_until_update,
                 "time_until_update_hours": time_until_update / 3600,
-                
                 "is_update_window": (
                         abs(time_until_update) <= cache.config.update_window
                 ),
@@ -595,44 +636,46 @@ def cache_status():
 def schedule_data_refresh():
     """Enhanced dynamic scheduling for data refresh"""
     from apscheduler.schedulers.background import BackgroundScheduler
+
+    async def calculate_interval():
+        """Get the next check interval from cache"""
+        interval = cache._calculate_next_check_interval()
+        logger.info(f"Calculated next check interval: {interval} seconds")
+        return interval
+    
     def refresh_data_task():
         """Wrapper for async refresh task"""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            # Get current check interval from cache
-            interval = cache._next_check_interval
-
-            # Perform refresh
+            # First refresh the data
             loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
 
-            # Schedule next check based on new interval
+            # Then calculate new interval
+            next_interval = loop.run_until_complete(calculate_interval())
+
+            # Update scheduler with new interval
+            logger.info(f"Rescheduling next refresh for {next_interval} seconds")
             scheduler.reschedule_job(
                 'dynamic_refresh',
                 trigger='interval',
-                seconds=cache._next_check_interval
+                seconds=next_interval
             )
 
-            logger.info(f"Next refresh scheduled in {cache._next_check_interval} seconds")
-
+        except Exception as e:
+            logger.error(f"Error in refresh task: {str(e)}")
         finally:
             loop.close()
 
     scheduler = BackgroundScheduler()
 
-    # Add session cleanup job
-    scheduler.add_job(
-        run_session_cleanup,
-        'interval',
-        hours=1,
-        id='session_cleanup'
-    )
-
-    # Add dynamic refresh job
+    # Start with initial interval from cache
+    initial_interval = run_async(calculate_interval())
+    
     scheduler.add_job(
         refresh_data_task,
         'interval',
-        seconds=cache_config.base_refresh_interval,
+        seconds=initial_interval,
         id='dynamic_refresh'
     )
 
@@ -815,8 +858,9 @@ def get_users():
             'role': user.get('role'),
             'lastLogin': user.get('lastLogin'),
             'isActive': user.get('isActive'),
-            'createdAt': user.get('createdAt')
-        } for user in (doc.to_dict() for doc in users)]
+            'createdAt': user.get('createdAt'),
+            'uid': doc.id  # Include the document ID as uid
+        } for doc, user in ((doc, doc.to_dict()) for doc in users)]
 
         return jsonify({
             'success': True,
@@ -829,67 +873,93 @@ def get_users():
             'message': 'Error fetching users'
         }), 500
 
-@app.route('/api/admin/users/<user_id>', methods=['PUT'])
+
+@app.route('/api/admin/users/<user_id>', methods=['PUT', 'DELETE'])
 @require_auth
 @require_role('admin')
-def update_user(user_id):
-    """Update user details"""
+def manage_user(user_id):
+    """Update or delete user details"""
     try:
-        data = request.get_json()
-
-        # Don't allow role change to admin for non-admin users
-        if data.get('role') == 'admin' and request.user['role'] != 'admin':
+        # Get user document
+        user_doc = auth.users_ref.document(user_id).get()
+        if not user_doc.exists:
             return jsonify({
                 'success': False,
-                'message': 'Unauthorized to assign admin role'
-            }), 403
+                'message': 'User not found'
+            }), 404
 
-        updates = {
-            'name': data.get('name'),
-            'role': data.get('role'),
-            'isActive': data.get('isActive', True)
-        }
+        if request.method == 'DELETE':
+            # Delete the user
+            user_doc.reference.delete()
+            return jsonify({
+                'success': True,
+                'message': 'User deleted successfully'
+            })
 
-        if data.get('password'):
-            password_hash, salt = auth._hash_password(data['password'])
-            updates['password_hash'] = password_hash
-            updates['salt'] = salt
+        elif request.method == 'PUT':
+            data = request.get_json()
 
-        auth.users_ref.document(user_id).update(updates)
+            # Don't allow role change to admin for non-admin users
+            if data.get('role') == 'admin' and request.user['role'] != 'admin':
+                return jsonify({
+                    'success': False,
+                    'message': 'Unauthorized to assign admin role'
+                }), 403
 
-        return jsonify({
-            'success': True,
-            'message': 'User updated successfully'
-        })
+            updates = {
+                'name': data.get('name'),
+                'role': data.get('role'),
+                'isActive': data.get('isActive', True)
+            }
+
+            # Remove None values
+            updates = {k: v for k, v in updates.items() if v is not None}
+
+            if data.get('password'):
+                password_hash, salt = auth._hash_password(data['password'])
+                updates['password_hash'] = password_hash
+                updates['salt'] = salt
+
+            user_doc.reference.update(updates)
+
+            return jsonify({
+                'success': True,
+                'message': 'User updated successfully'
+            })
     except Exception as e:
-        logger.error(f"Error updating user: {str(e)}")
+        logger.error(f"Error managing user: {str(e)}")
         return jsonify({
             'success': False,
-            'message': 'Error updating user'
+            'message': f'Error managing user: {str(e)}'
         }), 500
 
 @app.route('/api/admin/logs', methods=['GET'])
 @require_auth
-@require_role('admin')
-def get_logs():
-    """Get system logs"""
+@require_role(['admin'])
+def get_activity_logs():
+    """Get activity logs with optional filtering"""
     try:
-        log_type = request.args.get('type', 'all')
+        level = request.args.get('level', 'all')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
         limit = int(request.args.get('limit', 100))
 
-        # Implementation depends on your logging setup
-        # This is a placeholder that you'll need to implement
-        logs = log_config.get_recent_logs(log_type, limit)
+        logs = log_config.get_recent_logs(
+            level=level,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
 
         return jsonify({
-            'success': True,
+            'status': 'success',
             'logs': logs
         })
     except Exception as e:
-        logger.error(f"Error fetching logs: {str(e)}")
+        logger.error(f"Error retrieving logs: {str(e)}")
         return jsonify({
-            'success': False,
-            'message': 'Error fetching logs'
+            'status': 'error',
+            'message': str(e)
         }), 500
 
 
@@ -914,6 +984,154 @@ def get_system_metrics():
             "error": str(e)
         }), 500
 
+
+@app.route('/api/admin/users/<user_id>/status', methods=['PUT', 'OPTIONS'])
+@require_auth
+@require_role('admin')
+def update_user_status(user_id):
+    """Update user active status"""
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+
+        data = request.get_json()
+        is_active = data.get('isActive')
+
+        if is_active is None:
+            return jsonify({
+                'success': False,
+                'message': 'isActive status is required'
+            }), 400
+
+        # Get user document directly by ID
+        user_doc = auth.users_ref.document(user_id).get()
+
+        if not user_doc.exists:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+
+        # Update the user's status
+        user_doc.reference.update({
+            'isActive': is_active
+        })
+
+        return jsonify({
+            'success': True,
+            'message': 'User status updated successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error updating user status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'Error updating user status'
+        }), 500
+
+
+@app.route('/api/auth/change-password', methods=['POST'])
+@require_auth
+def change_password():
+    """Change user password"""
+    try:
+        data = request.get_json()
+        current_password = data.get('currentPassword')
+        new_password = data.get('newPassword')
+
+        if not current_password or not new_password:
+            return jsonify({
+                'success': False,
+                'message': 'Current and new passwords are required'
+            }), 400
+
+        # Get user from Firestore
+        user_doc = auth.users_ref.where('email', '==', request.user['email']).limit(1).stream()
+        user = next((doc.to_dict() for doc in user_doc), None)
+
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+
+        # Verify current password
+        hashed_input, _ = auth._hash_password(current_password, user['salt'])
+        if hashed_input != user['password_hash']:
+            return jsonify({
+                'success': False,
+                'message': 'Current password is incorrect'
+            }), 400
+
+        # Update password
+        new_hash, new_salt = auth._hash_password(new_password)
+        user_ref = auth.users_ref.document(user['uid'])
+        user_ref.update({
+            'password_hash': new_hash,
+            'salt': new_salt,
+            'requirePasswordChange': False
+        })
+
+        return jsonify({
+            'success': True,
+            'message': 'Password updated successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Error changing password: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': 'An error occurred while changing password'
+        }), 500
+
+
+@app.route('/api/admin/system/status', methods=['GET'])
+@require_auth
+@require_role('admin')
+@catch_exceptions
+def system_status():
+    """Get comprehensive system status"""
+    try:
+        # Get system metrics
+        metrics = system_monitor.get_all_metrics()
+
+        # Get users who logged in within the last 12 hours
+        twelve_hours_ago = datetime.utcnow() - timedelta(hours=12)
+        active_users = 0
+
+        # Query Firestore for recent logins
+        users = auth.users_ref.where('lastLogin', '>=', twelve_hours_ago.strftime('%Y-%m-%dT%H:%M:%S.%fZ')).stream()
+        active_users = len(list(users))
+
+        # Get cache health
+        cache_healthy = cache.is_healthy() if hasattr(cache, 'is_healthy') else True
+        cache_stats = cache.get_stats()  # Use get_stats() instead of get_health_details()
+
+        response = {
+            'healthy': cache_healthy,  # Overall health based on cache and system metrics
+            'timestamp': datetime.now().isoformat(),
+            'activeUsers': active_users,  # Now shows users active in last 12 hours
+            'cpu': metrics['cpu'],
+            'memory': metrics['memory'],
+            'disk': metrics['disk'],
+            'network': metrics['network'],
+            'performance': metrics['performance'],
+            'cache': cache_stats  # Include cache stats in the response
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logger.error(f"Error getting system status: {str(e)}")
+        return jsonify({
+            'healthy': False,
+            'error': str(e),
+            'details': 'Error retrieving system status'
+        }), 500
+
+if __name__ == '__main__':
+    logger.info("Starting application and updating initial cache.")
+    app.run(debug=True)
+
 # @app.route('/api/some_endpoint', methods=['GET'])
 # @require_auth
 # @catch_exceptions
@@ -928,7 +1146,3 @@ def get_system_metrics():
 #         "url": dynamic_url
 #     }
 #     return jsonify(response), 200
-
-if __name__ == '__main__':
-    logger.info("Starting application and updating initial cache.")
-    app.run(debug=True)

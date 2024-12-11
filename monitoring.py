@@ -1,81 +1,129 @@
 import psutil
 import os
 import platform
-from datetime import datetime
-from typing import Dict, Any
+from datetime import datetime, timedelta
+from typing import Dict, Any, List
 import logging
+from collections import deque
+import time
+from logger_config import LogConfig
 
+log_config = LogConfig()
+logger = log_config.get_logger('system_monitor')
+
+# Define essential routes to track
+ESSENTIAL_ROUTES = {
+    '/api/properties/search': 'search',
+    '/api/reports/generate': 'generation',
+    '/api/data': 'data_fetch'
+}
 
 class SystemMonitor:
     def __init__(self):
-        self.logger = logging.getLogger('system_monitor')
+        self.logger = logger
         self._start_time = datetime.now()
+        # Track response times per route
+        self._response_times = {
+            'search': deque(maxlen=100),
+            'generation': deque(maxlen=100),
+            'data_fetch': deque(maxlen=100),
+            'other': deque(maxlen=100)
+        }
+        self._errors = deque(maxlen=1000)
+        self._request_count = 0
+
+    def record_request_start(self) -> float:
+        """Record the start time of a request"""
+        return time.time()
+
+    def record_request_end(self, start_time: float, error: bool = False, path: str = None):
+        """Record the end time of a request and calculate metrics"""
+        end_time = time.time()
+        response_time = (end_time - start_time) * 1000  # Convert to milliseconds
+
+        # Determine route category
+        route_category = 'other'
+        if path:
+            route_category = ESSENTIAL_ROUTES.get(path, 'other')
+
+        # Record response time for the appropriate category
+        self._response_times[route_category].append(response_time)
+        self._request_count += 1
+
+        if error:
+            self._errors.append(end_time)
+
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics"""
+        now = time.time()
+        hour_ago = now - 3600  # 1 hour ago
+
+        # Calculate average response time for each category
+        response_times = {}
+        for category, times in self._response_times.items():
+            if times:
+                avg_time = sum(times) / len(times)
+                response_times[category] = round(avg_time, 2)
+            else:
+                response_times[category] = 0
+
+        # Calculate overall average for essential routes only
+        essential_times = []
+        for category in ['search', 'generation', 'data_fetch']:
+            essential_times.extend(self._response_times[category])
+
+        avg_response_time = 0
+        if essential_times:
+            avg_response_time = sum(essential_times) / len(essential_times)
+
+        # Calculate error rate for the last hour
+        recent_errors = sum(1 for error_time in self._errors if error_time > hour_ago)
+        error_rate = (recent_errors / self._request_count * 100) if self._request_count > 0 else 0
+
+        return {
+            "responseTime": round(avg_response_time, 2),
+            "routeResponseTimes": response_times,
+            "errorRate": round(error_rate, 2),
+            "totalRequests": self._request_count,
+            "recentErrors": recent_errors
+        }
 
     def get_memory_usage(self) -> Dict[str, Any]:
         """Get memory usage statistics"""
         memory = psutil.virtual_memory()
         return {
-            "total": self._bytes_to_gb(memory.total),
-            "available": self._bytes_to_gb(memory.available),
-            "used": self._bytes_to_gb(memory.used),
-            "free": self._bytes_to_gb(memory.free),
-            "percent": memory.percent
+            "total": memory.total,
+            "used": memory.used,
+            "free": memory.free,
+            "usage": memory.percent
         }
 
     def get_disk_usage(self) -> Dict[str, Any]:
         """Get disk usage statistics"""
         disk = psutil.disk_usage('/')
         return {
-            "total": self._bytes_to_gb(disk.total),
-            "used": self._bytes_to_gb(disk.used),
-            "free": self._bytes_to_gb(disk.free),
-            "percent": disk.percent
+            "total": disk.total,
+            "used": disk.used,
+            "free": disk.free,
+            "usage": disk.percent
         }
 
     def get_cpu_usage(self) -> Dict[str, Any]:
         """Get CPU usage statistics"""
         return {
-            "percent": psutil.cpu_percent(interval=1),
-            "cores": {
-                "physical": psutil.cpu_count(logical=False),
-                "logical": psutil.cpu_count(logical=True)
-            },
-            "frequency": {
-                "current": psutil.cpu_freq().current,
-                "min": psutil.cpu_freq().min,
-                "max": psutil.cpu_freq().max
-            }
-        }
-
-    def get_process_info(self) -> Dict[str, Any]:
-        """Get current process information"""
-        process = psutil.Process(os.getpid())
-        return {
-            "memory_percent": process.memory_percent(),
-            "cpu_percent": process.cpu_percent(interval=1),
-            "threads": process.num_threads(),
-            "uptime_seconds": (datetime.now() - self._start_time).total_seconds()
-        }
-
-    def get_system_info(self) -> Dict[str, Any]:
-        """Get general system information"""
-        return {
-            "platform": platform.system(),
-            "platform_release": platform.release(),
-            "platform_version": platform.version(),
-            "architecture": platform.machine(),
-            "processor": platform.processor(),
-            "hostname": platform.node()
+            "usage": psutil.cpu_percent(interval=1),
+            "cores": psutil.cpu_count()
         }
 
     def get_network_info(self) -> Dict[str, Any]:
         """Get network statistics"""
-        network_stats = psutil.net_io_counters()
+        network = psutil.net_io_counters()
+        process = psutil.Process()
+        uptime = time.time() - process.create_time()
         return {
-            "bytes_sent": self._bytes_to_mb(network_stats.bytes_sent),
-            "bytes_received": self._bytes_to_mb(network_stats.bytes_recv),
-            "packets_sent": network_stats.packets_sent,
-            "packets_received": network_stats.packets_recv
+            "bytesPerSec": (network.bytes_sent + network.bytes_recv) / uptime,
+            "sent": network.bytes_sent,
+            "received": network.bytes_recv
         }
 
     def get_all_metrics(self) -> Dict[str, Any]:
@@ -86,20 +134,9 @@ class SystemMonitor:
                 "memory": self.get_memory_usage(),
                 "disk": self.get_disk_usage(),
                 "cpu": self.get_cpu_usage(),
-                "process": self.get_process_info(),
-                "system": self.get_system_info(),
-                "network": self.get_network_info()
+                "network": self.get_network_info(),
+                "performance": self.get_performance_metrics()
             }
         except Exception as e:
             self.logger.error(f"Error collecting system metrics: {str(e)}")
             return {"error": str(e)}
-
-    @staticmethod
-    def _bytes_to_gb(bytes_value: int) -> float:
-        """Convert bytes to gigabytes"""
-        return round(bytes_value / (1024 ** 3), 2)
-
-    @staticmethod
-    def _bytes_to_mb(bytes_value: int) -> float:
-        """Convert bytes to megabytes"""
-        return round(bytes_value / (1024 ** 2), 2)

@@ -138,8 +138,8 @@ def cleanup_session(session_id: str) -> None:
             session_timestamp = datetime.fromisoformat(session_info_file.read_text())
             age = datetime.now() - session_timestamp
 
-            # Clean up if session is over 5 minutes old
-            if age > timedelta(minutes=5):
+            # Clean up if session is over 10 minutes old
+            if age > timedelta(minutes=10):
                 import shutil
                 shutil.rmtree(session_dir)
                 logger.info(f"Cleaned up old session: {session_id}")

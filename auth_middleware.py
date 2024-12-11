@@ -83,10 +83,10 @@ class AuthMiddleware:
                 logger.info(f"Password mismatch for user: {username}")
                 return None
 
-            # Update last login
+            # Update last login with UTC timezone
             user_ref = self.users_ref.document(user['uid'])
             user_ref.update({
-                'lastLogin': datetime.utcnow().isoformat()
+                'lastLogin': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             })
 
             # Calculate token expiration time
@@ -107,10 +107,11 @@ class AuthMiddleware:
                     'username': user['username'],
                     'name': user['name'],
                     'role': user['role'],
-                    'email': user['email']
+                    'email': user['email'],
+                    'requirePasswordChange': user.get('requirePasswordChange', False)
                 },
-                'expires_at': expiration_time.isoformat(),  # Add expiration time to response
-                'expires_in': int(timedelta(hours=24).total_seconds())  # Add seconds until expiration
+                'expires_at': expiration_time.isoformat(),
+                'expires_in': int(timedelta(hours=24).total_seconds())
             }
         except Exception as e:
             logger.warning(f"Authentication error: {e}, username: {username}")
@@ -127,6 +128,9 @@ class AuthMiddleware:
             # Hash password
             password_hash, salt = self._hash_password(password)
 
+            # Get current UTC time
+            now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
             # Create new user document
             user_data = {
                 'uid': self.users_ref.document().id,
@@ -136,7 +140,7 @@ class AuthMiddleware:
                 'salt': salt,
                 'name': name,
                 'isActive': True,
-                'createdAt': datetime.utcnow().isoformat(),
+                'createdAt': now,
                 'lastLogin': None,
                 'role': role  # Add role to user data
             }
@@ -147,7 +151,8 @@ class AuthMiddleware:
             return {
                 'username': user_data['username'],
                 'name': user_data['name'],
-                'role': user_data['role']
+                'role': user_data['role'],
+                'createdAt': now
             }
         except Exception as e:
             logger.warning(f"Error creating user: {e}")

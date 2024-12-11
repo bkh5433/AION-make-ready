@@ -77,7 +77,7 @@ class ContextFormatter(logging.Formatter):
 class LogConfig:
     """Centralized logging configuration with enhanced error tracking"""
 
-    def __init__(self, logs_dir: str = "logs", default_level: int = logging.INFO):
+    def __init__(self, logs_dir: str = "logs", default_level: int = logging.DEBUG):
         self.logs_dir = Path(logs_dir)
         self.default_level = default_level
         self._ensure_log_directory()
@@ -149,6 +149,75 @@ class LogConfig:
         logger.addHandler(file_handler)
 
         return logger
+
+    def get_recent_logs(self, level=None, start_date=None, end_date=None, limit=100):
+        """Get recent logs with optional filtering"""
+        logs = []
+        log_files = list(self.logs_dir.glob('*.log'))
+
+        # Convert dates to datetime objects if they're strings
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        if isinstance(end_date, str):
+            end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+
+        for log_file in log_files:
+            try:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        try:
+                            # Parse log line
+                            # Expected format: 2024-01-20 10:30:45 - name - LEVEL - Message
+                            parts = line.split(' - ', 3)
+                            if len(parts) >= 4:
+                                timestamp_str, name, log_level, message = parts
+                                log_timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+
+                                # Apply filters
+                                if level and level.upper() != 'ALL' and level.upper() != log_level.strip():
+                                    continue
+                                if start_date and log_timestamp < start_date:
+                                    continue
+                                if end_date and log_timestamp > end_date:
+                                    continue
+
+                                log_entry = {
+                                    'timestamp': log_timestamp.isoformat(),
+                                    'level': log_level.strip(),
+                                    'source': name.strip(),
+                                    'message': message.strip()
+                                }
+
+                                # Extract user info if present in the message
+                                if 'user:' in message:
+                                    user_start = message.find('user:') + 5
+                                    user_end = message.find(' ', user_start)
+                                    if user_end == -1:
+                                        user_end = len(message)
+                                    log_entry['user'] = message[user_start:user_end].strip()
+
+                                # Add any additional details if present
+                                if '{' in message and '}' in message:
+                                    try:
+                                        details_start = message.find('{')
+                                        details_end = message.rfind('}') + 1
+                                        details_str = message[details_start:details_end]
+                                        import json
+                                        log_entry['details'] = json.loads(details_str)
+                                    except json.JSONDecodeError:
+                                        pass
+
+                                logs.append(log_entry)
+                        except Exception as e:
+                            print(f"Error parsing log line: {e}")
+                            continue
+            except Exception as e:
+                print(f"Error reading log file {log_file}: {e}")
+                continue
+
+        # Sort logs by timestamp (newest first) and apply limit
+        logs.sort(key=lambda x: x['timestamp'], reverse=True)
+        return logs[:limit]
 
 
 def log_exceptions(logger: logging.Logger):
