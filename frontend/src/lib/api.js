@@ -326,9 +326,14 @@ export const api = {
         return response.json();
     },
 
-    async getActivityLogs() {
+    async getActivityLogs(filter = 'all', startDate = null, endDate = null) {
+        const params = new URLSearchParams();
+        if (filter !== 'all') params.append('level', filter);
+        if (startDate) params.append('start_date', startDate.toISOString());
+        if (endDate) params.append('end_date', endDate.toISOString());
+
         const response = await fetchWithErrorHandling(
-            `${API_BASE_URL}/admin/logs`
+            `${API_BASE_URL}/admin/logs?${params}`
         );
         return response.json();
     },

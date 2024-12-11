@@ -68,6 +68,29 @@ const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
     </div>
 );
 
+const getResponseTimeStatus = (responseTime, operationType) => {
+    // Different thresholds for different operation types
+    const thresholds = {
+        search: {warning: 200, error: 500},        // Search should be fast
+        data_fetch: {warning: 500, error: 1000},   // Data fetching moderate
+        generation: {warning: 5000, error: 15000}, // Report generation can take longer
+        default: {warning: 300, error: 1000}       // Default thresholds
+    };
+
+    const limits = thresholds[operationType] || thresholds.default;
+
+    if (!responseTime) return 'unknown';
+    if (responseTime < limits.warning) return 'healthy';
+    if (responseTime < limits.error) return 'warning';
+    return 'error';
+};
+
+const formatResponseTime = (time) => {
+    if (!time) return '0ms';
+    if (time < 1000) return `${time}ms`;
+    return `${(time / 1000).toFixed(1)}s`;
+};
+
 const SystemStatus = () => {
     const [systemStatus, setSystemStatus] = useState(null);
     const [cacheStatus, setCacheStatus] = useState(null);
@@ -276,24 +299,49 @@ const SystemStatus = () => {
             <div>
                 <h3 className="text-xl font-semibold text-gray-200 mb-4">Performance Metrics</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {/* Search Response Time */}
                     <MetricCard
-                        title="Response Time"
+                        title="Search Performance"
                         icon={Activity}
-                        value={`${systemStatus?.performance?.responseTime || 0}ms`}
-                        status={
-                            !systemStatus?.performance?.responseTime ? 'unknown' :
-                                systemStatus.performance.responseTime < 100 ? 'healthy' :
-                                    systemStatus.performance.responseTime < 300 ? 'warning' : 'error'
-                        }
+                        value={formatResponseTime(systemStatus?.performance?.routeResponseTimes?.search)}
+                        status={getResponseTimeStatus(
+                            systemStatus?.performance?.routeResponseTimes?.search,
+                            'search'
+                        )}
                         details={
-                            systemStatus?.performance?.routeResponseTimes ?
-                                `Search: ${systemStatus.performance.routeResponseTimes.search}ms\n` +
-                                `Generation: ${systemStatus.performance.routeResponseTimes.generation}ms\n` +
-                                `Data Fetch: ${systemStatus.performance.routeResponseTimes.data_fetch}ms` :
-                                'Average API response time'
+                            systemStatus?.performance?.searchMetrics ?
+                                `Avg: ${formatResponseTime(systemStatus.performance.searchMetrics.avg)}\n` +
+                                `Min: ${formatResponseTime(systemStatus.performance.searchMetrics.min)}\n` +
+                                `Max: ${formatResponseTime(systemStatus.performance.searchMetrics.max)}\n` +
+                                `Last hour: ${systemStatus.performance.searchMetrics.count} searches` :
+                                'No search metrics available'
                         }
                     />
 
+                    {/* Report Generation */}
+                    <MetricCard
+                        title="Report Generation"
+                        icon={Activity}
+                        value={
+                            systemStatus?.performance?.routeResponseTimes?.generation ?
+                                `${formatResponseTime(systemStatus.performance.routeResponseTimes.generation)} avg` :
+                                'No data'
+                        }
+                        status={getResponseTimeStatus(
+                            systemStatus?.performance?.routeResponseTimes?.generation,
+                            'generation'
+                        )}
+                        details={
+                            systemStatus?.performance?.asyncMetrics ?
+                                `Based on ${systemStatus.performance.asyncMetrics.completedGenerations} generations\n` +
+                                `Active: ${systemStatus.performance.asyncMetrics.activeGenerations}\n` +
+                                `Queue Size: ${systemStatus.performance.asyncMetrics.queueSize}\n` +
+                                `Failed: ${systemStatus.performance.asyncMetrics.failedGenerations}` :
+                                'No generation metrics available'
+                        }
+                    />
+
+                    {/* Error Rate */}
                     <MetricCard
                         title="Error Rate"
                         icon={AlertTriangle}
@@ -303,19 +351,14 @@ const SystemStatus = () => {
                                 systemStatus.performance.errorRate < 1 ? 'healthy' :
                                     systemStatus.performance.errorRate < 5 ? 'warning' : 'error'
                         }
-                        details="API error rate in last hour"
-                    />
-
-                    <MetricCard
-                        title="Cache Performance"
-                        icon={Database}
-                        value={`${cacheStatus?.performance_metrics?.avg_refresh_time?.toFixed(2) || 0}ms`}
-                        status={
-                            !cacheStatus?.performance_metrics?.avg_refresh_time ? 'unknown' :
-                                cacheStatus.performance_metrics.avg_refresh_time < 1000 ? 'healthy' :
-                                    cacheStatus.performance_metrics.avg_refresh_time < 5000 ? 'warning' : 'error'
+                        details={
+                            systemStatus?.performance?.errorMetrics ?
+                                `Last Hour:\n` +
+                                `API Errors: ${systemStatus.performance.errorMetrics.apiErrors}\n` +
+                                `Auth Failures: ${systemStatus.performance.errorMetrics.authFailures}\n` +
+                                `Validation Errors: ${systemStatus.performance.errorMetrics.validationErrors}` :
+                                'Error rate in last hour'
                         }
-                        details={`Avg. refresh time\nWait time: ${cacheStatus?.performance_metrics?.avg_wait_time?.toFixed(2) || 0}ms`}
                     />
                 </div>
             </div>

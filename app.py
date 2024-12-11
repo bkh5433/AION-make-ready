@@ -935,26 +935,31 @@ def manage_user(user_id):
 
 @app.route('/api/admin/logs', methods=['GET'])
 @require_auth
-@require_role('admin')
-def get_logs():
-    """Get system logs"""
+@require_role(['admin'])
+def get_activity_logs():
+    """Get activity logs with optional filtering"""
     try:
-        log_type = request.args.get('type', 'all')
+        level = request.args.get('level', 'all')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
         limit = int(request.args.get('limit', 100))
 
-        # Implementation depends on your logging setup
-        # This is a placeholder that you'll need to implement
-        logs = log_config.get_recent_logs(log_type, limit)
+        logs = log_config.get_recent_logs(
+            level=level,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit
+        )
 
         return jsonify({
-            'success': True,
+            'status': 'success',
             'logs': logs
         })
     except Exception as e:
-        logger.error(f"Error fetching logs: {str(e)}")
+        logger.error(f"Error retrieving logs: {str(e)}")
         return jsonify({
-            'success': False,
-            'message': 'Error fetching logs'
+            'status': 'error',
+            'message': str(e)
         }), 500
 
 
