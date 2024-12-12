@@ -936,7 +936,7 @@ def manage_user(user_id):
 
 @app.route('/api/admin/logs', methods=['GET'])
 @require_auth
-@require_role(['admin'])
+@require_role('admin')
 def get_activity_logs():
     """Get activity logs with optional filtering"""
     try:
@@ -1171,7 +1171,7 @@ def import_window_status():
 
 @app.route('/api/test/trigger-import-window', methods=['POST'])
 @require_auth
-# @require_role('admin')  # Only allow admins to trigger this
+@require_role('admin')  # Only allow admins to trigger this
 @catch_exceptions
 def trigger_import_window():
     """Test endpoint to manually trigger import window state"""

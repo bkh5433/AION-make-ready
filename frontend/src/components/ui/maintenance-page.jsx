@@ -217,7 +217,7 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
                             className="flex items-center justify-center gap-2 text-sm text-gray-400/80"
                         >
                             <Server className="h-4 w-4"/>
-                            This usually takes a few minutes
+                            Grab a cup of coffee... this might take a a while
                         </motion.div>
 
                         {/* <TimeEstimate startTime={startTime.current} /> */}
@@ -230,7 +230,7 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
                                     exit={{opacity: 0, y: -20}}
                                     className="text-sm text-gray-400/60 italic"
                                 >
-                                    Tip: Our system performs regular database updates to ensure data accuracy
+                                    This page will automatically refresh once the update is complete
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -255,14 +255,14 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
                         >
                             <h3 className="text-xl font-semibold text-gray-200">About Database Updates</h3>
                             <p className="text-gray-400 text-sm leading-relaxed">
-                                Once daily, we receive new data from RealPage and update our database.
-                                When Vista detects these updates, we temporarily restrict access to maintain
-                                data consistency and integrity.
+                                Each day, we receive new data from RealPage and update our database accordingly. During
+                                this update process, Vista temporarily limits access to ensure the consistency and
+                                integrity of the data.
                             </p>
                             <div className="text-gray-400 text-sm space-y-2">
                                 <p className="flex items-center gap-2">
                                     <Clock className="h-4 w-4 text-primary"/>
-                                    Updates typically take around 1 hour
+                                    Updates typically take around 1-2 hours
                                 </p>
                                 {/* <p className="flex items-center gap-2">
                   <Server className="h-4 w-4 text-primary" />

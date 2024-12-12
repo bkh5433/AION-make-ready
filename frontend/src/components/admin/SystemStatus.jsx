@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import {api} from '../../lib/api';
 import {useImportWindow} from '../../lib/hooks/useImportWindow';
+import {Tooltip} from '../ui/Tooltip';
 
 const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
     <div
@@ -168,15 +169,49 @@ const SystemStatus = () => {
 
         const details = [];
 
+        // Version info with enhanced confidence score display
+        if (cacheStatus.version_info) {
+            const {
+                primary_record_count,
+                fallback_record_count,
+                confidence_score
+            } = cacheStatus.version_info;
+
+            details.push(`Primary Records: ${primary_record_count}`);
+            details.push(`Fallback Records: ${fallback_record_count}`);
+
+            if (confidence_score !== undefined) {
+                details.push(
+                    <div key="confidence" className="flex items-center gap-2">
+                        <span>Confidence Score:</span>
+                        <Tooltip content={getConfidenceScoreDetails(confidence_score)} wide>
+                            <span className={`font-medium ${
+                                confidence_score >= 0.9 ? 'text-green-400' :
+                                    confidence_score >= 0.7 ? 'text-blue-400' :
+                                        confidence_score >= 0.5 ? 'text-yellow-400' :
+                                            'text-red-400'
+                            }`}>
+                                {(confidence_score * 100).toFixed(1)}%
+                            </span>
+                        </Tooltip>
+                    </div>
+                );
+            }
+        }
+
+        // Add import window status
+        if (cacheStatus.update_info?.import_window_detected) {
+            details.push(
+                <div key="import-window" className="flex items-center gap-2 text-yellow-400">
+                    <AlertTriangle className="w-4 h-4"/>
+                    <span>Import Window Active</span>
+                </div>
+            );
+        }
+
         // Add last refresh time
         if (cacheStatus.update_info?.last_refresh) {
             details.push(`Last Refresh: ${new Date(cacheStatus.update_info.last_refresh).toLocaleString()}`);
-        }
-
-        // Add version info
-        if (cacheStatus.version_info) {
-            const {record_count, stale_record_count} = cacheStatus.version_info;
-            details.push(`Records: ${record_count} (${stale_record_count} stale)`);
         }
 
         // Add performance metrics
@@ -191,7 +226,47 @@ const SystemStatus = () => {
             details.push(`Warnings: ${cacheStatus.warnings.join(', ')}`);
         }
 
-        return details.join('\n');
+        return (
+            <div className="space-y-1">
+                {details.map((detail, index) =>
+                    typeof detail === 'string' ? (
+                        <div key={index}>{detail}</div>
+                    ) : detail
+                )}
+            </div>
+        );
+    };
+
+    // Add helper function for confidence score tooltip content
+    const getConfidenceScoreDetails = (score) => {
+        if (!score && score !== 0) return 'No confidence data available';
+
+        let rating;
+        let explanation;
+
+        if (score >= 0.9) {
+            rating = 'Excellent';
+            explanation = 'Data is fresh and reliable. All validation checks passed.';
+        } else if (score >= 0.7) {
+            rating = 'Good';
+            explanation = 'Data is reliable but some metrics may be slightly delayed.';
+        } else if (score >= 0.5) {
+            rating = 'Fair';
+            explanation = 'Data may be stale or some validation checks failed.';
+        } else {
+            rating = 'Poor';
+            explanation = 'Data may be significantly outdated or failed validation.';
+        }
+
+        return `Confidence Score: ${(score * 100).toFixed(1)}%
+Rating: ${rating}
+${explanation}
+
+Factors affecting score:
+• Data freshness
+• Validation success rate
+• Update consistency
+• Data completeness`;
     };
 
     const getCacheStatus = () => {
