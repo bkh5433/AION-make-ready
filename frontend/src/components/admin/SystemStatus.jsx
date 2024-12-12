@@ -2,10 +2,10 @@ import React, {useState, useEffect} from 'react';
 import {
     RefreshCw, Database, Clock, Server,
     Gauge, HardDrive, Activity, AlertTriangle,
-    CheckCircle, Network, Users
+    CheckCircle, Network, Users, AlertCircle
 } from 'lucide-react';
 import {api} from '../../lib/api';
-import {Tooltip} from '../ui/Tooltip';
+import {useImportWindow} from '../../lib/hooks/useImportWindow';
 
 const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
     <div
@@ -92,43 +92,15 @@ const formatResponseTime = (time) => {
     return `${(time / 1000).toFixed(1)}s`;
 };
 
-const getConfidenceScoreDetails = (score) => {
-    if (!score && score !== 0) return 'No confidence data available';
-
-    let rating;
-    let explanation;
-
-    if (score >= 0.9) {
-        rating = 'Excellent';
-        explanation = 'Data is fresh and reliable. All validation checks passed.';
-    } else if (score >= 0.7) {
-        rating = 'Good';
-        explanation = 'Data is reliable but some metrics may be slightly delayed.';
-    } else if (score >= 0.5) {
-        rating = 'Fair';
-        explanation = 'Data may be stale or some validation checks failed.';
-    } else {
-        rating = 'Poor';
-        explanation = 'Data may be significantly outdated or failed validation.';
-    }
-
-    return `Confidence Score: ${(score * 100).toFixed(1)}%
-Rating: ${rating}
-${explanation}
-
-Factors affecting score:
-• Data freshness
-• Validation success rate
-• Update consistency
-• Data completeness`;
-};
-
 const SystemStatus = () => {
     const [systemStatus, setSystemStatus] = useState(null);
     const [cacheStatus, setCacheStatus] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
     const [autoRefresh, setAutoRefresh] = useState(true);
+    const {isInImportWindow, lastImportWindow, error: importWindowError, checkStatus} = useImportWindow();
+    const [isImportWindowLoading, setIsImportWindowLoading] = useState(false);
+    const [importActionError, setImportActionError] = useState(null);
 
     useEffect(() => {
         fetchStatus();
@@ -196,38 +168,15 @@ const SystemStatus = () => {
 
         const details = [];
 
-        // Version info with enhanced confidence score display
-        if (cacheStatus.version_info) {
-            const {
-                current_version,
-                primary_record_count,
-                fallback_record_count,
-                confidence_score
-            } = cacheStatus.version_info;
-            details.push(`Records: ${primary_record_count} current / ${fallback_record_count} fallback`);
-            if (current_version) details.push(`Version: ${current_version}`);
-            if (confidence_score !== undefined) {
-                details.push(
-                    <div key="confidence" className="flex items-center gap-1">
-                        <span>Confidence:</span>
-                        <Tooltip content={getConfidenceScoreDetails(confidence_score)}>
-                            <span className={`font-medium ${
-                                confidence_score >= 0.9 ? 'text-green-400' :
-                                    confidence_score >= 0.7 ? 'text-blue-400' :
-                                        confidence_score >= 0.5 ? 'text-yellow-400' :
-                                            'text-red-400'
-                            }`}>
-                                {(confidence_score * 100).toFixed(1)}%
-                            </span>
-                        </Tooltip>
-                    </div>
-                );
-            }
-        }
-
         // Add last refresh time
         if (cacheStatus.update_info?.last_refresh) {
             details.push(`Last Refresh: ${new Date(cacheStatus.update_info.last_refresh).toLocaleString()}`);
+        }
+
+        // Add version info
+        if (cacheStatus.version_info) {
+            const {record_count, stale_record_count} = cacheStatus.version_info;
+            details.push(`Records: ${record_count} (${stale_record_count} stale)`);
         }
 
         // Add performance metrics
@@ -242,15 +191,7 @@ const SystemStatus = () => {
             details.push(`Warnings: ${cacheStatus.warnings.join(', ')}`);
         }
 
-        return (
-            <div className="space-y-1">
-                {details.map((detail, index) =>
-                    typeof detail === 'string' ? (
-                        <div key={index}>{detail}</div>
-                    ) : detail
-                )}
-            </div>
-        );
+        return details.join('\n');
     };
 
     const getCacheStatus = () => {
@@ -259,6 +200,104 @@ const SystemStatus = () => {
         if (cacheStatus.refresh_state?.error) return 'error';
         return 'healthy';
     };
+
+    const handleTriggerImportWindow = async (action) => {
+        try {
+            setIsImportWindowLoading(true);
+            setImportActionError(null);
+            await api.triggerImportWindow(action);
+            await checkStatus();
+        } catch (err) {
+            console.error('Error triggering import window:', err);
+            setImportActionError(err.message);
+        } finally {
+            setIsImportWindowLoading(false);
+        }
+    };
+
+    // Add Import Window Testing Card
+    const importWindowCard = (
+        <div className="bg-white dark:bg-[#1f2937] rounded-lg shadow-md overflow-hidden">
+            <div className="p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-semibold">Database Import Controls</h3>
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium
+                        ${isInImportWindow
+                        ? 'bg-yellow-500/10 text-yellow-500'
+                        : 'bg-green-500/10 text-green-500'}`}
+                    >
+                        {isInImportWindow ? (
+                            <>
+                                <AlertCircle className="w-4 h-4"/>
+                                Import Active
+                            </>
+                        ) : (
+                            <>
+                                <CheckCircle className="w-4 h-4"/>
+                                Normal Operation
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                <div className="space-y-4">
+                    {lastImportWindow && (
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                            <span className="font-medium">Last Import Window:</span>
+                            <span className="ml-2">{new Date(lastImportWindow).toLocaleString()}</span>
+                        </div>
+                    )}
+
+                    <div className="flex gap-4">
+                        <button
+                            onClick={() => handleTriggerImportWindow('start')}
+                            disabled={isImportWindowLoading || isInImportWindow}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all
+                                ${isImportWindowLoading ? 'opacity-50 cursor-not-allowed' : ''}
+                                ${isInImportWindow
+                                ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                                : 'bg-blue-500 text-white hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700'
+                            }`}
+                        >
+                            {isImportWindowLoading ? (
+                                <RefreshCw className="w-4 h-4 animate-spin"/>
+                            ) : (
+                                <Database className="w-4 h-4"/>
+                            )}
+                            Start Import
+                        </button>
+
+                        <button
+                            onClick={() => handleTriggerImportWindow('end')}
+                            disabled={isImportWindowLoading || !isInImportWindow}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all
+                                ${isImportWindowLoading ? 'opacity-50 cursor-not-allowed' : ''}
+                                ${!isInImportWindow
+                                ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                                : 'bg-blue-500 text-white hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700'
+                            }`}
+                        >
+                            {isImportWindowLoading ? (
+                                <RefreshCw className="w-4 h-4 animate-spin"/>
+                            ) : (
+                                <CheckCircle className="w-4 h-4"/>
+                            )}
+                            End Import
+                        </button>
+                    </div>
+
+                    {(importWindowError || importActionError) && (
+                        <div className="flex items-center gap-2 text-sm text-red-500 bg-red-500/10 p-3 rounded-lg">
+                            <AlertCircle className="w-4 h-4 flex-shrink-0"/>
+                            <span>
+                                {importActionError || importWindowError}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
 
     return (
         <div className="space-y-8 p-6">
@@ -425,6 +464,8 @@ const SystemStatus = () => {
                     />
                 </div>
             </div>
+
+            {importWindowCard}
         </div>
     );
 };

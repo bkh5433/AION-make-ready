@@ -1141,6 +1141,74 @@ def system_status():
             'details': 'Error retrieving system status'
         }), 500
 
+
+@app.route('/api/import-window/status', methods=['GET'])
+@require_auth
+@catch_exceptions
+def import_window_status():
+    """Get the current import window status"""
+    try:
+        now = datetime.now(timezone.utc)
+        status = {
+            'in_import_window': cache._import_window_detected,
+            'last_import_window': cache._last_import_window.isoformat() if cache._last_import_window else None,
+            'consecutive_null_count': cache._consecutive_null_count,
+            'timestamp': now.isoformat(),
+            'cache_status': {
+                'is_refreshing': cache._refresh_state.is_refreshing,
+                'last_refresh': cache._last_refresh.isoformat() if cache._last_refresh else None,
+                'next_check_interval': cache._next_check_interval
+            }
+        }
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting import window status: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
+
+
+@app.route('/api/test/trigger-import-window', methods=['POST'])
+@require_auth
+# @require_role('admin')  # Only allow admins to trigger this
+@catch_exceptions
+def trigger_import_window():
+    """Test endpoint to manually trigger import window state"""
+    try:
+        action = request.json.get('action', 'start')
+        logger.info(f"Triggering import window action: {action}")
+
+        if action == 'start':
+            # Force the import window state
+            cache._consecutive_null_count = 2
+            cache._import_window_detected = True
+            cache._last_import_window = datetime.now(timezone.utc)
+            message = "Import window started"
+        elif action == 'end':
+            # Reset the import window state
+            cache._consecutive_null_count = 0
+            cache._import_window_detected = False
+            cache._last_import_window = datetime.now(timezone.utc)
+            message = "Import window ended"
+        else:
+            raise ValueError(f"Invalid action: {action}")
+
+        logger.info(f"Import window status changed - Message: {message}, Active: {cache._import_window_detected}")
+        return jsonify({
+            'status': 'success',
+            'message': message,
+            'import_window_active': cache._import_window_detected,
+            'last_import_window': cache._last_import_window.isoformat() if cache._last_import_window else None
+        })
+
+    except Exception as e:
+        logger.error(f"Error triggering import window: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
+
 if __name__ == '__main__':
     logger.info("Starting application and updating initial cache.")
     app.run(debug=True)

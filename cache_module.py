@@ -417,8 +417,8 @@ class ConcurrentSQLCache:
         return {
             "cache": {
                 "data": {
-                    "current_records": len(self._current_data) if self._current_data else 0,
-                    "stale_records": len(self._stale_data) if self._stale_data else 0
+                    "current_records": len(self._primary_cache) if self._primary_cache else 0,
+                    "stale_records": len(self._fallback_cache) if self._fallback_cache else 0
                 },
                 "performance": self.get_metrics(),
                 "status": {
