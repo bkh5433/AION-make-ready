@@ -166,29 +166,20 @@ def search_properties():
     - include_metrics: Whether to include full metrics (default: true)
     """
     try:
-        # Get search parameters
         search_term = request.args.get('q', None)
         include_metrics = request.args.get('include_metrics', 'true').lower() == 'true'
 
         logger.debug(f"Search parameters - term: {search_term}, include_metrics: {include_metrics}")
 
-        # Force refresh if needed
-        if cache.needs_force_refresh:
-            logger.info("Cache needs force refresh")
-            run_async(cache.refresh_data(fetch_make_ready_data))
-        elif cache.is_stale:
-            logger.info("Cache is stale, refreshing")
-            run_async(cache.refresh_data(fetch_make_ready_data))
-
-        # Get data from cache
-        data, is_stale = run_async(cache.get_data())
+        # Get data with confidence score
+        data, is_stale, confidence = run_async(cache.get_data())
 
         if not data:
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
-            data, is_stale = run_async(cache.get_data())
-        elif is_stale:
-            logger.info("Data is stale, triggering background refresh")
+            data, is_stale, confidence = run_async(cache.get_data())
+        elif is_stale and not cache._import_window_detected:
+            logger.info("Data is stale and not in import window, triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
                 args=(cache.refresh_data(fetch_make_ready_data),)
@@ -213,11 +204,11 @@ def search_properties():
 
         logger.info(f"Search complete - found {result.count} properties")
 
-        # Convert Pydantic models to dict
         response_data = {
             'count': result.count,
-            'data': [property.model_dump() for property in result.data],  # Convert Property objects to dict
+            'data': [property.model_dump() for property in result.data],
             'is_stale': is_stale,
+            'confidence_score': confidence,
             'last_updated': result.last_updated.isoformat() if result.last_updated else None,
             'period_info': {
                 'start_date': result.period_info[
@@ -228,7 +219,6 @@ def search_properties():
             'data_issues': result.data_issues
         }
 
-        # Add cache statistics if needed
         if include_metrics:
             response_data['cache_stats'] = {
                 'last_refresh': cache._last_refresh.isoformat() if cache._last_refresh else None,
@@ -236,7 +226,9 @@ def search_properties():
                 'refresh_age': (
                     (datetime.now(timezone.utc) - cache._last_refresh).total_seconds()
                     if cache._last_refresh else None
-                )
+                ),
+                'import_window_active': cache._import_window_detected,
+                'confidence_score': confidence
             }
 
         logger.info("Returning search results")
@@ -285,16 +277,16 @@ def generate_report():
                 "message": f"Invalid request format: {str(e)}"
             }, 400
 
-        # Get data from cache
-        data, is_stale = run_async(cache.get_data())
+        # Get data from cache with confidence score
+        data, is_stale, confidence = run_async(cache.get_data())
 
         if not data:
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
-            data, is_stale = run_async(cache.get_data())
-        elif is_stale:
-            # Trigger background refresh if data is stale
-            logger.info("Data is stale, triggering background refresh")
+            data, is_stale, confidence = run_async(cache.get_data())
+        elif is_stale and not cache._import_window_detected:
+            # Trigger background refresh if data is stale and not in import window
+            logger.info("Data is stale and not in import window, triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
                 args=(cache.refresh_data(fetch_make_ready_data),)
@@ -362,8 +354,13 @@ def generate_report():
                     }
                 ),
                 warnings=warnings if warnings else None,
-                data_issues=searcher.data_issues if searcher.data_issues else None,  # Include data issues
-                session_id=session_id
+                data_issues=searcher.data_issues if searcher.data_issues else None,
+                session_id=session_id,
+                data_quality={
+                    'is_stale': is_stale,
+                    'confidence_score': confidence,
+                    'import_window_active': cache._import_window_detected
+                }
             ).model_dump()
 
             response = jsonify(response_data)
@@ -571,12 +568,14 @@ def cache_status():
                 "is_update_window": (
                         abs(time_until_update) <= cache.config.update_window
                 ),
-                "update_detected_today": cache._update_detected_today
+                "import_window_detected": cache._import_window_detected
             },
             "version_info": {
                 "current_version": cache._current_version,
-                "record_count": len(cache._current_data) if cache._current_data else 0,
-                "stale_record_count": len(cache._stale_data) if cache._stale_data else 0
+                "primary_record_count": len(cache._primary_cache.data) if cache._primary_cache else 0,
+                "fallback_record_count": len(cache._fallback_cache.data) if cache._fallback_cache else 0,
+                "confidence_score": cache._calculate_confidence_score(
+                    cache._primary_cache) if cache._primary_cache else 0.0
             },
             "refresh_state": {
                 "is_refreshing": cache._refresh_state.is_refreshing,
@@ -617,8 +616,10 @@ def cache_status():
             warnings.append("Cache needs force refresh")
         if cache._refresh_state.error:
             warnings.append(f"Last refresh error: {cache._refresh_state.error}")
-        if not cache._update_detected_today and now.time() > expected_time:
-            warnings.append("No update detected today")
+        if cache._import_window_detected:
+            warnings.append("Import window detected - using fallback data")
+        if not cache._primary_cache:
+            warnings.append("No primary cache data available")
 
         if warnings:
             response["warnings"] = warnings
@@ -1104,7 +1105,11 @@ def system_status():
 
         # Get cache health
         cache_healthy = cache.is_healthy() if hasattr(cache, 'is_healthy') else True
-        cache_stats = cache.get_stats()  # Use get_stats() instead of get_health_details()
+        cache_stats = cache.get_stats()
+
+        # Get current data stats
+        current_data_count = len(cache._primary_cache.data) if cache._primary_cache else 0
+        fallback_data_count = len(cache._fallback_cache.data) if cache._fallback_cache else 0
 
         response = {
             'healthy': cache_healthy,  # Overall health based on cache and system metrics
@@ -1115,7 +1120,15 @@ def system_status():
             'disk': metrics['disk'],
             'network': metrics['network'],
             'performance': metrics['performance'],
-            'cache': cache_stats  # Include cache stats in the response
+            'cache': {
+                **cache_stats,
+                'current_data_count': current_data_count,
+                'fallback_data_count': fallback_data_count,
+                'import_window_active': cache._import_window_detected if hasattr(cache,
+                                                                                 '_import_window_detected') else False,
+                'confidence_score': cache._calculate_confidence_score(
+                    cache._primary_cache) if cache._primary_cache else 0.0
+            }
         }
 
         return jsonify(response)

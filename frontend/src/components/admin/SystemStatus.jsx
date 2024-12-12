@@ -5,6 +5,7 @@ import {
     CheckCircle, Network, Users
 } from 'lucide-react';
 import {api} from '../../lib/api';
+import {Tooltip} from '../ui/Tooltip';
 
 const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
     <div
@@ -91,6 +92,37 @@ const formatResponseTime = (time) => {
     return `${(time / 1000).toFixed(1)}s`;
 };
 
+const getConfidenceScoreDetails = (score) => {
+    if (!score && score !== 0) return 'No confidence data available';
+
+    let rating;
+    let explanation;
+
+    if (score >= 0.9) {
+        rating = 'Excellent';
+        explanation = 'Data is fresh and reliable. All validation checks passed.';
+    } else if (score >= 0.7) {
+        rating = 'Good';
+        explanation = 'Data is reliable but some metrics may be slightly delayed.';
+    } else if (score >= 0.5) {
+        rating = 'Fair';
+        explanation = 'Data may be stale or some validation checks failed.';
+    } else {
+        rating = 'Poor';
+        explanation = 'Data may be significantly outdated or failed validation.';
+    }
+
+    return `Confidence Score: ${(score * 100).toFixed(1)}%
+Rating: ${rating}
+${explanation}
+
+Factors affecting score:
+• Data freshness
+• Validation success rate
+• Update consistency
+• Data completeness`;
+};
+
 const SystemStatus = () => {
     const [systemStatus, setSystemStatus] = useState(null);
     const [cacheStatus, setCacheStatus] = useState(null);
@@ -164,15 +196,38 @@ const SystemStatus = () => {
 
         const details = [];
 
+        // Version info with enhanced confidence score display
+        if (cacheStatus.version_info) {
+            const {
+                current_version,
+                primary_record_count,
+                fallback_record_count,
+                confidence_score
+            } = cacheStatus.version_info;
+            details.push(`Records: ${primary_record_count} current / ${fallback_record_count} fallback`);
+            if (current_version) details.push(`Version: ${current_version}`);
+            if (confidence_score !== undefined) {
+                details.push(
+                    <div key="confidence" className="flex items-center gap-1">
+                        <span>Confidence:</span>
+                        <Tooltip content={getConfidenceScoreDetails(confidence_score)}>
+                            <span className={`font-medium ${
+                                confidence_score >= 0.9 ? 'text-green-400' :
+                                    confidence_score >= 0.7 ? 'text-blue-400' :
+                                        confidence_score >= 0.5 ? 'text-yellow-400' :
+                                            'text-red-400'
+                            }`}>
+                                {(confidence_score * 100).toFixed(1)}%
+                            </span>
+                        </Tooltip>
+                    </div>
+                );
+            }
+        }
+
         // Add last refresh time
         if (cacheStatus.update_info?.last_refresh) {
             details.push(`Last Refresh: ${new Date(cacheStatus.update_info.last_refresh).toLocaleString()}`);
-        }
-
-        // Add version info
-        if (cacheStatus.version_info) {
-            const {record_count, stale_record_count} = cacheStatus.version_info;
-            details.push(`Records: ${record_count} (${stale_record_count} stale)`);
         }
 
         // Add performance metrics
@@ -187,7 +242,15 @@ const SystemStatus = () => {
             details.push(`Warnings: ${cacheStatus.warnings.join(', ')}`);
         }
 
-        return details.join('\n');
+        return (
+            <div className="space-y-1">
+                {details.map((detail, index) =>
+                    typeof detail === 'string' ? (
+                        <div key={index}>{detail}</div>
+                    ) : detail
+                )}
+            </div>
+        );
     };
 
     const getCacheStatus = () => {
