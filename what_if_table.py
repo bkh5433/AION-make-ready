@@ -240,8 +240,9 @@ class WhatIfTableGenerator:
                     cell.alignment = Alignment(horizontal='right')
                     cell.border = self._get_border(position)
 
-                # Check for current output match
-                if not found_current and daily_rate >= current_output:
+                # Check if we need to insert current output before this row
+                if not found_current and daily_rate > current_output:
+                    # Insert current output row
                     self._highlight_row(
                         current_row,
                         "<-------- Current output (AVG)",
@@ -250,15 +251,27 @@ class WhatIfTableGenerator:
                         True,
                         position
                     )
-                    # Override number format for current output row to show decimals
                     daily_cell.value = current_output
                     monthly_cell.value = self._calculate_monthly_rate(current_output)
                     daily_cell.number_format = '0.0'
                     monthly_cell.number_format = '0.0'
                     found_current = True
+                    current_row += 1
 
-                # Check for break-even match
-                if not found_break_even and daily_rate >= break_even_target:
+                    # Re-create the regular row we were processing
+                    daily_cell = self.sheet[f'{self.daily_col}{current_row}']
+                    monthly_cell = self.sheet[f'{self.monthly_col}{current_row}']
+                    daily_cell.value = daily_rate
+                    monthly_cell.value = monthly_rate
+                    daily_cell.number_format = '0'
+                    monthly_cell.number_format = '0'
+                    for cell in [daily_cell, monthly_cell]:
+                        cell.font = Font(name='Aptos Narrow Body')
+                        cell.alignment = Alignment(horizontal='right')
+                        cell.border = self._get_border(position)
+
+                # Check if we need to insert break-even target
+                if not found_break_even and daily_rate > break_even_target:
                     self._highlight_row(
                         current_row,
                         "<-------- Break even",
@@ -267,14 +280,48 @@ class WhatIfTableGenerator:
                         True,
                         position
                     )
-                    # Override number format for break-even row to show decimals
                     daily_cell.value = break_even_target
                     monthly_cell.value = self._calculate_monthly_rate(break_even_target)
                     daily_cell.number_format = '0.0'
                     monthly_cell.number_format = '0.0'
                     found_break_even = True
+                    current_row += 1
+
+                    # Re-create the regular row we were processing if not the last row
+                    if not is_last_row:
+                        daily_cell = self.sheet[f'{self.daily_col}{current_row}']
+                        monthly_cell = self.sheet[f'{self.monthly_col}{current_row}']
+                        daily_cell.value = daily_rate
+                        monthly_cell.value = monthly_rate
+                        daily_cell.number_format = '0'
+                        monthly_cell.number_format = '0'
+                        for cell in [daily_cell, monthly_cell]:
+                            cell.font = Font(name='Aptos Narrow Body')
+                            cell.alignment = Alignment(horizontal='right')
+                            cell.border = self._get_border(position)
 
                 current_row += 1
+
+            # If we haven't found current output or break-even by the end, add them at the last row
+            if not found_current or not found_break_even:
+                if not found_current:
+                    self._highlight_row(
+                        current_row - 1,
+                        "<-------- Current output (AVG)",
+                        "FFA500",
+                        "000000",
+                        True,
+                        'bottom'
+                    )
+                if not found_break_even:
+                    self._highlight_row(
+                        current_row - 1,
+                        "<-------- Break even",
+                        "0000FF",
+                        "FFFFFF",
+                        True,
+                        'bottom'
+                    )
 
             logger.info("What-if table generated successfully")
 

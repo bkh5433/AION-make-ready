@@ -11,7 +11,7 @@ from data_retrieval import sql_queries
 from data_retrieval.db_connection import DatabaseConnection
 from decouple import config
 
-log_config = LogConfig(default_level=logging.DEBUG)
+log_config = LogConfig()
 logger = log_config.get_logger('cache_module')
 
 
