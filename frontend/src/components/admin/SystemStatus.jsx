@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {api} from '../../lib/api';
 import {useImportWindow} from '../../lib/hooks/useImportWindow';
-import {Tooltip} from '../ui/Tooltip';
+import {Tooltip} from '../ui/tooltip';
 
 const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
     <div
