@@ -130,6 +130,7 @@ class ConcurrentSQLCache:
         self._import_window_detected = False
         self._last_import_window = None
         self._consecutive_null_count = 0
+        self._consecutive_success_count = 0
 
         # Metrics
         self._access_count = 0
@@ -145,42 +146,172 @@ class ConcurrentSQLCache:
         self._version_check_interval: int = 120  # Minimum seconds between version checks
         self._version_check_lock = asyncio.Lock()
 
-    def _detect_import_window(self, version_info: Dict) -> bool:
-        """Detect if we're in a database import window"""
+    def _detect_import_window(self, version_info: Optional[Dict], error: Optional[str] = None) -> bool:
+        """
+        Detect if we're in a database import window.
+        This can be triggered by either:
+        1. Null values in version info (last_modified=None, record_count=0)
+        2. Database connection errors that suggest an import is in progress
+        3. No version info received at all
+
+        Import window ends only after 2 consecutive successful connections
+        """
+        # Check for database connection errors first
+        if error is not None and any(err in error.lower() for err in [
+            "cannot open database",
+            "login failed",
+            "connection refused",
+            "database is not available",
+            "(28000)",  # SQL Server login failure code
+            "18456"  # SQL Server login failure error number
+        ]):
+            self._consecutive_null_count += 1
+            self._consecutive_success_count = 0
+            logger.warning(f"Connection error detected. Consecutive errors: {self._consecutive_null_count}")
+
+            if self._consecutive_null_count >= 3:
+                self._import_window_detected = True
+                self._last_import_window = datetime.now(timezone.utc)
+                logger.warning("Import window detected due to consecutive connection failures")
+                logger.warning("Database appears to be in import window due to consecutive connection failures")
+                return True
+
+            logger.warning("Database connection error, will retry")
+            return False
+
+        # If we have no version info at all, count it as a potential import window indicator
+        if version_info is None:
+            self._consecutive_null_count += 1
+            self._consecutive_success_count = 0
+            logger.warning(f"No version info received. Consecutive null responses: {self._consecutive_null_count}")
+
+            if self._consecutive_null_count >= 3:
+                self._import_window_detected = True
+                self._last_import_window = datetime.now(timezone.utc)
+                logger.warning("Import window detected due to consecutive null version info responses")
+                return True
+            return False
+
+        # If we have version info, check for null values
         if version_info.get('last_modified') is None and version_info.get('record_count', 0) == 0:
             self._consecutive_null_count += 1
-            if self._consecutive_null_count >= 2:
+            self._consecutive_success_count = 0
+            if self._consecutive_null_count >= 3:
                 self._import_window_detected = True
                 self._last_import_window = datetime.now(timezone.utc)
                 logger.warning("Database import window detected - using fallback data")
                 return True
         else:
-            self._consecutive_null_count = 0
-            if self._import_window_detected:
-                logger.info("Database import window ended")
-                self._import_window_detected = False
-        return False
+            # Valid data received - increment success counter
+            self._consecutive_success_count += 1
+            logger.info(f"Valid data received. Consecutive successes: {self._consecutive_success_count}")
+
+            # Only reset counters and end import window after 2 consecutive successes
+            if self._consecutive_success_count >= 2:
+                if self._consecutive_null_count > 0:
+                    logger.info(
+                        f"Database access fully restored after {self._consecutive_success_count} successful connections")
+                self._consecutive_null_count = 0
+                self._consecutive_success_count = 0
+
+                if self._import_window_detected:
+                    logger.info("Database import window ended after 2 consecutive successful connections")
+                    self._import_window_detected = False
+
+        return self._import_window_detected
 
     def _calculate_confidence_score(self, cache_data: CacheData) -> float:
-        """Calculate confidence score for cached data"""
+        """
+        Calculate confidence score for cached data based on multiple factors:
+        1. Data age and business hours (weighted: 40%)
+        2. Import window status (weighted: 20%)
+        3. Data completeness (weighted: 20%)
+        4. Refresh history (weighted: 20%)
+        
+        Returns a score between 0.0 and 1.0
+        """
         if not cache_data:
             return 0.0
 
-        age_hours = (datetime.now(timezone.utc) - cache_data.last_modified).total_seconds() / 3600
-        days_old = age_hours / 24
+        now = datetime.now(timezone.utc)
 
-        if self._import_window_detected:
-            base_score = 0.7  # Lower base confidence during import
+        # 1. Data Age Score (40%) - More granular age-based scoring with business hours awareness
+        age_hours = (now - cache_data.last_modified).total_seconds() / 3600
+
+        # Get the expected update time for reference
+        expected_update_time = self.config.get_expected_update_time()
+        hours_until_update = (expected_update_time - now).total_seconds() / 3600 if expected_update_time > now else 24
+
+        # If we're before today's update time, data from yesterday is considered fresh
+        if hours_until_update > 0 and age_hours < 24:
+            age_score = 1.0
+        # If we're after today's update time, we expect today's data
+        elif hours_until_update <= 0:
+            if age_hours <= 6:  # Very fresh data (within 6 hours of update)
+                age_score = 1.0
+            elif age_hours <= 12:  # Fresh data (within 12 hours)
+                age_score = 0.9
+            elif age_hours <= 24:  # Today's data
+                age_score = 0.8
+            elif age_hours <= 36:  # Yesterday's data after missing today's update
+                age_score = 0.6
+            elif age_hours <= 48:  # Two days old
+                age_score = 0.4
+            else:  # More than two days old
+                age_score = max(0.0, 1.0 - ((age_hours - 48) / 24) * 0.2)  # Decrease by 0.2 for each additional day
         else:
-            base_score = 1.0
+            # We're before update time, grade more leniently
+            if age_hours <= 24:  # Yesterday's data
+                age_score = 1.0
+            elif age_hours <= 48:  # Two days old
+                age_score = 0.7
+            else:  # More than two days old
+                age_score = max(0.0, 0.7 - ((age_hours - 48) / 24) * 0.2)
 
-        # Adjust confidence based on data age
-        if days_old <= 1:  # Yesterday's data
-            return base_score
-        elif days_old <= 2:  # Two days old
-            return max(0.6, base_score - 0.3)
-        else:  # More than two days old
-            return max(0.2, base_score - 0.5)
+        # 2. Import Window Score (20%)
+        if self._import_window_detected:
+            import_score = 0.3  # Reduced confidence during import
+        else:
+            import_score = 1.0
+
+        # 3. Data Completeness Score (20%)
+        expected_record_count = self._current_version['record_count'] if self._current_version else 0
+        if expected_record_count > 0:
+            completeness_score = min(1.0, cache_data.record_count / expected_record_count)
+            # Severely penalize if we have less than 50% of expected records
+            if completeness_score < 0.5:
+                completeness_score *= 0.5
+        else:
+            completeness_score = 0.0
+
+        # 4. Refresh History Score (20%)
+        if self._failed_refreshes == 0:
+            refresh_score = 1.0
+        else:
+            # More aggressive penalty for failed refreshes
+            refresh_score = max(0.0, 1.0 - (self._failed_refreshes * 0.25))
+
+        # Calculate weighted average
+        final_score = (
+                (age_score * 0.4) +  # Age weight: 40%
+                (import_score * 0.2) +  # Import window weight: 20%
+                (completeness_score * 0.2) +  # Completeness weight: 20%
+                (refresh_score * 0.2)  # Refresh history weight: 20%
+        )
+
+        # Log detailed scoring components for debugging
+        logger.debug(
+            f"Confidence Score Components:\n"
+            f"  Age Score (40%): {age_score:.2f} (Data is {age_hours:.1f} hours old, "
+            f"Hours until update: {hours_until_update:.1f})\n"
+            f"  Import Score (20%): {import_score:.2f} (Import Window: {self._import_window_detected})\n"
+            f"  Completeness Score (20%): {completeness_score:.2f} "
+            f"(Records: {cache_data.record_count}/{expected_record_count})\n"
+            f"  Refresh Score (20%): {refresh_score:.2f} (Failed Refreshes: {self._failed_refreshes})\n"
+            f"  Final Score: {final_score:.2f}"
+        )
+
+        return round(final_score, 2)
 
     async def get_data(self) -> Tuple[Optional[List[Dict]], bool, float]:
         """
@@ -247,17 +378,24 @@ class ConcurrentSQLCache:
                 db = DatabaseConnection()
                 version_info = await db.fetch_version_info(self.config.version_check_query)
 
+                logger.debug(f"Current stored version info: {self._current_version}")
+                logger.debug(f"Received version info: {version_info}")
+
                 if not version_info:
                     logger.warning("No version info returned")
+                    # Check for import window with no version info
+                    if self._detect_import_window(version_info):
+                        return False
                     return False
 
-                # Check for import window
+                # Check for import window with valid version info
                 if self._detect_import_window(version_info):
                     return False  # Don't refresh during import window
 
                 if not self._current_version:
                     logger.info(f"Initial version info - PostDate: {version_info['last_modified']}")
                     self._current_version = version_info
+                    logger.debug(f"Stored initial version info: {self._current_version}")
                     return True
 
                 # Compare record counts
@@ -266,18 +404,27 @@ class ConcurrentSQLCache:
                         f"Record count change detected - Previous: {self._current_version['record_count']}, "
                         f"Current: {version_info['record_count']}"
                     )
+                    self._current_version = version_info  # Store new version info
+                    logger.debug(f"Updated version info after record count change: {self._current_version}")
                     return True
 
                 # Compare dates
                 if version_info['last_modified'] != self._current_version['last_modified']:
                     logger.info(
                         f"Date change detected - Previous: {self._current_version['last_modified']}, Current: {version_info['last_modified']}")
+                    self._current_version = version_info  # Store new version info
+                    logger.debug(f"Updated version info after date change: {self._current_version}")
                     return True
 
+                logger.debug("No version changes detected")
                 return False
 
             except Exception as e:
-                logger.error(f"Error checking version: {e}")
+                error_str = str(e)
+                logger.error(f"Error checking version: {error_str}")
+                # Check for import window with error
+                if self._detect_import_window(None, error=error_str):
+                    return False
                 return False
 
     async def refresh_data(self, fetch_func) -> None:
@@ -321,6 +468,7 @@ class ConcurrentSQLCache:
                         raise ValueError("No data returned from fetch function")
 
                     now = datetime.now(timezone.utc)
+                    logger.debug(f"Creating cache data with version info: {self._current_version}")
                     cache_data = CacheData(
                         data=new_data,
                         last_successful_update=now,
@@ -341,6 +489,7 @@ class ConcurrentSQLCache:
                         self._total_refresh_time += time.time() - start_time
 
                     logger.info(f"Cache refreshed successfully with {len(new_data)} records")
+                    logger.debug(f"Current version after refresh: {self._current_version}")
                     break
 
                 except Exception as e:
@@ -532,6 +681,168 @@ class ConcurrentSQLCache:
             return True
         age = datetime.now(timezone.utc) - self._last_refresh
         return age > timedelta(seconds=self.config.force_refresh_interval)
+
+    @dataclass
+    class StalenessInfo:
+        """Detailed information about cache staleness"""
+        is_stale: bool
+        staleness_reason: str
+        severity: str  # 'none', 'low', 'medium', 'high', 'critical'
+        time_since_refresh: float  # hours
+        time_since_update: float  # hours
+        next_update_in: float  # hours
+
+    def _get_staleness_info(self) -> StalenessInfo:
+        """
+        Enhanced staleness check using dynamic intervals and business rules.
+        Returns detailed staleness information.
+        """
+        now = datetime.now(timezone.utc)
+
+        if not self._last_refresh or not self._current_version:
+            return self.StalenessInfo(
+                is_stale=True,
+                staleness_reason="No data available",
+                severity="critical",
+                time_since_refresh=float('inf'),
+                time_since_update=float('inf'),
+                next_update_in=0.0
+            )
+
+        # Calculate various time deltas
+        time_since_refresh = (now - self._last_refresh).total_seconds() / 3600
+        time_since_update = (now - self._current_version['last_modified']).total_seconds() / 3600
+        expected_update_time = self.config.get_expected_update_time()
+        hours_until_update = (expected_update_time - now).total_seconds() / 3600 if expected_update_time > now else 24
+
+        # Before expected update time (15:00 UTC)
+        if hours_until_update > 0:
+            if time_since_update <= 24:  # Yesterday's data is fine before update time
+                return self.StalenessInfo(
+                    is_stale=False,
+                    staleness_reason="Data current for pre-update period",
+                    severity="none",
+                    time_since_refresh=time_since_refresh,
+                    time_since_update=time_since_update,
+                    next_update_in=hours_until_update
+                )
+            elif time_since_update <= 48:  # Two days old
+                return self.StalenessInfo(
+                    is_stale=True,
+                    staleness_reason="Data older than expected before update",
+                    severity="medium",
+                    time_since_refresh=time_since_refresh,
+                    time_since_update=time_since_update,
+                    next_update_in=hours_until_update
+                )
+            else:  # More than two days old
+                return self.StalenessInfo(
+                    is_stale=True,
+                    staleness_reason="Data significantly outdated",
+                    severity="high",
+                    time_since_refresh=time_since_refresh,
+                    time_since_update=time_since_update,
+                    next_update_in=hours_until_update
+                )
+
+        # After expected update time
+        else:
+            grace_period = 2  # 2 hour grace period after expected update
+            hours_past_update = -hours_until_update
+
+            if hours_past_update <= grace_period:  # Within grace period
+                if time_since_update <= 24:
+                    return self.StalenessInfo(
+                        is_stale=False,
+                        staleness_reason="Data current within update grace period",
+                        severity="none",
+                        time_since_refresh=time_since_refresh,
+                        time_since_update=time_since_update,
+                        next_update_in=hours_until_update
+                    )
+
+            # Past grace period
+            if time_since_update <= 24:  # Today's data
+                if self._import_window_detected:
+                    return self.StalenessInfo(
+                        is_stale=True,
+                        staleness_reason="Import window in progress",
+                        severity="low",
+                        time_since_refresh=time_since_refresh,
+                        time_since_update=time_since_update,
+                        next_update_in=hours_until_update
+                    )
+                return self.StalenessInfo(
+                    is_stale=False,
+                    staleness_reason="Data current",
+                    severity="none",
+                    time_since_refresh=time_since_refresh,
+                    time_since_update=time_since_update,
+                    next_update_in=hours_until_update
+                )
+            elif time_since_update <= 36:  # Missed today's update
+                return self.StalenessInfo(
+                    is_stale=True,
+                    staleness_reason="Today's update missing",
+                    severity="medium",
+                    time_since_refresh=time_since_refresh,
+                    time_since_update=time_since_update,
+                    next_update_in=hours_until_update
+                )
+            elif time_since_update <= 48:  # Two days old
+                return self.StalenessInfo(
+                    is_stale=True,
+                    staleness_reason="Data two days old",
+                    severity="high",
+                    time_since_refresh=time_since_refresh,
+                    time_since_update=time_since_update,
+                    next_update_in=hours_until_update
+                )
+            else:  # More than two days old
+                return self.StalenessInfo(
+                    is_stale=True,
+                    staleness_reason="Data critically outdated",
+                    severity="critical",
+                    time_since_refresh=time_since_refresh,
+                    time_since_update=time_since_update,
+                    next_update_in=hours_until_update
+                )
+
+    @property
+    def is_stale(self) -> bool:
+        """Legacy property for backward compatibility"""
+        return self._get_staleness_info().is_stale
+
+    def get_cache_status(self) -> Dict[str, Any]:
+        """Get detailed cache status information"""
+        staleness_info = self._get_staleness_info()
+
+        return {
+            "is_stale": staleness_info.is_stale,
+            "staleness_reason": staleness_info.staleness_reason,
+            "severity": staleness_info.severity,
+            "timing": {
+                "hours_since_refresh": round(staleness_info.time_since_refresh, 2),
+                "hours_since_update": round(staleness_info.time_since_update, 2),
+                "hours_until_next_update": round(staleness_info.next_update_in, 2),
+                "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
+                "last_update": self._current_version['last_modified'].isoformat() if self._current_version else None,
+                "next_expected_update": self.config.get_expected_update_time().isoformat()
+            },
+            "data_state": {
+                "import_window_active": self._import_window_detected,
+                "last_import_window": self._last_import_window.isoformat() if self._last_import_window else None,
+                "record_count": self._primary_cache.record_count if self._primary_cache else 0,
+                "expected_record_count": self._current_version['record_count'] if self._current_version else 0,
+                "confidence_score": self._calculate_confidence_score(
+                    self._primary_cache) if self._primary_cache else 0.0
+            },
+            "system_health": {
+                "failed_refreshes": self._failed_refreshes,
+                "consecutive_null_count": self._consecutive_null_count,
+                "consecutive_success_count": self._consecutive_success_count
+            }
+        }
 
 
 def with_cache_check(cache_instance):

@@ -231,7 +231,7 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
                             <div className="text-gray-400 text-sm space-y-2">
                                 <p className="flex items-center gap-2">
                                     <Clock className="h-4 w-4 text-primary"/>
-                                    Updates typically take around 30-60 minutes
+                                    Updates typically take around 30-45 minutes
                                 </p>
                             </div>
                             <button
