@@ -2,9 +2,12 @@ import React, {useState, useEffect} from 'react';
 import {
     RefreshCw, Database, Clock, Server,
     Gauge, HardDrive, Activity, AlertTriangle,
-    CheckCircle, Network, Users
+    CheckCircle, Network, Users, AlertCircle,
+    AlertOctagon
 } from 'lucide-react';
 import {api} from '../../lib/api';
+import {useImportWindow} from '../../lib/hooks/useImportWindow';
+import {Tooltip} from '../ui/Tooltip';
 
 const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
     <div
@@ -97,6 +100,11 @@ const SystemStatus = () => {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
     const [autoRefresh, setAutoRefresh] = useState(true);
+    const {isInImportWindow, lastImportWindow, error: importWindowError, checkStatus} = useImportWindow();
+    const [isImportWindowLoading, setIsImportWindowLoading] = useState(false);
+    const [importActionError, setImportActionError] = useState(null);
+    const [showImportWarning, setShowImportWarning] = useState(false);
+    const [pendingAction, setPendingAction] = useState(null);
 
     useEffect(() => {
         fetchStatus();
@@ -164,15 +172,49 @@ const SystemStatus = () => {
 
         const details = [];
 
+        // Version info with enhanced confidence score display
+        if (cacheStatus.version_info) {
+            const {
+                primary_record_count,
+                fallback_record_count,
+                confidence_score
+            } = cacheStatus.version_info;
+
+            details.push(`Primary Records: ${primary_record_count}`);
+            details.push(`Fallback Records: ${fallback_record_count}`);
+
+            if (confidence_score !== undefined) {
+                details.push(
+                    <div key="confidence" className="flex items-center gap-2">
+                        <span>Confidence Score:</span>
+                        <Tooltip content={getConfidenceScoreDetails(confidence_score)} wide>
+                            <span className={`font-medium ${
+                                confidence_score >= 0.9 ? 'text-green-400' :
+                                    confidence_score >= 0.7 ? 'text-blue-400' :
+                                        confidence_score >= 0.5 ? 'text-yellow-400' :
+                                            'text-red-400'
+                            }`}>
+                                {(confidence_score * 100).toFixed(1)}%
+                            </span>
+                        </Tooltip>
+                    </div>
+                );
+            }
+        }
+
+        // Add import window status
+        if (cacheStatus.update_info?.import_window_detected) {
+            details.push(
+                <div key="import-window" className="flex items-center gap-2 text-yellow-400">
+                    <AlertTriangle className="w-4 h-4"/>
+                    <span>Import Window Active</span>
+                </div>
+            );
+        }
+
         // Add last refresh time
         if (cacheStatus.update_info?.last_refresh) {
             details.push(`Last Refresh: ${new Date(cacheStatus.update_info.last_refresh).toLocaleString()}`);
-        }
-
-        // Add version info
-        if (cacheStatus.version_info) {
-            const {record_count, stale_record_count} = cacheStatus.version_info;
-            details.push(`Records: ${record_count} (${stale_record_count} stale)`);
         }
 
         // Add performance metrics
@@ -187,7 +229,47 @@ const SystemStatus = () => {
             details.push(`Warnings: ${cacheStatus.warnings.join(', ')}`);
         }
 
-        return details.join('\n');
+        return (
+            <div className="space-y-1">
+                {details.map((detail, index) =>
+                    typeof detail === 'string' ? (
+                        <div key={index}>{detail}</div>
+                    ) : detail
+                )}
+            </div>
+        );
+    };
+
+    // Add helper function for confidence score tooltip content
+    const getConfidenceScoreDetails = (score) => {
+        if (!score && score !== 0) return 'No confidence data available';
+
+        let rating;
+        let explanation;
+
+        if (score >= 0.9) {
+            rating = 'Excellent';
+            explanation = 'Data is fresh and reliable. All validation checks passed.';
+        } else if (score >= 0.7) {
+            rating = 'Good';
+            explanation = 'Data is reliable but some metrics may be slightly delayed.';
+        } else if (score >= 0.5) {
+            rating = 'Fair';
+            explanation = 'Data may be stale or some validation checks failed.';
+        } else {
+            rating = 'Poor';
+            explanation = 'Data may be significantly outdated or failed validation.';
+        }
+
+        return `Confidence Score: ${(score * 100).toFixed(1)}%
+Rating: ${rating}
+${explanation}
+
+Factors affecting score:
+• Data freshness
+• Validation success rate
+• Update consistency
+• Data completeness`;
     };
 
     const getCacheStatus = () => {
@@ -196,6 +278,150 @@ const SystemStatus = () => {
         if (cacheStatus.refresh_state?.error) return 'error';
         return 'healthy';
     };
+
+    const handleTriggerImportWindow = async (action) => {
+        if (!showImportWarning) {
+            setShowImportWarning(true);
+            setPendingAction(action);
+            return;
+        }
+
+        try {
+            setIsImportWindowLoading(true);
+            setImportActionError(null);
+            await api.triggerImportWindow(action);
+            await checkStatus();
+        } catch (err) {
+            console.error('Error triggering import window:', err);
+            setImportActionError(err.message);
+        } finally {
+            setIsImportWindowLoading(false);
+            setShowImportWarning(false);
+            setPendingAction(null);
+        }
+    };
+
+    // Add Import Window Testing Card
+    const importWindowCard = (
+        <div className="bg-white dark:bg-[#1f2937] rounded-lg shadow-md overflow-hidden">
+            <div className="p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-semibold">Database Import Controls</h3>
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium
+                        ${isInImportWindow
+                        ? 'bg-yellow-500/10 text-yellow-500'
+                        : 'bg-green-500/10 text-green-500'}`}
+                    >
+                        {isInImportWindow ? (
+                            <>
+                                <AlertCircle className="w-4 h-4"/>
+                                Import Active
+                            </>
+                        ) : (
+                            <>
+                                <CheckCircle className="w-4 h-4"/>
+                                Normal Operation
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                <div className="space-y-4">
+                    {lastImportWindow && (
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                            <span className="font-medium">Last Import Window:</span>
+                            <span className="ml-2">{new Date(lastImportWindow).toLocaleString()}</span>
+                        </div>
+                    )}
+
+                    <div className="flex gap-4">
+                        <button
+                            onClick={() => handleTriggerImportWindow('start')}
+                            disabled={isImportWindowLoading || isInImportWindow}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all
+                                ${isImportWindowLoading ? 'opacity-50 cursor-not-allowed' : ''}
+                                ${isInImportWindow
+                                ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                                : 'bg-blue-500 text-white hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700'
+                            }`}
+                        >
+                            {isImportWindowLoading ? (
+                                <RefreshCw className="w-4 h-4 animate-spin"/>
+                            ) : (
+                                <Database className="w-4 h-4"/>
+                            )}
+                            Start Import
+                        </button>
+
+                        <button
+                            onClick={() => handleTriggerImportWindow('end')}
+                            disabled={isImportWindowLoading || !isInImportWindow}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all
+                                ${isImportWindowLoading ? 'opacity-50 cursor-not-allowed' : ''}
+                                ${!isInImportWindow
+                                ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                                : 'bg-blue-500 text-white hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-700'
+                            }`}
+                        >
+                            {isImportWindowLoading ? (
+                                <RefreshCw className="w-4 h-4 animate-spin"/>
+                            ) : (
+                                <CheckCircle className="w-4 h-4"/>
+                            )}
+                            End Import
+                        </button>
+                    </div>
+
+                    {(importWindowError || importActionError) && (
+                        <div className="flex items-center gap-2 text-sm text-red-500 bg-red-500/10 p-3 rounded-lg">
+                            <AlertCircle className="w-4 h-4 flex-shrink-0"/>
+                            <span>
+                                {importActionError || importWindowError}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+
+    // Add this new warning dialog component
+    const importWarningDialog = showImportWarning && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 max-w-md w-full mx-4">
+                <div className="flex items-center gap-3 text-yellow-400 mb-4">
+                    <AlertOctagon className="w-6 h-6"/>
+                    <h3 className="text-lg font-semibold">Warning: Import Window Control</h3>
+                </div>
+
+                <p className="text-gray-300 mb-4">
+                    {pendingAction === 'start' ? (
+                        "Starting an import window will temporarily affect system performance and may impact user operations. Only proceed if a database import is required."
+                    ) : (
+                        "Ending the import window prematurely may result in incomplete data synchronization. Ensure all import operations are complete before proceeding."
+                    )}
+                </p>
+
+                <div className="flex justify-end gap-3">
+                    <button
+                        onClick={() => {
+                            setShowImportWarning(false);
+                            setPendingAction(null);
+                        }}
+                        className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={() => handleTriggerImportWindow(pendingAction)}
+                        className="px-4 py-2 rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 transition-colors"
+                    >
+                        Proceed
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 
     return (
         <div className="space-y-8 p-6">
@@ -362,6 +588,9 @@ const SystemStatus = () => {
                     />
                 </div>
             </div>
+
+            {importWindowCard}
+            {importWarningDialog}
         </div>
     );
 };

@@ -367,5 +367,21 @@ export const api = {
             }
         );
         return response.json();
+    },
+
+    async getImportWindowStatus() {
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/import-window/status`);
+        return response.json();
+    },
+
+    async triggerImportWindow(action) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/test/trigger-import-window`,
+            {
+                method: 'POST',
+                body: JSON.stringify({action})
+            }
+        );
+        return response.json();
     }
 };
