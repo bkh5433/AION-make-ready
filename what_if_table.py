@@ -104,6 +104,12 @@ class WhatIfTableGenerator:
         else:  # middle
             return Border(top=thin, bottom=thin, left=thick, right=thick)
 
+    def _apply_border_style(self, row: int, position: str = 'middle') -> None:
+        """Apply consistent border styling to a row"""
+        for col in [self.daily_col, self.monthly_col, self.label_col]:
+            cell = self.sheet[f'{col}{row}']
+            cell.border = self._get_border(position)
+
     def _format_headers(self):
         """Format the header row of the table"""
         # Header text
@@ -124,6 +130,12 @@ class WhatIfTableGenerator:
             cell.font = header_font
             cell.border = self._get_border('top')
             cell.alignment = Alignment(horizontal='center', wrap_text=True)
+
+        # Add border to first data row (the row after header)
+        first_data_row = self.header_row + 1
+        for col in [self.daily_col, self.monthly_col, self.label_col]:
+            cell = self.sheet[f'{col}{first_data_row}']
+            cell.border = self._get_border('middle')
 
     def _create_cell_style(self,
                            bg_color: str,
@@ -159,6 +171,9 @@ class WhatIfTableGenerator:
         label_cell.font = font
         label_cell.border = border
         label_cell.alignment = Alignment(horizontal='left')
+
+        # Ensure consistent border style for the entire row
+        self._apply_border_style(row, position)
 
     def _calculate_monthly_rate(self, daily_rate: float) -> float:
         """Calculate monthly rate from daily rate."""
@@ -238,10 +253,16 @@ class WhatIfTableGenerator:
                 for cell in [daily_cell, monthly_cell]:
                     cell.font = Font(name='Aptos Narrow Body')
                     cell.alignment = Alignment(horizontal='right')
-                    cell.border = self._get_border(position)
+
+                # Apply borders
+                self._apply_border_style(current_row, position)
 
                 # Check if we need to insert current output before this row
                 if not found_current and daily_rate > current_output:
+                    # Update border of previous row if it exists
+                    if current_row > self.start_row:
+                        self._apply_border_style(current_row - 1, 'middle')
+
                     # Insert current output row
                     self._highlight_row(
                         current_row,
@@ -249,7 +270,7 @@ class WhatIfTableGenerator:
                         "FFA500",  # Orange
                         "000000",  # Black text
                         True,
-                        position
+                        'middle'  # Always middle since we're inserting
                     )
                     daily_cell.value = current_output
                     monthly_cell.value = self._calculate_monthly_rate(current_output)
@@ -268,17 +289,24 @@ class WhatIfTableGenerator:
                     for cell in [daily_cell, monthly_cell]:
                         cell.font = Font(name='Aptos Narrow Body')
                         cell.alignment = Alignment(horizontal='right')
-                        cell.border = self._get_border(position)
+
+                    # Apply borders to new row
+                    self._apply_border_style(current_row, position)
 
                 # Check if we need to insert break-even target
                 if not found_break_even and daily_rate > break_even_target:
+                    # Update border of previous row
+                    if current_row > self.start_row:
+                        self._apply_border_style(current_row - 1, 'middle')
+
+                    # Insert break-even row
                     self._highlight_row(
                         current_row,
                         "<-------- Break even",
                         "0000FF",  # Blue
                         "FFFFFF",  # White text
                         True,
-                        position
+                        'middle'  # Always middle since we're inserting
                     )
                     daily_cell.value = break_even_target
                     monthly_cell.value = self._calculate_monthly_rate(break_even_target)
@@ -298,15 +326,18 @@ class WhatIfTableGenerator:
                         for cell in [daily_cell, monthly_cell]:
                             cell.font = Font(name='Aptos Narrow Body')
                             cell.alignment = Alignment(horizontal='right')
-                            cell.border = self._get_border(position)
+
+                        # Apply borders to new row
+                        self._apply_border_style(current_row, position)
 
                 current_row += 1
 
             # If we haven't found current output or break-even by the end, add them at the last row
             if not found_current or not found_break_even:
+                last_row = current_row - 1
                 if not found_current:
                     self._highlight_row(
-                        current_row - 1,
+                        last_row,
                         "<-------- Current output (AVG)",
                         "FFA500",
                         "000000",
@@ -315,13 +346,20 @@ class WhatIfTableGenerator:
                     )
                 if not found_break_even:
                     self._highlight_row(
-                        current_row - 1,
+                        last_row,
                         "<-------- Break even",
                         "0000FF",
                         "FFFFFF",
                         True,
                         'bottom'
                     )
+                # Ensure proper border on the last row
+                self._apply_border_style(last_row, 'bottom')
+
+            # Final pass to ensure all borders are consistent
+            for row in range(self.header_row + 1, current_row):
+                position = 'bottom' if row == current_row - 1 else 'middle'
+                self._apply_border_style(row, position)
 
             logger.info("What-if table generated successfully")
 
