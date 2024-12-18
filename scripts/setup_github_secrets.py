@@ -150,7 +150,7 @@ def setup_secrets():
         "FIREBASE_CLIENT_EMAIL": os.getenv("FIREBASE_CLIENT_EMAIL"),
         "FIREBASE_CLIENT_ID": os.getenv("FIREBASE_CLIENT_ID"),
         "FIREBASE_AUTH_URI": os.getenv("FIREBASE_AUTH_URI"),
-        "FIREBASE_TOKEN_URI": os.getenv("FIREBASE_TOKEN_URI"),
+        "FIREBASE_TOKEN_URI": os.getenv("FIREBASE_TOKEN_URI"), 
     }
 
     # Add SSH private key if available
