@@ -46,6 +46,17 @@ class Config:
         'token_uri': config('FIREBASE_TOKEN_URI')
     }
 
+    # Microsoft SSO
+    MICROSOFT_CONFIG = {
+        'client_id': config('MICROSOFT_CLIENT_ID', default=None),
+        'client_secret': config('MICROSOFT_CLIENT_SECRET', default=None),
+        'tenant_id': config('MICROSOFT_TENANT_ID', default=None),
+        'redirect_uri': config('MICROSOFT_REDIRECT_URI', default='http://localhost:5173/auth/microsoft/callback'),
+        'scopes': ['openid', 'User.Read', 'https://graph.microsoft.com/User.Read'],
+        'domain_hint': config('MICROSOFT_DOMAIN_HINT', default='aionmanagement.com'),
+        'enabled': config('MICROSOFT_SSO_ENABLED', default='FALSE', cast=lambda x: x.upper() == 'TRUE')
+    }
+
     # Session
     SESSION_CLEANUP_INTERVAL = config('SESSION_CLEANUP_INTERVAL', default=3600, cast=int)
     SESSION_MAX_AGE = config('SESSION_MAX_AGE', default=86400, cast=int)

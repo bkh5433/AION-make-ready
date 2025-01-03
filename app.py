@@ -1,5 +1,5 @@
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, redirect
 import shutil
 import threading
 import asyncio
@@ -22,6 +22,9 @@ from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
 import psutil
+from ms_auth import MicrosoftAuth
+import os
+import secrets
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -1065,7 +1068,7 @@ def change_password():
 
         # Update password
         new_hash, new_salt = auth._hash_password(new_password)
-        user_ref = auth.users_ref.document(user['uid'])
+        user_ref = auth.users_ref.document(user['user_id'])
         user_ref.update({
             'password_hash': new_hash,
             'salt': new_salt,
@@ -1208,6 +1211,97 @@ def trigger_import_window():
             'error': str(e),
             'status': 'error'
         }), 500
+
+
+@app.route('/api/auth/microsoft/login', methods=['GET'])
+@catch_exceptions
+def microsoft_login():
+    """Initiate Microsoft SSO login"""
+    try:
+        if not Config.MICROSOFT_CONFIG['enabled']:
+            return jsonify({
+                'success': False,
+                'message': 'Microsoft SSO is not configured'
+            }), 501
+
+        if not all([
+            Config.MICROSOFT_CONFIG['client_id'],
+            Config.MICROSOFT_CONFIG['client_secret'],
+            Config.MICROSOFT_CONFIG['tenant_id']
+        ]):
+            logger.error("Microsoft SSO configuration is incomplete")
+            return jsonify({
+                'success': False,
+                'message': 'Microsoft SSO configuration is incomplete'
+            }), 501
+
+        ms_auth = MicrosoftAuth()
+        auth_url = ms_auth.get_auth_url()
+        return jsonify({
+            'success': True,
+            'auth_url': auth_url
+        })
+    except Exception as e:
+        logger.error(f"Microsoft login error: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': 'Failed to initiate Microsoft login'
+        }), 500
+
+
+@app.route('/api/auth/microsoft/callback')
+@catch_exceptions
+def auth_callback():
+    """Handle Microsoft OAuth callback"""
+    try:
+        # Get the frontend URL from environment, but ensure it points to the frontend domain
+        frontend_base_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+        if not Config.MICROSOFT_CONFIG['enabled']:
+            return redirect(f"{frontend_base_url}/auth/callback?error=Microsoft SSO is not configured")
+
+        if not all([
+            Config.MICROSOFT_CONFIG['client_id'],
+            Config.MICROSOFT_CONFIG['client_secret'],
+            Config.MICROSOFT_CONFIG['tenant_id']
+        ]):
+            logger.error("Microsoft SSO configuration is incomplete")
+            return redirect(f"{frontend_base_url}/auth/callback?error=Microsoft SSO configuration is incomplete")
+
+        error = request.args.get('error')
+        if error:
+            logger.error(f"Microsoft auth error: {error}")
+            return redirect(f"{frontend_base_url}/auth/callback?error={error}")
+
+        code = request.args.get('code')
+        if not code:
+            logger.error("No authorization code received from Microsoft")
+            return redirect(f"{frontend_base_url}/auth/callback?error=No authorization code received")
+
+        # Initialize Microsoft auth
+        ms_auth = MicrosoftAuth()
+
+        # Create event loop for async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            # Handle the complete authentication process
+            result = loop.run_until_complete(ms_auth.handle_callback(code, auth))
+
+            if not result:
+                logger.error("Failed to complete authentication")
+                return redirect(f"{frontend_base_url}/auth/callback?error=Authentication failed")
+
+            # Redirect to frontend callback component with token
+            return redirect(f"{frontend_base_url}/auth/callback?token={result['token']}")
+
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Error in Microsoft callback: {str(e)}", exc_info=True)
+        return redirect(f"{frontend_base_url}/auth/callback?error=Internal server error")
 
 if __name__ == '__main__':
     logger.info("Starting application and updating initial cache.")

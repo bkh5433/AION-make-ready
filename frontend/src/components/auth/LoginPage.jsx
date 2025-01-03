@@ -1,13 +1,14 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from '../ui/card';
 import {useTheme} from "../../lib/theme";
 import {AlertTriangle, CheckCircle, X, Lock, Mail} from 'lucide-react';
-import {Link, useNavigate} from 'react-router-dom';
+import {Link, useNavigate, useLocation} from 'react-router-dom';
 import {api} from '../../lib/api';
 
 const LoginPage = () => {
     const {theme} = useTheme();
     const navigate = useNavigate();
+    const location = useLocation();
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [notifications, setNotifications] = useState([]);
@@ -15,6 +16,46 @@ const LoginPage = () => {
         username: '',
         password: ''
     });
+
+    useEffect(() => {
+        // Handle Microsoft callback
+        const params = new URLSearchParams(location.search);
+        const code = params.get('code');
+        const error = params.get('error');
+
+        if (code) {
+            handleMicrosoftCallback(code);
+        } else if (error) {
+            addNotification('error', 'Microsoft login failed: ' + error);
+        }
+    }, [location]);
+
+    const handleMicrosoftCallback = async (code) => {
+        setIsLoading(true);
+        try {
+            const response = await api.handleMicrosoftCallback(code);
+            if (response.success) {
+                addNotification('success', 'Successfully logged in with Microsoft!');
+                navigate('/');
+            }
+        } catch (error) {
+            setError(error.message);
+            addNotification('error', error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleMicrosoftLogin = async () => {
+        setIsLoading(true);
+        try {
+            await api.microsoftLogin();
+        } catch (error) {
+            setError(error.message);
+            addNotification('error', error.message);
+            setIsLoading(false);
+        }
+    };
 
     const addNotification = (type, message, duration = 5000) => {
         const id = Date.now();
@@ -187,6 +228,33 @@ const LoginPage = () => {
                             ) : (
                                 <span>Sign in to Dashboard</span>
                             )}
+                        </button>
+
+                        <div className="relative my-6">
+                            <div className="absolute inset-0 flex items-center">
+                                <div className="w-full border-t border-border"></div>
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={handleMicrosoftLogin}
+                            disabled={isLoading}
+                            className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg
+                            bg-[#2F2F2F] text-white hover:bg-[#404040]
+                            transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]
+                            ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                            <svg className="h-5 w-5" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M10 0H0V10H10V0Z" fill="#F25022"/>
+                                <path d="M21 0H11V10H21V0Z" fill="#7FBA00"/>
+                                <path d="M10 11H0V21H10V11Z" fill="#00A4EF"/>
+                                <path d="M21 11H11V21H21V11Z" fill="#FFB900"/>
+                            </svg>
+                            <span>Sign in with Microsoft</span>
                         </button>
 
                         <div className="text-center text-sm text-gray-500 dark:text-gray-400">

@@ -383,5 +383,63 @@ export const api = {
             }
         );
         return response.json();
+    },
+
+    async microsoftLogin() {
+        try {
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/auth/microsoft/login`,
+                {
+                    method: 'GET'
+                },
+                true // Skip token check for login
+            );
+            const data = await response.json();
+
+            if (response.status === 501) {
+                throw new Error('Microsoft SSO is not available. Please use username/password login.');
+            }
+
+            if (data.success && data.auth_url) {
+                // Redirect to Microsoft login
+                window.location.href = data.auth_url;
+            } else {
+                throw new Error(data.message || 'Failed to initiate Microsoft login');
+            }
+        } catch (error) {
+            console.error('Microsoft login error:', error);
+            throw error;
+        }
+    },
+
+    async handleMicrosoftCallback(code) {
+        try {
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/auth/microsoft/callback?code=${code}`,
+                {
+                    method: 'GET'
+                },
+                true // Skip token check for callback
+            );
+
+            if (response.status === 501) {
+                throw new Error('Microsoft SSO is not available. Please use username/password login.');
+            }
+
+            const data = await response.json();
+
+            if (data.success && data.token) {
+                // Store the auth token
+                localStorage.setItem('authToken', data.token);
+                localStorage.setItem('tokenExpiresAt', data.expires_at);
+                localStorage.setItem('tokenExpiresIn', data.expires_in);
+                return data;
+            } else {
+                throw new Error(data.message || 'Microsoft authentication failed');
+            }
+        } catch (error) {
+            console.error('Microsoft callback error:', error);
+            throw error;
+        }
     }
 };
