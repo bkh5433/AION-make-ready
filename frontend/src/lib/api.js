@@ -453,5 +453,21 @@ export const api = {
             console.error('Microsoft callback error:', error);
             throw error;
         }
+    },
+
+    async getMicrosoftSSOStatus() {
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/admin/microsoft-sso/status`);
+        return response.json();
+    },
+
+    async toggleMicrosoftSSO(environment) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/microsoft-sso/toggle`,
+            {
+                method: 'POST',
+                body: JSON.stringify({environment})
+            }
+        );
+        return response.json();
     }
 };

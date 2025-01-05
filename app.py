@@ -16,7 +16,7 @@ from session import get_session_path, cleanup_session, run_session_cleanup, gene
     setup_session_directory
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
-from auth_middleware import AuthMiddleware, require_auth, require_role
+from auth_middleware import AuthMiddleware, require_auth, require_role, db
 from config import Config
 from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
@@ -29,7 +29,7 @@ import secrets
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
-        "origins": Config.CORS_ORIGINS,
+        "origins": Config.CORS_ORIGINS.split(',') if isinstance(Config.CORS_ORIGINS, str) else Config.CORS_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "expose_headers": ["Content-Type", "Authorization"],
@@ -1213,15 +1213,130 @@ def trigger_import_window():
         }), 500
 
 
+async def get_sso_status():
+    """Helper function to get SSO status from Firestore"""
+    settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+    settings_doc = settings_ref.get()
+
+    if not settings_doc.exists:
+        settings_ref.set({'enabled': False})
+        return False
+
+    return settings_doc.to_dict().get('enabled', False)
+
+
+@app.route('/api/admin/microsoft-sso/status', methods=['GET'])
+@require_auth
+@catch_exceptions
+def get_microsoft_sso_status():
+    """Get Microsoft SSO status from Firestore"""
+    try:
+        # Use the imported db instance directly
+        settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+        settings_doc = settings_ref.get()
+
+        # If document doesn't exist, create it with default values
+        if not settings_doc.exists:
+            settings_ref.set({
+                'dev_enabled': False,
+                'prod_enabled': False
+            })
+            return jsonify({
+                'success': True,
+                'dev_enabled': False,
+                'prod_enabled': False
+            })
+
+        settings = settings_doc.to_dict()
+        return jsonify({
+            'success': True,
+            'dev_enabled': settings.get('dev_enabled', False),
+            'prod_enabled': settings.get('prod_enabled', False)
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting Microsoft SSO status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/admin/microsoft-sso/toggle', methods=['POST'])
+@require_auth
+@require_role('admin')
+@catch_exceptions
+def toggle_microsoft_sso():
+    """Toggle Microsoft SSO status in Firestore"""
+    try:
+        # Get environment from request
+        data = request.get_json()
+        environment = data.get('environment')
+
+        if environment not in ['dev', 'prod']:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid environment specified'
+            }), 400
+
+        # Use the imported db instance directly
+        settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+        settings_doc = settings_ref.get()
+
+        # Get current settings or default to both disabled
+        settings = settings_doc.to_dict() if settings_doc.exists else {
+            'dev_enabled': False,
+            'prod_enabled': False
+        }
+
+        # Toggle the status for the specified environment
+        field_name = f'{environment}_enabled'
+        current_status = settings.get(field_name, False)
+        new_status = not current_status
+
+        # Update only the specified environment
+        settings_ref.set({
+            field_name: new_status
+        }, merge=True)
+
+        return jsonify({
+            'success': True,
+            'enabled': new_status,
+            'environment': environment
+        })
+
+    except Exception as e:
+        logger.error(f"Error toggling Microsoft SSO: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/auth/microsoft/login', methods=['GET'])
 @catch_exceptions
 def microsoft_login():
     """Initiate Microsoft SSO login"""
     try:
-        if not Config.MICROSOFT_CONFIG['enabled']:
+        # Check if SSO is enabled in Firestore for the appropriate environment
+        settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+        settings_doc = settings_ref.get()
+
+        # Determine environment based on request origin or configuration
+        origin = request.headers.get('Origin', '')
+        is_production = (
+                origin.startswith('https://') or
+                Config.ENV.lower() in ['prod', 'production']
+        )
+        field_name = 'prod_enabled' if is_production else 'dev_enabled'
+        env_name = 'production' if is_production else 'development'
+
+        settings = settings_doc.to_dict() if settings_doc.exists else {}
+        sso_enabled = settings.get(field_name, False)
+
+        if not sso_enabled:
             return jsonify({
                 'success': False,
-                'message': 'Microsoft SSO is not configured'
+                'message': f'Microsoft SSO is not enabled'
             }), 501
 
         if not all([

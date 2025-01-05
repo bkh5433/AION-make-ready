@@ -3,6 +3,9 @@ from datetime import timedelta
 import os
 
 class Config:
+    # Environment
+    ENV = config('ENV', default='development')
+
     # Database
     DB_SERVER = config('DB_SERVER')
     DB_NAME = config('DB_NAME')
