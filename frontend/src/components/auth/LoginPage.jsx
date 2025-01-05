@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from '../ui/card';
 import {useTheme} from "../../lib/theme";
 import {AlertTriangle, CheckCircle, X, Lock, Mail} from 'lucide-react';
@@ -16,8 +16,14 @@ const LoginPage = () => {
         username: '',
         password: ''
     });
+    const hasShownError = useRef(false);
 
     useEffect(() => {
+        // Check API health on component mount
+        if (!hasShownError.current) {
+            checkApiHealth();
+        }
+
         // Handle Microsoft callback
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
@@ -29,6 +35,67 @@ const LoginPage = () => {
             addNotification('error', 'Microsoft login failed: ' + error);
         }
     }, [location]);
+
+    const checkApiHealth = async () => {
+        try {
+            const isHealthy = await api.checkHealth();
+            console.log('API Health Check Result:', isHealthy);
+            // Reset the error flag if health check succeeds
+            hasShownError.current = false;
+        } catch (error) {
+            console.error('API Health Check Error:', error);
+
+            // Only show error if we haven't shown one yet
+            if (!hasShownError.current) {
+                hasShownError.current = true;
+
+                // Check if it's a certificate error
+                if (
+                    error.message?.includes('ERR_CERT_AUTHORITY_INVALID') ||
+                    error.message?.includes('certificate') ||
+                    error.message?.includes('self-signed')
+                ) {
+                    const healthEndpoint = api.getHealthEndpoint();
+                    console.log('Health endpoint URL:', healthEndpoint);
+
+                    addNotification('error',
+                        <div className="space-y-2">
+                            <div>SSL Certificate Error detected. To resolve this:</div>
+                            <ol className="list-decimal ml-4">
+                                <li>Click <a href={healthEndpoint} target="_blank"
+                                             className="text-blue-400 hover:text-blue-300 underline">here</a> to open
+                                    the API health endpoint
+                                </li>
+                                <li>Click "Advanced" in your browser</li>
+                                <li>Click "Proceed" or "Accept Risk and Continue"</li>
+                                <li>Return to this page and refresh</li>
+                            </ol>
+                        </div>,
+                        25000 // Show for 25 seconds
+                    );
+                }
+                // Check for network/API availability errors
+                else if (
+                    error.message?.includes('Failed to fetch') ||
+                    error.message?.includes('Network Error') ||
+                    error.message?.includes('ECONNREFUSED') ||
+                    error.name === 'TypeError'
+                ) {
+                    addNotification('error',
+                        <div className="space-y-2">
+                            <div>Unable to connect to the API server:</div>
+                            <ol className="list-decimal ml-4">
+                                <li>Check if the API server is running</li>
+                                <li>Verify your internet connection</li>
+                                <li>Contact your system administrator if the problem persists</li>
+                            </ol>
+                        </div>,
+                        15000 // Show for 10 seconds
+                    );
+                }
+            }
+        }
+    };
 
     const handleMicrosoftCallback = async (code) => {
         setIsLoading(true);
@@ -96,9 +163,34 @@ const LoginPage = () => {
                 addNotification('error', response.message || 'Login failed');
             }
         } catch (error) {
-            const errorMessage = error.message || 'An error occurred during login';
-            setError(errorMessage);
-            addNotification('error', errorMessage);
+            // Check if it's a certificate error
+            if (error.message?.includes('SSL') || error.message?.includes('certificate') || error.message?.includes('self-signed') || error.name === 'TypeError') {
+                const healthEndpoint = api.getHealthEndpoint();
+                console.log('Health endpoint URL:', healthEndpoint);
+
+                if (!hasShownError.current) {
+                    hasShownError.current = true;
+                    addNotification('error',
+                        <div className="space-y-2">
+                            <div>SSL Certificate Error detected. To resolve this:</div>
+                            <ol className="list-decimal ml-4">
+                                <li>Click <a href={healthEndpoint} target="_blank"
+                                             className="text-blue-400 hover:text-blue-300 underline">here</a> to open
+                                    the API health endpoint
+                                </li>
+                                <li>Click "Advanced" in your browser</li>
+                                <li>Click "Proceed" or "Accept Risk and Continue"</li>
+                                <li>Return to this page and refresh</li>
+                            </ol>
+                        </div>,
+                        25000 // Show for 25 seconds
+                    );
+                }
+            } else {
+                const errorMessage = error.message || 'An error occurred during login';
+                setError(errorMessage);
+                addNotification('error', errorMessage);
+            }
         } finally {
             setIsLoading(false);
         }

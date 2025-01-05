@@ -1,7 +1,7 @@
 import {getSessionId, setSessionId, clearSessionId} from './session';
 
 // Ensure the base URL always uses HTTPS and ends with /api
-const API_BASE_URL = (() => {
+export const API_BASE_URL = (() => {
     const baseUrl = import.meta.env.VITE_API_BASE_URL;
     console.log('API Base URL from env:', baseUrl);
 
@@ -105,6 +105,29 @@ export const api = {
         return data;
     },
 
+    getHealthEndpoint() {
+        return `${API_BASE_URL}/health`;
+    },
+
+    async checkHealth() {
+        try {
+            // Simulate SSL certificate error
+            // throw new TypeError("net::ERR_CERT_AUTHORITY_INVALID");
+
+            // Real implementation
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/health`,
+                {},
+                true // Skip token check for health endpoint
+            );
+            const data = await response.json();
+            return data.status === 'healthy';
+        } catch (error) {
+            console.error('Health check failed:', error);
+            throw error; // Re-throw to trigger the error handling in LoginPage
+        }
+    },
+
     async generateReports(propertyKeys) {
         console.log('Generating reports for properties:', propertyKeys);
 
@@ -171,17 +194,6 @@ export const api = {
         }
 
         return blobs;
-    },
-
-    async checkHealth() {
-        try {
-            const response = await fetchWithErrorHandling(`${API_BASE_URL}/health`);
-            const data = await response.json();
-            return data.status === 'healthy';
-        } catch (error) {
-            console.error('Health check failed:', error);
-            return false;
-        }
     },
 
     async login({username, password}) {
