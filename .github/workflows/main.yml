@@ -189,7 +189,7 @@ jobs:
                 --name aion-api \
                 --restart always \
                 -p 5000:5000 \
-                -e ENV='development' \
+                -e ENV='production' \
                 -e DB_SERVER='${{ secrets.DEV_DB_SERVER }}' \
                 -e DB_NAME='${{ secrets.DEV_DB_NAME }}' \
                 -e DB_USER='${{ secrets.DEV_DB_USER }}' \
