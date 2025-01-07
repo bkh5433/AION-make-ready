@@ -114,9 +114,7 @@ def setup_secrets():
         "DEV_DB_PASSWORD": os.getenv("DB_PASSWORD"),
         "DEV_AWS_BUCKET_NAME": os.getenv("AWS_BUCKET_NAME"),
         "DEV_CORS_ORIGINS": os.getenv("CORS_ORIGINS"),
-
-        # Frontend Development Secrets (Amplify)
-        "DEV_API_URL": os.getenv("API_URL", "http://localhost:5000"),  # Default to localhost
+        "DEV_API_URL": os.getenv("EC2_HOST", "http://localhost:5000"),
     }
 
     # Define production secrets
@@ -128,8 +126,6 @@ def setup_secrets():
         "PROD_DB_PASSWORD": os.getenv("PROD_DB_PASSWORD"),
         "PROD_AWS_BUCKET_NAME": os.getenv("PROD_AWS_BUCKET_NAME"),
         "PROD_CORS_ORIGINS": os.getenv("PROD_CORS_ORIGINS"),
-
-        # Frontend Production Secrets (Amplify)
         "PROD_API_URL": os.getenv("PROD_API_URL"),
     }
 
@@ -143,14 +139,21 @@ def setup_secrets():
         "EC2_HOST": os.getenv("EC2_HOST"),
         "EC2_USERNAME": os.getenv("EC2_USERNAME"),
 
-        # Firebase Configuration (shared between frontend and backend)
+        # Firebase Configuration
         "FIREBASE_PROJECT_ID": os.getenv("FIREBASE_PROJECT_ID"),
         "FIREBASE_PRIVATE_KEY_ID": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
         "FIREBASE_PRIVATE_KEY": os.getenv("FIREBASE_PRIVATE_KEY"),
         "FIREBASE_CLIENT_EMAIL": os.getenv("FIREBASE_CLIENT_EMAIL"),
         "FIREBASE_CLIENT_ID": os.getenv("FIREBASE_CLIENT_ID"),
         "FIREBASE_AUTH_URI": os.getenv("FIREBASE_AUTH_URI"),
-        "FIREBASE_TOKEN_URI": os.getenv("FIREBASE_TOKEN_URI"), 
+        "FIREBASE_TOKEN_URI": os.getenv("FIREBASE_TOKEN_URI"),
+
+        # Microsoft SSO Configuration
+        "MICROSOFT_CLIENT_ID": os.getenv("MICROSOFT_CLIENT_ID"),
+        "MICROSOFT_CLIENT_SECRET": os.getenv("MICROSOFT_CLIENT_SECRET"),
+        "MICROSOFT_TENANT_ID": os.getenv("MICROSOFT_TENANT_ID"),
+        "MICROSOFT_REDIRECT_URI": os.getenv("MICROSOFT_REDIRECT_URI"),
+        "MICROSOFT_DOMAIN_HINT": os.getenv("MICROSOFT_DOMAIN_HINT"),
     }
 
     # Add SSH private key if available
@@ -178,7 +181,8 @@ def setup_secrets():
             "DEV_DB_PASSWORD"
         ],
         "Development Frontend": [
-            "DEV_API_URL"
+            "DEV_API_URL",
+            "DEV_CORS_ORIGINS"
         ],
         "Firebase Configuration": [
             "FIREBASE_PROJECT_ID",
@@ -188,6 +192,13 @@ def setup_secrets():
             "FIREBASE_CLIENT_ID",
             "FIREBASE_AUTH_URI",
             "FIREBASE_TOKEN_URI"
+        ],
+        "Microsoft SSO": [
+            "MICROSOFT_CLIENT_ID",
+            "MICROSOFT_CLIENT_SECRET",
+            "MICROSOFT_TENANT_ID",
+            "MICROSOFT_REDIRECT_URI",
+            "MICROSOFT_DOMAIN_HINT"
         ]
     }
 
@@ -200,7 +211,8 @@ def setup_secrets():
             "PROD_DB_PASSWORD"
         ],
         "Production Frontend": [
-            "PROD_API_URL"
+            "PROD_API_URL",
+            "PROD_CORS_ORIGINS"
         ]
     }
 
