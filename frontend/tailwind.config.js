@@ -72,13 +72,21 @@ module.exports = {
                 "float-orb": {
                     "0%, 100%": {transform: "translateY(0)"},
                     "50%": {transform: "translateY(-10px)"}
+                },
+                "ping-slow": {
+                    '0%': {transform: 'scale(1)', opacity: '0.8'},
+                    '25%': {transform: 'scale(1.3)', opacity: '0.7'},
+                    '50%': {transform: 'scale(1.6)', opacity: '0.5'},
+                    '75%': {transform: 'scale(1.9)', opacity: '0.3'},
+                    '100%': {transform: 'scale(2.2)', opacity: '0'}
                 }
             },
             animation: {
                 "accordion-down": "accordion-down 0.2s ease-out",
                 "accordion-up": "accordion-up 0.2s ease-out",
                 "progress-ring": "progress-ring 2s ease-out forwards",
-                "float-orb": "float-orb 3s ease-in-out infinite"
+                "float-orb": "float-orb 3s ease-in-out infinite",
+                "ping-slow": "ping-slow 5.5s cubic-bezier(0.2, 0.1, 0.2, 1) infinite"
             },
         },
     },

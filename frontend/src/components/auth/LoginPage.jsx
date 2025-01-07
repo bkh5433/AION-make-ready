@@ -12,17 +12,37 @@ const LoginPage = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [notifications, setNotifications] = useState([]);
+    const [apiHealth, setApiHealth] = useState('checking');
+    const [retryCount, setRetryCount] = useState(0);
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2 seconds
     const [formData, setFormData] = useState({
         username: '',
         password: ''
     });
     const hasShownError = useRef(false);
 
-    useEffect(() => {
-        // Check API health on component mount
-        if (!hasShownError.current) {
-            checkApiHealth();
+    // Get the status message based on current state
+    const getStatusMessage = () => {
+        switch (apiHealth) {
+            case 'healthy':
+                return 'System Online';
+            case 'unhealthy':
+                return 'Connection Failed';
+            case 'checking':
+                return retryCount > 0 ? `Retrying Connection (${retryCount}/${MAX_RETRIES})...` : 'Verifying Connection...';
+            default:
+                return 'Status Unknown';
         }
+    };
+
+    // Helper function for delay
+    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    useEffect(() => {
+        // Check API health on component mount and every 30 seconds
+        checkApiHealth();
+        const healthInterval = setInterval(checkApiHealth, 30000);
 
         // Handle Microsoft callback
         const params = new URLSearchParams(location.search);
@@ -34,23 +54,33 @@ const LoginPage = () => {
         } else if (error) {
             addNotification('error', 'Microsoft login failed: ' + error);
         }
+
+        return () => clearInterval(healthInterval);
     }, [location]);
 
-    const checkApiHealth = async () => {
+    const checkApiHealth = async (isRetry = false) => {
+        // Only reset retry count if this is a fresh check
+        if (!isRetry) {
+            setRetryCount(0);
+        }
+        
         try {
             const isHealthy = await api.checkHealth();
             console.log('API Health Check Result:', isHealthy);
-            // Reset the error flag if health check succeeds
+            setApiHealth(isHealthy ? 'healthy' : 'unhealthy');
+            setRetryCount(0);
             hasShownError.current = false;
         } catch (error) {
             console.error('API Health Check Error:', error);
 
-            // Only show error if we haven't shown one yet
-            if (!hasShownError.current) {
-                hasShownError.current = true;
+            // If it's an SSL certificate error, don't retry
+            if (error.message === 'SSL_CERTIFICATE_ERROR') {
+                setApiHealth('unhealthy');
+                setRetryCount(0);
 
-                // Check for our specific SSL certificate error
-                if (error.message === 'SSL_CERTIFICATE_ERROR') {
+                // Show SSL error notification if haven't shown yet
+                if (!hasShownError.current) {
+                    hasShownError.current = true;
                     const healthEndpoint = api.getHealthEndpoint();
                     console.log('Health endpoint URL:', healthEndpoint);
 
@@ -67,28 +97,26 @@ const LoginPage = () => {
                                 <li>Return to this page and refresh</li>
                             </ol>
                         </div>,
-                        25000 // Show for 25 seconds
+                        25000
                     );
                 }
-                // Check for network/API availability errors
-                else if (
-                    error.message?.includes('Failed to fetch') ||
-                    error.message?.includes('Network Error') ||
-                    error.message?.includes('ECONNREFUSED')
-                ) {
-                    addNotification('error',
-                        <div className="space-y-2">
-                            <div>Unable to connect to the API server:</div>
-                            <ol className="list-decimal ml-4">
-                                <li>Check if the API server is running</li>
-                                <li>Verify your internet connection</li>
-                                <li>Contact your system administrator if the problem persists</li>
-                            </ol>
-                        </div>,
-                        15000 // Show for 15 seconds
-                    );
-                }
+                return;
             }
+
+            // For other errors, handle retries
+            const currentRetryCount = retryCount + 1;
+
+            if (currentRetryCount < MAX_RETRIES) {
+                setApiHealth('checking');
+                setRetryCount(currentRetryCount);
+                console.log(`Retry attempt ${currentRetryCount} of ${MAX_RETRIES}`);
+                // Schedule next retry
+                setTimeout(() => checkApiHealth(true), RETRY_DELAY);
+                return;
+            }
+
+            setApiHealth('unhealthy');
+            setRetryCount(0);
         }
     };
 
@@ -342,6 +370,36 @@ const LoginPage = () => {
                             )}
                         </button>
                     </form>
+
+                    {/* API Health Indicator */}
+                    <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground/70">
+                        <div
+                            className="flex items-center gap-2 group hover:bg-muted/30 px-3 py-1.5 rounded-full transition-all duration-300">
+                            <div className="relative">
+                                <div
+                                    className={`h-3 w-3 rounded-full transition-all duration-500 ${
+                                        apiHealth === 'healthy'
+                                            ? 'bg-green-500/90'
+                                            : apiHealth === 'unhealthy'
+                                                ? 'bg-red-500/90'
+                                                : 'bg-yellow-500/90'
+                                    }`}
+                                />
+                                {(apiHealth === 'healthy' || apiHealth === 'checking') && (
+                                    <div
+                                        className={`absolute inset-0 rounded-full transition-all duration-500 ${
+                                            apiHealth === 'healthy'
+                                                ? 'bg-green-500/40'
+                                                : 'bg-yellow-500/40'
+                                        } animate-ping-slow`}
+                                    />
+                                )}
+                            </div>
+                            <span className="transition-all duration-200 group-hover:text-foreground/90">
+                                {getStatusMessage()}
+                            </span>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
         </div>

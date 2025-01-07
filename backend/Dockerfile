@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY .. .
 
 # Create .env file with default values
-RUN echo "CACHE_REFRESH_INTERVAL=600\n\
+RUN echo "CACHE_REFRESH_INTERVAL=300\n\
 CACHE_FORCE_REFRESH=43200\n\
 CACHE_REFRESH_TIMEOUT=30\n\
 CACHE_MAX_RETRY_ATTEMPTS=3\n\
