@@ -73,12 +73,40 @@ module.exports = {
                     "0%, 100%": {transform: "translateY(0)"},
                     "50%": {transform: "translateY(-10px)"}
                 },
-                "ping-slow": {
-                    '0%': {transform: 'scale(1)', opacity: '0.8'},
-                    '25%': {transform: 'scale(1.3)', opacity: '0.7'},
-                    '50%': {transform: 'scale(1.6)', opacity: '0.5'},
-                    '75%': {transform: 'scale(1.9)', opacity: '0.3'},
-                    '100%': {transform: 'scale(2.2)', opacity: '0'}
+                "glow-pulse": {
+                    '0%': {
+                        transform: 'scale(1) rotate(0deg)',
+                        opacity: '0.4',
+                        filter: 'blur(0px)'
+                    },
+                    '50%': {
+                        transform: 'scale(1.3) rotate(180deg)',
+                        opacity: '0.2',
+                        filter: 'blur(2px)'
+                    },
+                    '100%': {
+                        transform: 'scale(1) rotate(360deg)',
+                        opacity: '0.4',
+                        filter: 'blur(0px)'
+                    }
+                },
+                "sonar-ping": {
+                    '0%': {
+                        transform: 'scale(1)',
+                        opacity: '0.55'
+                    },
+                    '35%': {
+                        transform: 'scale(2)',
+                        opacity: '0.3'
+                    },
+                    '75%': {
+                        transform: 'scale(3.2)',
+                        opacity: '0.1'
+                    },
+                    '100%': {
+                        transform: 'scale(4)',
+                        opacity: '0'
+                    }
                 }
             },
             animation: {
@@ -86,7 +114,8 @@ module.exports = {
                 "accordion-up": "accordion-up 0.2s ease-out",
                 "progress-ring": "progress-ring 2s ease-out forwards",
                 "float-orb": "float-orb 3s ease-in-out infinite",
-                "ping-slow": "ping-slow 5.5s cubic-bezier(0.2, 0.1, 0.2, 1) infinite"
+                "glow-pulse": "glow-pulse 8s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+                "sonar-ping": "sonar-ping 7.5s cubic-bezier(0.15, 0, 0.25, 1) infinite"
             },
         },
     },

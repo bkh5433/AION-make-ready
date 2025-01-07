@@ -14,6 +14,7 @@ const LoginPage = () => {
     const [notifications, setNotifications] = useState([]);
     const [apiHealth, setApiHealth] = useState('checking');
     const [retryCount, setRetryCount] = useState(0);
+    const [lastChecked, setLastChecked] = useState(null);
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 2000; // 2 seconds
     const [formData, setFormData] = useState({
@@ -33,6 +34,77 @@ const LoginPage = () => {
                 return retryCount > 0 ? `Retrying Connection (${retryCount}/${MAX_RETRIES})...` : 'Verifying Connection...';
             default:
                 return 'Status Unknown';
+        }
+    };
+
+    // Get detailed status information
+    const getDetailedStatus = () => {
+        switch (apiHealth) {
+            case 'healthy':
+                return (
+                    <div className="space-y-2 text-left">
+                        <div className="font-semibold text-green-500">System Status: Healthy</div>
+                        <div className="space-y-1 text-sm">
+                            <div>• API Endpoint: Active</div>
+                            <div>• Connection: Stable</div>
+                            <div>• Authentication: Ready</div>
+                            <div>• Services: All Systems Go</div>
+                        </div>
+                    </div>
+                );
+            case 'unhealthy':
+                const isSSLError = hasShownError.current;
+                return (
+                    <div className="space-y-2 text-left">
+                        <div className="font-semibold text-red-500">System Status: Error</div>
+                        <div className="space-y-1 text-sm">
+                            <div>• API Endpoint: Unreachable</div>
+                            <div>• Connection: Failed</div>
+                            <div className="pl-4 text-xs text-red-400/90">
+                                {isSSLError ? (
+                                    <>
+                                        - SSL Certificate Error<br/>
+                                        - Certificate Not Trusted<br/>
+                                        - Click indicator for fix
+                                    </>
+                                ) : (
+                                    <>
+                                        - Network Unreachable<br/>
+                                        - API Server Down<br/>
+                                        - Check Connection
+                                    </>
+                                )}
+                            </div>
+                            <div>• Authentication: {isSSLError ? 'SSL Error' : 'Unavailable'}</div>
+                            <div>• Services: System Disruption</div>
+                        </div>
+                    </div>
+                );
+            case 'checking':
+                return (
+                    <div className="space-y-2 text-left">
+                        <div className="font-semibold text-yellow-500">System Status: Checking</div>
+                        <div className="space-y-1 text-sm">
+                            <div>• API Endpoint: Verifying</div>
+                            <div>• Connection: In Progress</div>
+                            <div>• Authentication: Pending</div>
+                            {retryCount > 0 && (
+                                <div>• Retry Status: Attempt {retryCount} of {MAX_RETRIES}</div>
+                            )}
+                        </div>
+                    </div>
+                );
+            default:
+                return (
+                    <div className="space-y-2 text-left">
+                        <div className="font-semibold">System Status: Unknown</div>
+                        <div className="space-y-1 text-sm">
+                            <div>• System Status: Unavailable</div>
+                            <div>• Connection: Unknown</div>
+                            <div>• Services: Not Detected</div>
+                        </div>
+                    </div>
+                );
         }
     };
 
@@ -68,6 +140,7 @@ const LoginPage = () => {
             const isHealthy = await api.checkHealth();
             console.log('API Health Check Result:', isHealthy);
             setApiHealth(isHealthy ? 'healthy' : 'unhealthy');
+            setLastChecked(new Date());
             setRetryCount(0);
             hasShownError.current = false;
         } catch (error) {
@@ -76,6 +149,7 @@ const LoginPage = () => {
             // If it's an SSL certificate error, don't retry
             if (error.message === 'SSL_CERTIFICATE_ERROR') {
                 setApiHealth('unhealthy');
+                setLastChecked(new Date());
                 setRetryCount(0);
 
                 // Show SSL error notification if haven't shown yet
@@ -373,31 +447,56 @@ const LoginPage = () => {
 
                     {/* API Health Indicator */}
                     <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground/70">
-                        <div
-                            className="flex items-center gap-2 group hover:bg-muted/30 px-3 py-1.5 rounded-full transition-all duration-300">
-                            <div className="relative">
-                                <div
-                                    className={`h-3 w-3 rounded-full transition-all duration-500 ${
-                                        apiHealth === 'healthy'
-                                            ? 'bg-green-500/90'
-                                            : apiHealth === 'unhealthy'
-                                                ? 'bg-red-500/90'
-                                                : 'bg-yellow-500/90'
-                                    }`}
-                                />
-                                {(apiHealth === 'healthy' || apiHealth === 'checking') && (
+                        <div className="relative group">
+                            <div
+                                className="flex items-center gap-2 hover:bg-muted/30 px-3 py-1.5 rounded-full transition-all duration-300">
+                                <div className="relative">
                                     <div
-                                        className={`absolute inset-0 rounded-full transition-all duration-500 ${
+                                        className={`h-3 w-3 rounded-full transition-all duration-500 ${
                                             apiHealth === 'healthy'
-                                                ? 'bg-green-500/40'
-                                                : 'bg-yellow-500/40'
-                                        } animate-ping-slow`}
+                                                ? 'bg-green-500/90'
+                                                : apiHealth === 'unhealthy'
+                                                    ? 'bg-red-500/90'
+                                                    : 'bg-yellow-500/90'
+                                        }`}
                                     />
-                                )}
+                                    {(apiHealth === 'healthy' || apiHealth === 'checking') && (
+                                        <>
+                                            {/* Glow effect */}
+                                            <div
+                                                className={`absolute inset-0 rounded-full transition-all duration-500 ${
+                                                    apiHealth === 'healthy'
+                                                        ? 'bg-green-500/30'
+                                                        : 'bg-yellow-500/30'
+                                                } animate-glow-pulse`}
+                                            />
+                                            {/* Radar ping effect */}
+                                            <div
+                                                className={`absolute -inset-[2px] rounded-full border-2 ${
+                                                    apiHealth === 'healthy'
+                                                        ? 'border-green-500/50'
+                                                        : 'border-yellow-500/50'
+                                                } animate-sonar-ping`}
+                                            />
+                                        </>
+                                    )}
+                                </div>
+                                <span className="transition-all duration-200 group-hover:text-foreground/90">
+                                    {getStatusMessage()}
+                                </span>
                             </div>
-                            <span className="transition-all duration-200 group-hover:text-foreground/90">
-                                {getStatusMessage()}
-                            </span>
+
+                            {/* Detailed Status Tooltip */}
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 
+                                          opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none">
+                                <div
+                                    className="bg-popover/95 backdrop-blur-sm border border-border/50 p-3 rounded-lg shadow-lg">
+                                    {getDetailedStatus()}
+                                </div>
+                                <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 
+                                              w-2 h-2 rotate-45 bg-popover/95 border-r border-b border-border/50">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </CardContent>

@@ -59,7 +59,9 @@ const StatusBanner = ({status, message, icon: Icon}) => (
         exit={{opacity: 0, y: -20}}
         transition={{duration: 0.2}}
         className={`w-full py-2 px-4 text-sm text-center font-medium
-            ${status === 'extended'
+            ${status === 'critical'
+            ? 'bg-red-500/10 text-red-600 dark:text-red-500'
+            : status === 'extended'
             ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-500'
             : 'bg-blue-500/10 text-blue-600 dark:text-blue-500'}`}
     >
@@ -102,12 +104,14 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
             <AnimatePresence mode="wait">
                 {consecutiveNulls >= 3 && (
                     <StatusBanner
-                        key={consecutiveNulls >= 5 ? 'extended' : 'normal'}
-                        status={consecutiveNulls >= 5 ? 'extended' : 'normal'}
-                        message={consecutiveNulls >= 5
+                        key={consecutiveNulls >= 20 ? 'critical' : consecutiveNulls >= 15 ? 'extended' : 'normal'}
+                        status={consecutiveNulls >= 20 ? 'critical' : consecutiveNulls >= 15 ? 'extended' : 'normal'}
+                        message={consecutiveNulls >= 20
+                            ? "The database update is experiencing significant delays."
+                            : consecutiveNulls >= 15
                             ? "The database update is taking longer than expected. "
                             : "Database update in progress. This may take several minutes."}
-                        icon={consecutiveNulls >= 5 ? AlertTriangle : Info}
+                        icon={consecutiveNulls >= 20 ? AlertTriangle : consecutiveNulls >= 15 ? AlertTriangle : Info}
                     />
                 )}
             </AnimatePresence>
