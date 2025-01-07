@@ -124,7 +124,18 @@ export const api = {
             return data.status === 'healthy';
         } catch (error) {
             console.error('Health check failed:', error);
-            throw error; // Re-throw to trigger the error handling in LoginPage
+            // Check specifically for certificate errors
+            if (error.message?.includes('Failed to fetch') ||
+                error.message?.includes('TypeError') ||
+                error.name === 'TypeError' ||
+                error.message?.includes('ERR_CERT_AUTHORITY_INVALID') ||
+                error.message?.includes('certificate')) {
+                // Throw a specific error type for certificate issues
+                const newError = new Error('SSL_CERTIFICATE_ERROR');
+                newError.originalError = error;
+                throw newError;
+            }
+            throw error; // Re-throw other errors
         }
     },
 

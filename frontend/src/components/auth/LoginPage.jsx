@@ -49,12 +49,8 @@ const LoginPage = () => {
             if (!hasShownError.current) {
                 hasShownError.current = true;
 
-                // Check if it's a certificate error
-                if (
-                    error.message?.includes('ERR_CERT_AUTHORITY_INVALID') ||
-                    error.message?.includes('certificate') ||
-                    error.message?.includes('self-signed')
-                ) {
+                // Check for our specific SSL certificate error
+                if (error.message === 'SSL_CERTIFICATE_ERROR') {
                     const healthEndpoint = api.getHealthEndpoint();
                     console.log('Health endpoint URL:', healthEndpoint);
 
@@ -78,8 +74,7 @@ const LoginPage = () => {
                 else if (
                     error.message?.includes('Failed to fetch') ||
                     error.message?.includes('Network Error') ||
-                    error.message?.includes('ECONNREFUSED') ||
-                    error.name === 'TypeError'
+                    error.message?.includes('ECONNREFUSED')
                 ) {
                     addNotification('error',
                         <div className="space-y-2">
@@ -90,7 +85,7 @@ const LoginPage = () => {
                                 <li>Contact your system administrator if the problem persists</li>
                             </ol>
                         </div>,
-                        15000 // Show for 10 seconds
+                        15000 // Show for 15 seconds
                     );
                 }
             }
