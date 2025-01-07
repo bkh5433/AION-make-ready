@@ -1,8 +1,9 @@
 import React, {useEffect, useState} from 'react';
 import {motion, AnimatePresence} from 'framer-motion';
 import {Loader2, Database, RefreshCw, Server, AlertTriangle, Clock, Info, X} from 'lucide-react';
+import {useImportWindow} from '../../lib/hooks/useImportWindow';
 
-// Simplified ProgressRing with CSS animation
+// Optimized ProgressRing with simpler animation
 const ProgressRing = () => (
     <svg className="w-40 h-40" viewBox="0 0 100 100">
         <circle
@@ -12,7 +13,7 @@ const ProgressRing = () => (
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
-            className="text-gray-700/30"
+            className="text-gray-200/20 dark:text-gray-700/20"
         />
         <circle
             cx="50"
@@ -20,8 +21,8 @@ const ProgressRing = () => (
             r="45"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
-            className="text-primary origin-center rotate-0 animate-[spin_3s_linear_infinite]"
+            strokeWidth="2.5"
+            className="text-primary animate-progress-ring"
             strokeLinecap="round"
             style={{
                 strokeDasharray: '280, 360',
@@ -30,24 +31,48 @@ const ProgressRing = () => (
     </svg>
 );
 
-// Replace the PulsingRing with a more efficient version using CSS animations
+// Simplified PulsingRing without blur
 const PulsingRing = () => (
     <div className="absolute inset-0">
-        <div className="w-full h-full rounded-full border-4 border-primary/30 blur-[2px] animate-pulse-ring"/>
+        <div className="w-full h-full rounded-full border-[3px] border-primary/20 animate-pulse"/>
     </div>
 );
 
-// Optimize FloatingOrb to use CSS animations where possible
+// Optimized FloatingOrb with reduced opacity changes
 const FloatingOrb = ({delay = 0, position = {}}) => (
     <div
-        className="absolute w-3 h-3 animate-float-orb"
+        className="absolute w-2 h-2 animate-float-orb"
         style={{
             ...position,
             animationDelay: `${delay}s`
         }}
     >
-        <div className="w-full h-full rounded-full bg-gradient-to-r from-primary/40 to-blue-400/40 blur-[1px]"/>
+        <div className="w-full h-full rounded-full bg-primary/30"/>
     </div>
+);
+
+const StatusBanner = ({status, message, icon: Icon}) => (
+    <motion.div
+        key={status}
+        initial={{opacity: 0, y: -20}}
+        animate={{opacity: 1, y: 0}}
+        exit={{opacity: 0, y: -20}}
+        transition={{duration: 0.2}}
+        className={`w-full py-2 px-4 text-sm text-center font-medium
+            ${status === 'extended'
+            ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-500'
+            : 'bg-blue-500/10 text-blue-600 dark:text-blue-500'}`}
+    >
+        <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            transition={{duration: 0.2, delay: 0.1}}
+            className="flex items-center justify-center gap-2 max-w-2xl mx-auto"
+        >
+            <Icon className="h-4 w-4"/>
+            <span>{message}</span>
+        </motion.div>
+    </motion.div>
 );
 
 const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
@@ -55,13 +80,13 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
     const [showTip, setShowTip] = useState(false);
     const [showInfo, setShowInfo] = useState(false);
     const startTime = React.useRef(new Date());
+    const {consecutiveNulls} = useImportWindow();
 
     useEffect(() => {
         const interval = setInterval(() => {
             setDots(prev => prev.length >= 3 ? '' : prev + '.');
         }, 500);
 
-        // Show tip after 10 seconds
         const tipTimeout = setTimeout(() => setShowTip(true), 10000);
 
         return () => {
@@ -71,45 +96,36 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
     }, []);
 
     return (
-        <motion.div
-            initial={{opacity: 0}}
-            animate={{opacity: 1}}
-            exit={{opacity: 0}}
-            transition={{duration: 0.3, ease: "easeOut"}}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md"
-        >
-            {/* Background with blur */}
+        <div
+            className="fixed inset-0 z-50 flex flex-col bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-black">
+            {/* Status Banner */}
+            <AnimatePresence mode="wait">
+                {consecutiveNulls >= 3 && (
+                    <StatusBanner
+                        key={consecutiveNulls >= 5 ? 'extended' : 'normal'}
+                        status={consecutiveNulls >= 5 ? 'extended' : 'normal'}
+                        message={consecutiveNulls >= 5
+                            ? "The database update is taking longer than expected. "
+                            : "Database update in progress. This may take several minutes."}
+                        icon={consecutiveNulls >= 5 ? AlertTriangle : Info}
+                    />
+                )}
+            </AnimatePresence>
+
+            {/* Simplified background */}
             <div className="absolute inset-0">
-                {/* Static gradient layers */}
+                <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-blue-600/5"/>
                 <div
-                    className="absolute inset-0 bg-gradient-to-b from-gray-50 via-gray-100 to-white dark:from-gray-950 dark:via-gray-900 dark:to-black"/>
-                <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-blue-500/5"/>
-
-                {/* Keep initial motion animation for the main content */}
-                <motion.div
-                    initial={{opacity: 0, y: 20}}
-                    animate={{opacity: 1, y: 0}}
-                    transition={{delay: 0.2}}
-                    className="absolute inset-0 bg-gradient-to-tr from-primary/5 via-transparent to-blue-600/5 dark:from-primary/10 dark:to-blue-600/10 animate-fade-pulse"
-                />
-
-                {/* Simplified glow effects */}
-                <div className="absolute inset-0 overflow-hidden">
-                    <div
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] animate-slow-spin">
-                        <div
-                            className="absolute inset-0 bg-gradient-to-r from-primary/10 via-blue-500/10 to-primary/10 dark:from-primary/20 dark:via-blue-500/20 dark:to-primary/20 rounded-full blur-[120px]"/>
-                    </div>
-                </div>
+                    className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.08),transparent_100%)]"/>
             </div>
 
             {/* Admin bypass button */}
             {isAdmin && (
-                <div className="fixed top-4 right-4 z-50 animate-fade-in">
+                <div className="fixed top-4 right-4 z-50">
                     <button
                         onClick={onAdminBypass}
-                        className="px-4 py-2 rounded-lg bg-yellow-500/20 hover:bg-yellow-500/30
-                            text-yellow-500 border border-yellow-500/20 backdrop-blur-sm transition-colors
+                        className="px-4 py-2 rounded-lg bg-yellow-500/10 hover:bg-yellow-500/20
+                            text-yellow-600 dark:text-yellow-500 border border-yellow-500/20 transition-colors
                             flex items-center gap-2 text-sm font-medium"
                     >
                         <AlertTriangle className="h-4 w-4"/>
@@ -118,117 +134,111 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
                 </div>
             )}
 
-            {/* Content container with initial animation */}
-            <motion.div
-                initial={{opacity: 0, y: 20}}
-                animate={{opacity: 1, y: 0}}
-                transition={{delay: 0.4}}
-                className="relative flex flex-col items-center justify-center max-w-2xl mx-auto p-8 text-center"
-            >
-                {/* Simplified icon section */}
-                <div className="relative w-40 h-40 mx-auto mb-12">
-                    <ProgressRing/>
+            {/* Content container */}
+            <div className="flex-1 flex items-center justify-center">
+                <div className="relative flex flex-col items-center justify-center max-w-2xl mx-auto p-8 text-center">
+                    {/* Icon section */}
+                    <div className="relative w-40 h-40 mx-auto mb-12">
+                        <ProgressRing/>
+                        <PulsingRing/>
 
-                    {/* Add PulsingRing for additional effect */}
-                    <PulsingRing/>
+                        {/* Reduced number of orbs */}
+                        <FloatingOrb delay={0} position={{left: '20%', top: '30%'}}/>
+                        <FloatingOrb delay={1.5} position={{right: '20%', top: '70%'}}/>
 
-                    {/* Add FloatingOrbs in different positions */}
-                    <FloatingOrb delay={0} position={{left: '15%', top: '30%'}}/>
-                    <FloatingOrb delay={1} position={{left: '85%', top: '30%'}}/>
-                    <FloatingOrb delay={2} position={{left: '50%', top: '85%'}}/>
-
-                    {/* Keep the existing rotating ring and database icon */}
-                    <div
-                        className="absolute inset-0 border-2 border-primary/10 rounded-full animate-[spin_30s_linear_infinite]"/>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="relative">
-                            <Database className="h-16 w-16 text-primary"/>
-                            <div className="absolute inset-0 animate-[spin_10s_linear_infinite] opacity-40">
-                                <RefreshCw className="h-16 w-16 text-primary/50"/>
+                        {/* Simplified rotating elements */}
+                        <div
+                            className="absolute inset-0 border border-primary/10 rounded-full animate-[spin_20s_linear_infinite]"/>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="relative">
+                                <Database className="h-16 w-16 text-primary animate-pulse"/>
+                                <div className="absolute inset-0 animate-[spin_8s_linear_infinite] opacity-30">
+                                    <RefreshCw className="h-16 w-16 text-primary"/>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                {/* Text content */}
-                <div className="space-y-6 animate-fade-in">
-                    <h2 className="text-5xl font-bold tracking-tight text-center">
-                        <span className="bg-gradient-to-r from-primary via-blue-400 to-primary bg-clip-text text-transparent
-                            [text-shadow:_0_4px_20px_rgb(0_0_0_/_20%)] dark:[text-shadow:_0_4px_20px_rgb(0_0_0_/_40%)]">
-                            Database Update in Progress
-                        </span>
-                    </h2>
+                    {/* Text content */}
+                    <div className="space-y-6">
+                        <h2 className="text-4xl font-bold tracking-tight">
+                            <span className="bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent">
+                                Database Update in Progress
+                            </span>
+                        </h2>
 
-                    <p className="text-xl text-gray-600/90 dark:text-gray-300/90 max-w-md mx-auto text-center leading-relaxed">
-                        We're currently updating our database to bring you the latest property metrics.
-                        Vista will be back shortly{dots}
-                    </p>
+                        <p className="text-xl text-gray-600 dark:text-gray-300/90 max-w-md mx-auto leading-relaxed">
+                            We're currently updating our database to bring you the latest property metrics.
+                            Vista will be back shortly{dots}
+                        </p>
 
-                    <div className="flex items-center justify-center gap-2 text-sm text-gray-400/80">
-                        <Server className="h-4 w-4"/>
-                        Go grab a cup of coffee... this might take a few minutes
-                    </div>
+                        <div
+                            className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400/90">
+                            <Server className="h-4 w-4"/>
+                            Go grab a cup of coffee... this might take a few minutes
+                        </div>
 
-                    <AnimatePresence>
-                        {showTip && (
-                            <motion.div
-                                initial={{opacity: 0, y: 20}}
-                                animate={{opacity: 1, y: 0}}
-                                exit={{opacity: 0, y: -20}}
-                                className="flex flex-col items-center gap-4"
-                            >
-                                <div className="text-sm text-gray-400/60 italic">
-                                    This page will automatically refresh once the update is complete
-                                </div>
-
-                                <button
-                                    onClick={() => setShowInfo(prev => !prev)}
-                                    className="flex items-center gap-2 px-4 py-2 rounded-lg 
-                                        bg-gray-700/50 hover:bg-gray-700/70
-                                        text-gray-400 backdrop-blur-sm transition-colors"
+                        <AnimatePresence>
+                            {showTip && (
+                                <motion.div
+                                    initial={{opacity: 0, y: 10}}
+                                    animate={{opacity: 1, y: 0}}
+                                    exit={{opacity: 0, y: -10}}
+                                    transition={{duration: 0.2}}
+                                    className="flex flex-col items-center gap-4"
                                 >
-                                    <Info className="h-4 w-4"/>
-                                    <span className="text-sm">About Database Updates</span>
-                                </button>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                                    <div className="text-sm text-gray-500/90 dark:text-gray-400/80 italic">
+                                        This page will automatically refresh once the update is complete
+                                    </div>
+
+                                    <button
+                                        onClick={() => setShowInfo(prev => !prev)}
+                                        className="flex items-center gap-2 px-4 py-2 rounded-lg 
+                                            bg-gray-100 hover:bg-gray-200 dark:bg-gray-800/50 dark:hover:bg-gray-800/70
+                                            text-gray-600 dark:text-gray-300 transition-colors"
+                                    >
+                                        <Info className="h-4 w-4"/>
+                                        <span className="text-sm">About Database Updates</span>
+                                    </button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
                 </div>
-            </motion.div>
+            </div>
 
             {/* Modal */}
             <AnimatePresence>
                 {showInfo && (
-                    <motion.div
-                        initial={{opacity: 0}}
-                        animate={{opacity: 1}}
-                        exit={{opacity: 0}}
-                        className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+                    <div
+                        className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/30 dark:bg-black/60"
                         onClick={() => setShowInfo(false)}
                     >
                         <motion.div
                             initial={{scale: 0.95, opacity: 0}}
                             animate={{scale: 1, opacity: 1}}
                             exit={{scale: 0.95, opacity: 0}}
-                            className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md rounded-xl p-6 max-w-md w-full 
+                            transition={{duration: 0.2}}
+                            className="bg-white dark:bg-gray-900 rounded-xl p-6 max-w-md w-full 
                                 border border-gray-200/50 dark:border-gray-800/50 
-                                shadow-2xl text-left space-y-4 relative"
+                                shadow-xl text-left space-y-4 relative"
                             onClick={(e) => e.stopPropagation()}
                         >
                             <button
                                 onClick={() => setShowInfo(false)}
-                                className="absolute top-4 right-4 text-gray-400 hover:text-gray-200 transition-colors"
+                                className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
                                 aria-label="Close Info Modal"
                             >
                                 <X className="h-6 w-6"/>
                             </button>
-                            <h3 className="text-xl font-semibold text-gray-200">About Database Updates</h3>
-                            <p className="text-gray-400 text-sm leading-relaxed">
+                            <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200">About Database
+                                Updates</h3>
+                            <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">
                                 Each day, we receive new data from RealPage and update our database accordingly. During
                                 this update process, Vista temporarily limits access to ensure the consistency and
                                 integrity of the data.
                             </p>
-                            <div className="text-gray-400 text-sm space-y-2">
+                            <div className="text-gray-600 dark:text-gray-400 text-sm space-y-2">
                                 <p className="flex items-center gap-2">
                                     <Clock className="h-4 w-4 text-primary"/>
                                     Updates typically take around 30-45 minutes
@@ -241,31 +251,11 @@ const MaintenancePage = ({onCheckStatus, isAdmin, onAdminBypass}) => {
                                 Close
                             </button>
                         </motion.div>
-                    </motion.div>
+                    </div>
                 )}
             </AnimatePresence>
-        </motion.div>
+        </div>
     );
 };
 
-// Add to tailwind.config.js:
-// theme: {
-//   extend: {
-//     keyframes: {
-//       'fade-in': {
-//         '0%': { opacity: '0' },
-//         '100%': { opacity: '1' },
-//       },
-//       'float': {
-//         '0%, 100%': { transform: 'translateY(0)', opacity: '0' },
-//         '50%': { transform: 'translateY(-20px)', opacity: '0.3' },
-//       },
-//     },
-//     animation: {
-//       'fade-in': 'fade-in 0.3s ease-out',
-//       'float': 'float 3s infinite ease-in-out',
-//     },
-//   },
-// },
-
-export default MaintenancePage; 
+export default MaintenancePage;

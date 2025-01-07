@@ -65,10 +65,20 @@ module.exports = {
                     from: {height: "var(--radix-accordion-content-height)"},
                     to: {height: 0},
                 },
+                "progress-ring": {
+                    "0%": {strokeDashoffset: "280"},
+                    "100%": {strokeDashoffset: "0"}
+                },
+                "float-orb": {
+                    "0%, 100%": {transform: "translateY(0)"},
+                    "50%": {transform: "translateY(-10px)"}
+                }
             },
             animation: {
                 "accordion-down": "accordion-down 0.2s ease-out",
                 "accordion-up": "accordion-up 0.2s ease-out",
+                "progress-ring": "progress-ring 2s ease-out forwards",
+                "float-orb": "float-orb 3s ease-in-out infinite"
             },
         },
     },

@@ -1,5 +1,5 @@
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, redirect
 import shutil
 import threading
 import asyncio
@@ -16,17 +16,20 @@ from session import get_session_path, cleanup_session, run_session_cleanup, gene
     setup_session_directory
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
-from auth_middleware import AuthMiddleware, require_auth, require_role
+from auth_middleware import AuthMiddleware, require_auth, require_role, db
 from config import Config
 from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
 import psutil
+from ms_auth import MicrosoftAuth
+import os
+import secrets
 
 app = Flask(__name__)
 CORS(app, resources={
     r"/api/*": {
-        "origins": Config.CORS_ORIGINS,
+        "origins": Config.CORS_ORIGINS.split(',') if isinstance(Config.CORS_ORIGINS, str) else Config.CORS_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "expose_headers": ["Content-Type", "Authorization"],
@@ -1065,7 +1068,7 @@ def change_password():
 
         # Update password
         new_hash, new_salt = auth._hash_password(new_password)
-        user_ref = auth.users_ref.document(user['uid'])
+        user_ref = auth.users_ref.document(user['user_id'])
         user_ref.update({
             'password_hash': new_hash,
             'salt': new_salt,
@@ -1208,6 +1211,212 @@ def trigger_import_window():
             'error': str(e),
             'status': 'error'
         }), 500
+
+
+async def get_sso_status():
+    """Helper function to get SSO status from Firestore"""
+    settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+    settings_doc = settings_ref.get()
+
+    if not settings_doc.exists:
+        settings_ref.set({'enabled': False})
+        return False
+
+    return settings_doc.to_dict().get('enabled', False)
+
+
+@app.route('/api/admin/microsoft-sso/status', methods=['GET'])
+@require_auth
+@catch_exceptions
+def get_microsoft_sso_status():
+    """Get Microsoft SSO status from Firestore"""
+    try:
+        # Use the imported db instance directly
+        settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+        settings_doc = settings_ref.get()
+
+        # If document doesn't exist, create it with default values
+        if not settings_doc.exists:
+            settings_ref.set({
+                'dev_enabled': False,
+                'prod_enabled': False
+            })
+            return jsonify({
+                'success': True,
+                'dev_enabled': False,
+                'prod_enabled': False
+            })
+
+        settings = settings_doc.to_dict()
+        return jsonify({
+            'success': True,
+            'dev_enabled': settings.get('dev_enabled', False),
+            'prod_enabled': settings.get('prod_enabled', False)
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting Microsoft SSO status: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/admin/microsoft-sso/toggle', methods=['POST'])
+@require_auth
+@require_role('admin')
+@catch_exceptions
+def toggle_microsoft_sso():
+    """Toggle Microsoft SSO status in Firestore"""
+    try:
+        # Get environment from request
+        data = request.get_json()
+        environment = data.get('environment')
+
+        if environment not in ['dev', 'prod']:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid environment specified'
+            }), 400
+
+        # Use the imported db instance directly
+        settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+        settings_doc = settings_ref.get()
+
+        # Get current settings or default to both disabled
+        settings = settings_doc.to_dict() if settings_doc.exists else {
+            'dev_enabled': False,
+            'prod_enabled': False
+        }
+
+        # Toggle the status for the specified environment
+        field_name = f'{environment}_enabled'
+        current_status = settings.get(field_name, False)
+        new_status = not current_status
+
+        # Update only the specified environment
+        settings_ref.set({
+            field_name: new_status
+        }, merge=True)
+
+        return jsonify({
+            'success': True,
+            'enabled': new_status,
+            'environment': environment
+        })
+
+    except Exception as e:
+        logger.error(f"Error toggling Microsoft SSO: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/auth/microsoft/login', methods=['GET'])
+@catch_exceptions
+def microsoft_login():
+    """Initiate Microsoft SSO login"""
+    try:
+        # Check if SSO is enabled in Firestore for the appropriate environment
+        settings_ref = db.collection(u'settings').document(u'microsoft_sso')
+        settings_doc = settings_ref.get()
+
+        # Determine environment based on request origin or configuration
+        origin = request.headers.get('Origin', '')
+        is_production = (
+                origin.startswith('https://') or
+                Config.ENV.lower() in ['prod', 'production']
+        )
+        field_name = 'prod_enabled' if is_production else 'dev_enabled'
+        env_name = 'production' if is_production else 'development'
+
+        settings = settings_doc.to_dict() if settings_doc.exists else {}
+        sso_enabled = settings.get(field_name, False)
+
+        if not sso_enabled:
+            return jsonify({
+                'success': False,
+                'message': f'Microsoft SSO is not enabled'
+            }), 501
+
+        if not all([
+            Config.MICROSOFT_CONFIG['client_id'],
+            Config.MICROSOFT_CONFIG['client_secret'],
+            Config.MICROSOFT_CONFIG['tenant_id']
+        ]):
+            logger.error("Microsoft SSO configuration is incomplete")
+            return jsonify({
+                'success': False,
+                'message': 'Microsoft SSO configuration is incomplete'
+            }), 501
+
+        ms_auth = MicrosoftAuth()
+        auth_url = ms_auth.get_auth_url()
+        return jsonify({
+            'success': True,
+            'auth_url': auth_url
+        })
+    except Exception as e:
+        logger.error(f"Microsoft login error: {str(e)}", exc_info=True)
+        return jsonify({
+            'success': False,
+            'message': 'Failed to initiate Microsoft login'
+        }), 500
+
+
+@app.route('/api/auth/microsoft/callback')
+@catch_exceptions
+def auth_callback():
+    """Handle Microsoft OAuth callback"""
+    try:
+        # Get the frontend URL from environment, but ensure it points to the frontend domain
+        frontend_base_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+        if not Config.MICROSOFT_CONFIG['enabled']:
+            return redirect(f"{frontend_base_url}/auth/callback?error=Microsoft SSO is not configured")
+
+        if not all([
+            Config.MICROSOFT_CONFIG['client_id'],
+            Config.MICROSOFT_CONFIG['client_secret'],
+            Config.MICROSOFT_CONFIG['tenant_id']
+        ]):
+            logger.error("Microsoft SSO configuration is incomplete")
+            return redirect(f"{frontend_base_url}/auth/callback?error=Microsoft SSO configuration is incomplete")
+
+        error = request.args.get('error')
+        if error:
+            logger.error(f"Microsoft auth error: {error}")
+            return redirect(f"{frontend_base_url}/auth/callback?error={error}")
+
+        code = request.args.get('code')
+        if not code:
+            logger.error("No authorization code received from Microsoft")
+            return redirect(f"{frontend_base_url}/auth/callback?error=No authorization code received")
+
+        # Initialize Microsoft auth
+        ms_auth = MicrosoftAuth()
+
+        # Create event loop for async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            # Handle the complete authentication process
+            result = loop.run_until_complete(ms_auth.handle_callback(code, auth))
+
+            if not result:
+                logger.error("Failed to complete authentication")
+                return redirect(f"{frontend_base_url}/auth/callback?error=Authentication failed")
+
+            # Redirect to frontend callback component with token
+            return redirect(f"{frontend_base_url}/auth/callback?token={result['token']}")
+
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Error in Microsoft callback: {str(e)}", exc_info=True)
+        return redirect(f"{frontend_base_url}/auth/callback?error=Internal server error")
 
 if __name__ == '__main__':
     logger.info("Starting application and updating initial cache.")

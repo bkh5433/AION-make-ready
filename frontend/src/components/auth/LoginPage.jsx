@@ -1,13 +1,14 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect, useRef} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from '../ui/card';
 import {useTheme} from "../../lib/theme";
 import {AlertTriangle, CheckCircle, X, Lock, Mail} from 'lucide-react';
-import {Link, useNavigate} from 'react-router-dom';
+import {Link, useNavigate, useLocation} from 'react-router-dom';
 import {api} from '../../lib/api';
 
 const LoginPage = () => {
     const {theme} = useTheme();
     const navigate = useNavigate();
+    const location = useLocation();
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [notifications, setNotifications] = useState([]);
@@ -15,6 +16,113 @@ const LoginPage = () => {
         username: '',
         password: ''
     });
+    const hasShownError = useRef(false);
+
+    useEffect(() => {
+        // Check API health on component mount
+        if (!hasShownError.current) {
+            checkApiHealth();
+        }
+
+        // Handle Microsoft callback
+        const params = new URLSearchParams(location.search);
+        const code = params.get('code');
+        const error = params.get('error');
+
+        if (code) {
+            handleMicrosoftCallback(code);
+        } else if (error) {
+            addNotification('error', 'Microsoft login failed: ' + error);
+        }
+    }, [location]);
+
+    const checkApiHealth = async () => {
+        try {
+            const isHealthy = await api.checkHealth();
+            console.log('API Health Check Result:', isHealthy);
+            // Reset the error flag if health check succeeds
+            hasShownError.current = false;
+        } catch (error) {
+            console.error('API Health Check Error:', error);
+
+            // Only show error if we haven't shown one yet
+            if (!hasShownError.current) {
+                hasShownError.current = true;
+
+                // Check if it's a certificate error
+                if (
+                    error.message?.includes('ERR_CERT_AUTHORITY_INVALID') ||
+                    error.message?.includes('certificate') ||
+                    error.message?.includes('self-signed')
+                ) {
+                    const healthEndpoint = api.getHealthEndpoint();
+                    console.log('Health endpoint URL:', healthEndpoint);
+
+                    addNotification('error',
+                        <div className="space-y-2">
+                            <div>SSL Certificate Error detected. To resolve this:</div>
+                            <ol className="list-decimal ml-4">
+                                <li>Click <a href={healthEndpoint} target="_blank"
+                                             className="text-blue-400 hover:text-blue-300 underline">here</a> to open
+                                    the API health endpoint
+                                </li>
+                                <li>Click "Advanced" in your browser</li>
+                                <li>Click "Proceed" or "Accept Risk and Continue"</li>
+                                <li>Return to this page and refresh</li>
+                            </ol>
+                        </div>,
+                        25000 // Show for 25 seconds
+                    );
+                }
+                // Check for network/API availability errors
+                else if (
+                    error.message?.includes('Failed to fetch') ||
+                    error.message?.includes('Network Error') ||
+                    error.message?.includes('ECONNREFUSED') ||
+                    error.name === 'TypeError'
+                ) {
+                    addNotification('error',
+                        <div className="space-y-2">
+                            <div>Unable to connect to the API server:</div>
+                            <ol className="list-decimal ml-4">
+                                <li>Check if the API server is running</li>
+                                <li>Verify your internet connection</li>
+                                <li>Contact your system administrator if the problem persists</li>
+                            </ol>
+                        </div>,
+                        15000 // Show for 10 seconds
+                    );
+                }
+            }
+        }
+    };
+
+    const handleMicrosoftCallback = async (code) => {
+        setIsLoading(true);
+        try {
+            const response = await api.handleMicrosoftCallback(code);
+            if (response.success) {
+                addNotification('success', 'Successfully logged in with Microsoft!');
+                navigate('/');
+            }
+        } catch (error) {
+            setError(error.message);
+            addNotification('error', error.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleMicrosoftLogin = async () => {
+        setIsLoading(true);
+        try {
+            await api.microsoftLogin();
+        } catch (error) {
+            setError(error.message);
+            addNotification('error', error.message);
+            setIsLoading(false);
+        }
+    };
 
     const addNotification = (type, message, duration = 5000) => {
         const id = Date.now();
@@ -55,9 +163,34 @@ const LoginPage = () => {
                 addNotification('error', response.message || 'Login failed');
             }
         } catch (error) {
-            const errorMessage = error.message || 'An error occurred during login';
-            setError(errorMessage);
-            addNotification('error', errorMessage);
+            // Check if it's a certificate error
+            if (error.message?.includes('SSL') || error.message?.includes('certificate') || error.message?.includes('self-signed') || error.name === 'TypeError') {
+                const healthEndpoint = api.getHealthEndpoint();
+                console.log('Health endpoint URL:', healthEndpoint);
+
+                if (!hasShownError.current) {
+                    hasShownError.current = true;
+                    addNotification('error',
+                        <div className="space-y-2">
+                            <div>SSL Certificate Error detected. To resolve this:</div>
+                            <ol className="list-decimal ml-4">
+                                <li>Click <a href={healthEndpoint} target="_blank"
+                                             className="text-blue-400 hover:text-blue-300 underline">here</a> to open
+                                    the API health endpoint
+                                </li>
+                                <li>Click "Advanced" in your browser</li>
+                                <li>Click "Proceed" or "Accept Risk and Continue"</li>
+                                <li>Return to this page and refresh</li>
+                            </ol>
+                        </div>,
+                        25000 // Show for 25 seconds
+                    );
+                }
+            } else {
+                const errorMessage = error.message || 'An error occurred during login';
+                setError(errorMessage);
+                addNotification('error', errorMessage);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -72,13 +205,14 @@ const LoginPage = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-background">
+        <div
+            className="min-h-screen flex items-center justify-center px-4 py-12 bg-gradient-to-br from-background to-background/95">
             {/* Notifications Container */}
             <div className="fixed top-4 right-4 z-50 space-y-3">
                 {notifications.map(notification => (
                     <div
                         key={notification.id}
-                        className={`flex items-center gap-2 p-4 rounded-lg shadow-lg slide-in-from-right transform transition-all duration-300 hover:translate-x-[-4px] hover:shadow-xl ${
+                        className={`flex items-center gap-2 p-4 rounded-lg shadow-lg backdrop-blur-sm slide-in-from-right transform transition-all duration-300 hover:translate-x-[-4px] hover:shadow-xl ${
                             notification.type === 'success'
                                 ? 'bg-green-500/90 text-white'
                                 : notification.type === 'error'
@@ -100,31 +234,63 @@ const LoginPage = () => {
                 ))}
             </div>
 
-            <Card className="w-full max-w-md bg-card shadow-xl border border-border transition-all duration-200">
-                <CardHeader className="space-y-1 p-6">
-                    <CardTitle className="text-2xl font-bold text-center text-foreground">
+            <Card
+                className="w-full max-w-md bg-card/80 backdrop-blur-sm shadow-2xl border border-border/50 transition-all duration-200">
+                <CardHeader className="space-y-2 p-8">
+                    <CardTitle
+                        className="text-3xl font-bold text-center bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent">
                         Welcome to AION Vista
                     </CardTitle>
-                    <p className="text-center text-muted-foreground">
+                    <p className="text-center text-muted-foreground/80 text-lg">
                         Sign in to access the dashboard
                     </p>
                 </CardHeader>
-                <CardContent className="p-6">
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        {error && (
-                            <div
-                                className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive">
-                                <p className="text-sm flex items-center gap-2">
-                                    <AlertTriangle className="h-4 w-4"/>
-                                    {error}
-                                </p>
-                            </div>
-                        )}
+                <CardContent className="p-8 space-y-8">
+                    {error && (
+                        <div
+                            className="p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive backdrop-blur-sm">
+                            <p className="text-sm flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4"/>
+                                {error}
+                            </p>
+                        </div>
+                    )}
 
-                        <div className="space-y-2">
-                            <div className="relative">
+                    {/* Microsoft Login Button - Primary */}
+                    <button
+                        type="button"
+                        onClick={handleMicrosoftLogin}
+                        disabled={isLoading}
+                        className={`w-full flex items-center justify-center gap-3 px-6 py-4 rounded-lg
+                        bg-[#2F2F2F] text-white hover:bg-[#404040]
+                        transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] hover:shadow-lg
+                        ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        <svg className="h-6 w-6" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M10 0H0V10H10V0Z" fill="#F25022"/>
+                            <path d="M21 0H11V10H21V0Z" fill="#7FBA00"/>
+                            <path d="M10 11H0V21H10V11Z" fill="#00A4EF"/>
+                            <path d="M21 11H11V21H21V11Z" fill="#FFB900"/>
+                        </svg>
+                        <span className="text-lg">Sign in with Microsoft</span>
+                    </button>
+
+                    <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-border/50"></div>
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                            <span
+                                className="bg-card px-4 py-1 text-muted-foreground/70 rounded-full border border-border/50">Or</span>
+                        </div>
+                    </div>
+
+                    {/* Traditional Login Form */}
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        <div className="space-y-4">
+                            <div className="relative group">
                                 <Mail
-                                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground"/>
+                                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-hover:text-foreground/80 transition-colors duration-200"/>
                                 <input
                                     type="text"
                                     name="username"
@@ -132,19 +298,18 @@ const LoginPage = () => {
                                     value={formData.username}
                                     onChange={handleInputChange}
                                     disabled={isLoading}
-                                    className="pl-10 pr-4 py-3 w-full rounded-lg bg-input 
-                                    border-border text-foreground
-                                    placeholder-muted-foreground focus:ring-2 
-                                    focus:ring-ring focus:border-transparent transition-all duration-200"
+                                    className="pl-10 pr-4 py-3 w-full rounded-lg bg-input/50 backdrop-blur-sm
+                                    border-border/50 text-foreground
+                                    placeholder-muted-foreground/70 focus:ring-2 
+                                    focus:ring-ring/50 focus:border-transparent transition-all duration-200
+                                    hover:bg-input/70"
                                     required
                                 />
                             </div>
-                        </div>
 
-                        <div className="space-y-2">
-                            <div className="relative">
+                            <div className="relative group">
                                 <Lock
-                                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground"/>
+                                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-hover:text-foreground/80 transition-colors duration-200"/>
                                 <input
                                     type="password"
                                     name="password"
@@ -152,52 +317,35 @@ const LoginPage = () => {
                                     value={formData.password}
                                     onChange={handleInputChange}
                                     disabled={isLoading}
-                                    className="pl-10 pr-4 py-3 w-full rounded-lg bg-input 
-                                    border-border text-foreground
-                                    placeholder-muted-foreground focus:ring-2 
-                                    focus:ring-ring focus:border-transparent transition-all duration-200"
+                                    className="pl-10 pr-4 py-3 w-full rounded-lg bg-input/50 backdrop-blur-sm
+                                    border-border/50 text-foreground
+                                    placeholder-muted-foreground/70 focus:ring-2 
+                                    focus:ring-ring/50 focus:border-transparent transition-all duration-200
+                                    hover:bg-input/70"
                                     required
                                 />
                             </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-sm">
-                            <Link
-                                to="/forgot-password"
-                                className="text-blue-600 dark:text-blue-400 hover:underline"
-                            >
-                                Reset your password
-                            </Link>
-                        </div>
-
                         <button
                             type="submit"
                             disabled={isLoading}
-                            className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white 
+                            className={`w-full flex items-center justify-center gap-2 px-6 py-4 rounded-lg
                             transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
-                            ${isLoading ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed' :
-                                'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'}`}
+                            bg-secondary/80 hover:bg-secondary text-secondary-foreground backdrop-blur-sm
+                            hover:shadow-lg
+                            ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                             {isLoading ? (
                                 <>
                                     <div
-                                        className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
-                                    <span>Signing in...</span>
+                                        className="animate-spin h-5 w-5 border-2 border-current border-t-transparent rounded-full"/>
+                                    <span className="text-lg">Signing in...</span>
                                 </>
                             ) : (
-                                <span>Sign in to Dashboard</span>
+                                <span className="text-lg">Sign in with Email</span>
                             )}
                         </button>
-
-                        <div className="text-center text-sm text-gray-500 dark:text-gray-400">
-                            New to AION Vista?{' '}
-                            <Link
-                                to="/register"
-                                className="text-blue-600 dark:text-blue-400 hover:underline"
-                            >
-                                Request an account
-                            </Link>
-                        </div>
                     </form>
                 </CardContent>
             </Card>

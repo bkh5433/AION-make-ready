@@ -6,6 +6,7 @@ const POLL_INTERVAL = 10000; // Reduce to 10 seconds for more responsive detecti
 export const useImportWindow = () => {
     const [isInImportWindow, setIsInImportWindow] = useState(false);
     const [lastImportWindow, setLastImportWindow] = useState(null);
+    const [consecutiveNulls, setConsecutiveNulls] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -15,6 +16,7 @@ export const useImportWindow = () => {
             console.log('Import window status:', response); // Add logging
             setIsInImportWindow(response.in_import_window);
             setLastImportWindow(response.last_import_window);
+            setConsecutiveNulls(response.consecutive_null_count || 0);
             setError(null);
         } catch (err) {
             console.error('Error checking import window status:', err);
@@ -37,6 +39,7 @@ export const useImportWindow = () => {
     return {
         isInImportWindow,
         lastImportWindow,
+        consecutiveNulls,
         isLoading,
         error,
         checkStatus: checkImportWindowStatus

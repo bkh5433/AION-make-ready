@@ -3,6 +3,9 @@ from datetime import timedelta
 import os
 
 class Config:
+    # Environment
+    ENV = config('ENV', default='development')
+
     # Database
     DB_SERVER = config('DB_SERVER')
     DB_NAME = config('DB_NAME')
@@ -44,6 +47,17 @@ class Config:
         'client_id': config('FIREBASE_CLIENT_ID'),
         'auth_uri': config('FIREBASE_AUTH_URI'),
         'token_uri': config('FIREBASE_TOKEN_URI')
+    }
+
+    # Microsoft SSO
+    MICROSOFT_CONFIG = {
+        'client_id': config('MICROSOFT_CLIENT_ID', default=None),
+        'client_secret': config('MICROSOFT_CLIENT_SECRET', default=None),
+        'tenant_id': config('MICROSOFT_TENANT_ID', default=None),
+        'redirect_uri': config('MICROSOFT_REDIRECT_URI', default='http://localhost:5173/auth/microsoft/callback'),
+        'scopes': ['openid', 'User.Read', 'https://graph.microsoft.com/User.Read'],
+        'domain_hint': config('MICROSOFT_DOMAIN_HINT', default='aionmanagement.com'),
+        'enabled': config('MICROSOFT_SSO_ENABLED', default='FALSE', cast=lambda x: x.upper() == 'TRUE')
     }
 
     # Session

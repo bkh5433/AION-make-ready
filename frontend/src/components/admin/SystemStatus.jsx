@@ -3,7 +3,7 @@ import {
     RefreshCw, Database, Clock, Server,
     Gauge, HardDrive, Activity, AlertTriangle,
     CheckCircle, Network, Users, AlertCircle,
-    AlertOctagon
+    AlertOctagon, LogIn
 } from 'lucide-react';
 import {api} from '../../lib/api';
 import {useImportWindow} from '../../lib/hooks/useImportWindow';
@@ -105,13 +105,21 @@ const SystemStatus = () => {
     const [importActionError, setImportActionError] = useState(null);
     const [showImportWarning, setShowImportWarning] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
+    const [microsoftSSOEnabled, setMicrosoftSSOEnabled] = useState({dev: false, prod: false});
+    const [isTogglingSSO, setIsTogglingSSO] = useState({dev: false, prod: false});
+    const [showSSOWarning, setShowSSOWarning] = useState(false);
+    const [pendingSSOAction, setPendingSSOAction] = useState(null);
 
     useEffect(() => {
         fetchStatus();
+        fetchMicrosoftSSOStatus();
         let interval;
 
         if (autoRefresh) {
-            interval = setInterval(fetchStatus, refreshInterval);
+            interval = setInterval(() => {
+                fetchStatus();
+                fetchMicrosoftSSOStatus();
+            }, refreshInterval);
         }
 
         return () => {
@@ -129,6 +137,45 @@ const SystemStatus = () => {
             setCacheStatus(cacheData);
         } catch (error) {
             console.error('Error fetching status:', error);
+        }
+    };
+
+    const fetchMicrosoftSSOStatus = async () => {
+        try {
+            const response = await api.getMicrosoftSSOStatus();
+            if (response.success) {
+                setMicrosoftSSOEnabled({
+                    dev: response.dev_enabled || false,
+                    prod: response.prod_enabled || false
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching Microsoft SSO status:', error);
+        }
+    };
+
+    const handleToggleMicrosoftSSO = async (environment) => {
+        if (!showSSOWarning) {
+            setShowSSOWarning(true);
+            setPendingSSOAction(environment);
+            return;
+        }
+
+        try {
+            setIsTogglingSSO(prev => ({...prev, [environment]: true}));
+            const response = await api.toggleMicrosoftSSO(environment);
+            if (response.success) {
+                setMicrosoftSSOEnabled(prev => ({
+                    ...prev,
+                    [environment]: response.enabled
+                }));
+            }
+        } catch (error) {
+            console.error('Error toggling Microsoft SSO:', error);
+        } finally {
+            setIsTogglingSSO(prev => ({...prev, [environment]: false}));
+            setShowSSOWarning(false);
+            setPendingSSOAction(null);
         }
     };
 
@@ -301,6 +348,24 @@ Factors affecting score:
         }
     };
 
+    const SSOToggleButton = ({environment, enabled, isToggling}) => (
+        <button
+            onClick={() => handleToggleMicrosoftSSO(environment)}
+            disabled={isToggling}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors
+                ${enabled
+                ? 'bg-green-900/50 text-green-400 hover:bg-green-900/70'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+        >
+            {isToggling ? (
+                <RefreshCw className="w-4 h-4 animate-spin"/>
+            ) : (
+                <LogIn className="w-4 h-4"/>
+            )}
+            {enabled ? 'Disable' : 'Enable'} {environment.toUpperCase()}
+        </button>
+    );
+
     // Add Import Window Testing Card
     const importWindowCard = (
         <div className="bg-white dark:bg-[#1f2937] rounded-lg shadow-md overflow-hidden">
@@ -423,6 +488,43 @@ Factors affecting score:
         </div>
     );
 
+    const ssoWarningDialog = showSSOWarning && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-gray-900 p-6 rounded-xl border border-gray-700 max-w-md w-full mx-4">
+                <div className="flex items-center gap-3 text-yellow-400 mb-4">
+                    <AlertOctagon className="w-6 h-6"/>
+                    <h3 className="text-lg font-semibold">Warning: SSO Configuration Change</h3>
+                </div>
+
+                <p className="text-gray-300 mb-4">
+                    {microsoftSSOEnabled[pendingSSOAction] ? (
+                        `Disabling Microsoft SSO for ${pendingSSOAction.toUpperCase()} environment will prevent users from logging in via Microsoft. They will need to use username/password authentication.`
+                    ) : (
+                        `Enabling Microsoft SSO for ${pendingSSOAction.toUpperCase()} environment will allow users to log in using their Microsoft accounts. Ensure Microsoft SSO is properly configured before proceeding.`
+                    )}
+                </p>
+
+                <div className="flex justify-end gap-3">
+                    <button
+                        onClick={() => {
+                            setShowSSOWarning(false);
+                            setPendingSSOAction(null);
+                        }}
+                        className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={() => handleToggleMicrosoftSSO(pendingSSOAction)}
+                        className="px-4 py-2 rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 transition-colors"
+                    >
+                        Proceed
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
     return (
         <div className="space-y-8 p-6">
             {/* Controls */}
@@ -481,6 +583,47 @@ Factors affecting score:
                     status="healthy"
                     details="Currently active users in the system"
                 />
+            </div>
+
+            {/* Authentication Settings */}
+            <div>
+                <h3 className="text-xl font-semibold text-gray-200 mb-4">Authentication Settings</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <MetricCard
+                        title="Microsoft SSO"
+                        icon={LogIn}
+                        status={microsoftSSOEnabled.prod ? 'healthy' : 'warning'}
+                        value={
+                            <div className="flex flex-col gap-1">
+                                <span
+                                    className={`text-sm ${microsoftSSOEnabled.dev ? 'text-green-400' : 'text-gray-400'}`}>
+                                    Dev: {microsoftSSOEnabled.dev ? 'Enabled' : 'Disabled'}
+                                </span>
+                                <span
+                                    className={`text-sm ${microsoftSSOEnabled.prod ? 'text-green-400' : 'text-gray-400'}`}>
+                                    Prod: {microsoftSSOEnabled.prod ? 'Enabled' : 'Disabled'}
+                                </span>
+                            </div>
+                        }
+                        details={
+                            <div className="flex flex-col gap-2">
+                                <p>Toggle Microsoft SSO status for each environment</p>
+                                <div className="flex flex-col gap-2">
+                                    <SSOToggleButton
+                                        environment="dev"
+                                        enabled={microsoftSSOEnabled.dev}
+                                        isToggling={isTogglingSSO.dev}
+                                    />
+                                    <SSOToggleButton
+                                        environment="prod"
+                                        enabled={microsoftSSOEnabled.prod}
+                                        isToggling={isTogglingSSO.prod}
+                                    />
+                                </div>
+                            </div>
+                        }
+                    />
+                </div>
             </div>
 
             {/* Resource Metrics */}
@@ -590,6 +733,7 @@ Factors affecting score:
             </div>
 
             {importWindowCard}
+            {ssoWarningDialog}
             {importWarningDialog}
         </div>
     );

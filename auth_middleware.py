@@ -49,7 +49,7 @@ class AuthMiddleware:
     def generate_token(self, user_data: dict) -> str:
         """Generate a JWT token for the user"""
         payload = {
-            'user_id': user_data['uid'],
+            'user_id': user_data['user_id'],
             'username': user_data['username'],
             'email': user_data['email'],
             'name': user_data['name'],
@@ -84,7 +84,7 @@ class AuthMiddleware:
                 return None
 
             # Update last login with UTC timezone
-            user_ref = self.users_ref.document(user['uid'])
+            user_ref = self.users_ref.document(user.get('user_id', user.get('uid')))
             user_ref.update({
                 'lastLogin': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             })
@@ -92,9 +92,9 @@ class AuthMiddleware:
             # Calculate token expiration time
             expiration_time = datetime.utcnow() + timedelta(hours=24)
 
-            # Generate token with complete user data
+            # Generate token with complete user data, handling both user_id and uid
             token = self.generate_token({
-                'uid': user['uid'],
+                'user_id': user.get('user_id', user.get('uid')),  # Try user_id first, fall back to uid
                 'username': user['username'],
                 'email': user['email'],
                 'name': user['name'],
@@ -133,7 +133,7 @@ class AuthMiddleware:
 
             # Create new user document
             user_data = {
-                'uid': self.users_ref.document().id,
+                'user_id': self.users_ref.document().id,
                 'username': username,
                 'email': username,  # Using username as email for now
                 'password_hash': password_hash,
@@ -145,7 +145,7 @@ class AuthMiddleware:
                 'role': role  # Add role to user data
             }
 
-            self.users_ref.document(user_data['uid']).set(user_data)
+            self.users_ref.document(user_data['user_id']).set(user_data)
 
             # Return a sanitized version without sensitive data
             return {

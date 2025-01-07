@@ -12,6 +12,7 @@ import MaintenancePage from './components/ui/maintenance-page';
 import {useImportWindow} from './lib/hooks/useImportWindow';
 import {motion} from 'framer-motion';
 import {useState} from 'react';
+import MicrosoftCallback from './components/auth/MicrosoftCallback';
 
 // Protected Route component
 const ProtectedRoute = ({children}) => {
@@ -164,6 +165,7 @@ function App() {
                       </ProtectedRoute>
                     }
                 />
+                  <Route path="/auth/callback" element={<MicrosoftCallback/>}/>
               </Routes>
             </div>
           </ThemeProvider>

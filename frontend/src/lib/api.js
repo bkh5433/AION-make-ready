@@ -1,7 +1,7 @@
 import {getSessionId, setSessionId, clearSessionId} from './session';
 
 // Ensure the base URL always uses HTTPS and ends with /api
-const API_BASE_URL = (() => {
+export const API_BASE_URL = (() => {
     const baseUrl = import.meta.env.VITE_API_BASE_URL;
     console.log('API Base URL from env:', baseUrl);
 
@@ -105,6 +105,29 @@ export const api = {
         return data;
     },
 
+    getHealthEndpoint() {
+        return `${API_BASE_URL}/health`;
+    },
+
+    async checkHealth() {
+        try {
+            // Simulate SSL certificate error
+            // throw new TypeError("net::ERR_CERT_AUTHORITY_INVALID");
+
+            // Real implementation
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/health`,
+                {},
+                true // Skip token check for health endpoint
+            );
+            const data = await response.json();
+            return data.status === 'healthy';
+        } catch (error) {
+            console.error('Health check failed:', error);
+            throw error; // Re-throw to trigger the error handling in LoginPage
+        }
+    },
+
     async generateReports(propertyKeys) {
         console.log('Generating reports for properties:', propertyKeys);
 
@@ -171,17 +194,6 @@ export const api = {
         }
 
         return blobs;
-    },
-
-    async checkHealth() {
-        try {
-            const response = await fetchWithErrorHandling(`${API_BASE_URL}/health`);
-            const data = await response.json();
-            return data.status === 'healthy';
-        } catch (error) {
-            console.error('Health check failed:', error);
-            return false;
-        }
     },
 
     async login({username, password}) {
@@ -380,6 +392,80 @@ export const api = {
             {
                 method: 'POST',
                 body: JSON.stringify({action})
+            }
+        );
+        return response.json();
+    },
+
+    async microsoftLogin() {
+        try {
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/auth/microsoft/login`,
+                {
+                    method: 'GET'
+                },
+                true // Skip token check for login
+            );
+            const data = await response.json();
+
+            if (response.status === 501) {
+                throw new Error('Microsoft SSO is not available. Please use username/password login.');
+            }
+
+            if (data.success && data.auth_url) {
+                // Redirect to Microsoft login
+                window.location.href = data.auth_url;
+            } else {
+                throw new Error(data.message || 'Failed to initiate Microsoft login');
+            }
+        } catch (error) {
+            console.error('Microsoft login error:', error);
+            throw error;
+        }
+    },
+
+    async handleMicrosoftCallback(code) {
+        try {
+            const response = await fetchWithErrorHandling(
+                `${API_BASE_URL}/auth/microsoft/callback?code=${code}`,
+                {
+                    method: 'GET'
+                },
+                true // Skip token check for callback
+            );
+
+            if (response.status === 501) {
+                throw new Error('Microsoft SSO is not available. Please use username/password login.');
+            }
+
+            const data = await response.json();
+
+            if (data.success && data.token) {
+                // Store the auth token
+                localStorage.setItem('authToken', data.token);
+                localStorage.setItem('tokenExpiresAt', data.expires_at);
+                localStorage.setItem('tokenExpiresIn', data.expires_in);
+                return data;
+            } else {
+                throw new Error(data.message || 'Microsoft authentication failed');
+            }
+        } catch (error) {
+            console.error('Microsoft callback error:', error);
+            throw error;
+        }
+    },
+
+    async getMicrosoftSSOStatus() {
+        const response = await fetchWithErrorHandling(`${API_BASE_URL}/admin/microsoft-sso/status`);
+        return response.json();
+    },
+
+    async toggleMicrosoftSSO(environment) {
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/admin/microsoft-sso/toggle`,
+            {
+                method: 'POST',
+                body: JSON.stringify({environment})
             }
         );
         return response.json();
