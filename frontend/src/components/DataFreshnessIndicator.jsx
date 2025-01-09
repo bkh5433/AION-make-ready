@@ -1,5 +1,5 @@
 import React from 'react';
-import {AlertTriangle, CheckCircle, RefreshCw} from 'lucide-react';
+import {AlertTriangle, CheckCircle, RefreshCw, AlertCircle, Info} from 'lucide-react';
 
 const DataFreshnessIndicator = ({
                                     isDataUpToDate,
@@ -9,103 +9,225 @@ const DataFreshnessIndicator = ({
                                     onRefresh,
                                     isRefreshing,
                                     isAdmin = false,
-                                    formatDate
+                                    confidenceScore = 1.0
                                 }) => {
-    // Format the dates exactly as they come from the API
     const formatExactDate = (date) => {
         if (!date) return null;
-        // Keep the date in UTC/GMT format to match the report
         const utcDate = new Date(date);
         return new Intl.DateTimeFormat('en-US', {
             month: 'short',
             day: 'numeric',
             year: 'numeric',
-            timeZone: 'UTC'  // Force UTC to match backend dates
+            timeZone: 'UTC'
         }).format(utcDate);
+    };
+
+    // Get status based on both freshness and confidence
+    const getStatus = () => {
+        if (!isDataUpToDate) return 'error';
+        if (confidenceScore >= 0.9) return 'success';
+        if (confidenceScore >= 0.7) return 'info';
+        if (confidenceScore >= 0.5) return 'warning';
+        return 'error';
+    };
+
+    const status = getStatus();
+    // const status = 'info';
+
+    // Get appropriate messaging based on status
+    const getMessage = () => {
+        if (!isDataUpToDate) return {
+            title: 'Data Update Required',
+            description: 'Property data needs to be refreshed to ensure accuracy. Some information may not reflect recent changes.',
+            confidence: confidenceScore < 0.7 ? 'Data quality checks recommended' : null
+        };
+
+        if (confidenceScore >= 0.9) return {
+            title: 'Data Status: Excellent',
+            description: 'All property data is current and validated through yesterday. Reports will reflect the most recent information.',
+            confidence: 'All quality checks passed successfully'
+        };
+
+        if (confidenceScore >= 0.7) return {
+            title: 'Data Status: Good',
+            description: 'Property data is current, with minor validation checks pending. Reports can be generated with confidence.',
+            confidence: 'Most quality checks completed successfully'
+        };
+
+        return {
+            title: 'Data Quality Notice',
+            description: 'While data is current, some quality metrics are below optimal levels. Consider refreshing data before generating reports.',
+            confidence: 'Additional validation recommended'
+        };
+    };
+
+    const message = getMessage();
+
+    const getStatusStyles = () => {
+        const styles = {
+            success: {
+                bg: 'before:bg-gradient-to-r before:from-green-50/90 before:to-emerald-50/90 dark:before:from-green-900/30 dark:before:to-emerald-900/20',
+                border: 'after:border-b-green-200/80 dark:after:border-b-green-700/50',
+                text: 'text-green-900 dark:text-green-100',
+                description: 'text-green-700 dark:text-green-300'
+            },
+            warning: {
+                bg: 'before:bg-gradient-to-r before:from-yellow-50/90 before:to-orange-50/90 dark:before:from-yellow-900/30 dark:before:to-orange-900/20',
+                border: 'after:border-b-yellow-200/80 dark:after:border-b-yellow-700/50',
+                text: 'text-yellow-900 dark:text-yellow-100',
+                description: 'text-yellow-700 dark:text-yellow-300'
+            },
+            error: {
+                bg: 'before:bg-gradient-to-r before:from-red-50/90 before:to-rose-50/90 dark:before:from-red-900/30 dark:before:to-rose-900/20',
+                border: 'after:border-b-red-200/80 dark:after:border-b-red-700/50',
+                text: 'text-red-900 dark:text-red-100',
+                description: 'text-red-700 dark:text-red-300'
+            },
+            info: {
+                bg: 'before:bg-gradient-to-r before:from-blue-50/90 before:to-sky-50/90 dark:before:from-blue-900/30 dark:before:to-sky-900/20',
+                border: 'after:border-b-blue-200/80 dark:after:border-b-blue-700/50',
+                text: 'text-blue-900 dark:text-blue-100',
+                description: 'text-blue-700 dark:text-blue-300'
+            }
+        };
+        return styles[status];
+    };
+
+    const styles = getStatusStyles();
+
+    const StatusIcon = () => {
+        const iconProps = "w-8 h-8";
+        switch (status) {
+            case 'success':
+                return <CheckCircle className={`${iconProps} text-green-600 dark:text-green-400`}/>;
+            case 'warning':
+                return <AlertTriangle className={`${iconProps} text-yellow-600 dark:text-yellow-400`}/>;
+            case 'error':
+                return <AlertCircle className={`${iconProps} text-red-600 dark:text-red-400`}/>;
+            case 'info':
+                return <Info className={`${iconProps} text-blue-600 dark:text-blue-400`}/>;
+            default:
+                return null;
+        }
     };
 
     return (
         <div className={`
-      flex items-center gap-3 p-8 transition-all duration-300 animate-scale-in
-      -mx-8
-      ${isDataUpToDate
-            ? 'bg-green-50 dark:bg-green-900/20 border-b border-green-200 dark:border-green-700'
-            : 'bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-700'
-        }`}>
-            <div className="flex-shrink-0">
-                {isDataUpToDate ? (
-                    <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400"/>
-                ) : (
-                    <AlertTriangle className="w-6 h-6 text-yellow-600 dark:text-yellow-400"/>
-                )}
+            relative flex items-start gap-6 px-8 py-7 transition-all duration-500
+            -mx-8 overflow-hidden min-h-[120px]
+            before:absolute before:inset-0 before:z-0
+            before:backdrop-blur-md before:backdrop-saturate-150
+            animate-in fade-in-0 duration-1000
+            ${styles.bg}
+            after:absolute after:inset-0 after:z-[1]
+            after:border-b-2 after:border-b-white/20 dark:after:border-b-white/5
+            ${styles.border}
+            after:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.1)] dark:after:shadow-[0_4px_24px_-4px_rgba(0,0,0,0.3)]
+            after:animate-in after:fade-in-0 after:duration-[1200ms] after:ease-in-out
+        `}>
+            <div className="relative z-10 flex-shrink-0 transition-all duration-300 hover:scale-110 hover:rotate-3
+                animate-in fade-in-0 zoom-in-75 duration-1000 delay-[400ms] pt-1">
+                <div className="relative">
+                    <div className="absolute inset-0 animate-pulse-slow blur-sm opacity-50">
+                        <StatusIcon/>
+                    </div>
+                    <StatusIcon/>
+                </div>
             </div>
-            <div className="flex-grow">
+            <div className="relative z-10 flex-grow animate-in slide-in-from-bottom-2 duration-1000 delay-[200ms]">
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <h3 className={`font-semibold ${
-                            isDataUpToDate
-                                ? 'text-green-900 dark:text-green-100'
-                                : 'text-yellow-900 dark:text-yellow-100'
-                        }`}>
-                            {isDataUpToDate ? 'Data is Current (as of yesterday)' : 'Data Status Warning'}
+                    <div className="flex items-center gap-4">
+                        <h3 className={`font-semibold text-lg tracking-tight animate-in fade-in-0 duration-1000 delay-[600ms] ${styles.text}`}>
+                            {message.title}
                         </h3>
-                        <span
-                            className="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
-              {properties.length} Properties
-            </span>
+                        <div className="flex items-center gap-2">
+                            <span className="px-3.5 py-1 text-xs font-medium rounded-full 
+                                bg-white/60 dark:bg-gray-800/60 text-gray-700 dark:text-gray-300
+                                border border-white/80 dark:border-gray-700/80 
+                                shadow-[0_2px_8px_-2px_rgba(0,0,0,0.1)] dark:shadow-[0_2px_8px_-2px_rgba(0,0,0,0.3)]
+                                backdrop-blur-sm
+                                animate-in fade-in-0 duration-1000 delay-[800ms]">
+                                {properties.length} Properties
+                            </span>
+                            {confidenceScore !== undefined && (
+                                <span className={`px-3.5 py-1 text-xs font-medium rounded-full 
+                                    bg-white/60 dark:bg-gray-800/60
+                                    border border-white/80 dark:border-gray-700/80 
+                                    shadow-[0_2px_8px_-2px_rgba(0,0,0,0.1)] dark:shadow-[0_2px_8px_-2px_rgba(0,0,0,0.3)]
+                                    backdrop-blur-sm ${styles.text}
+                                    animate-in fade-in-0 duration-1000 delay-[900ms]`}>
+                                    {(confidenceScore * 100).toFixed(1)}% Confidence
+                                </span>
+                            )}
+                        </div>
                     </div>
                     {!isDataUpToDate && isAdmin && (
                         <button
                             onClick={onRefresh}
                             disabled={isRefreshing}
-                            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium 
-              transition-all duration-200 transform hover:scale-105 active:scale-95
-              ${isRefreshing
-                                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-                                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
-                            }`}
+                            className={`relative group flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium 
+                                transition-all duration-300 transform hover:scale-102 active:scale-98
+                                before:absolute before:inset-0 before:rounded-md before:transition-all
+                                before:duration-300 before:z-0 hover:before:scale-105
+                                animate-in fade-in-0 duration-1000 delay-[1000ms]
+                                ${isRefreshing
+                                ? 'before:bg-gray-100/80 dark:before:bg-gray-800/80 text-gray-400 cursor-not-allowed'
+                                : 'before:bg-blue-100/80 dark:before:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:before:bg-blue-200/90 dark:hover:before:bg-blue-900/60'
+                            }
+                                before:backdrop-blur-sm before:shadow-lg`}
                         >
-                            {isRefreshing ? (
-                                <>
-                                    <div
-                                        className="animate-spin h-4 w-4 border-2 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full"/>
-                                    <span>Refreshing...</span>
-                                </>
-                            ) : (
-                                <>
-                                    <RefreshCw className="h-4 w-4"/>
-                                    <span>Force Refresh</span>
-                                </>
-                            )}
+                            <span className="relative z-10 flex items-center gap-2">
+                                {isRefreshing ? (
+                                    <>
+                                        <div
+                                            className="animate-spin h-4 w-4 border-2 border-blue-600 dark:border-blue-400 border-t-transparent rounded-full"/>
+                                        <span>Refreshing...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <RefreshCw
+                                            className="h-4 w-4 transition-transform group-hover:rotate-180 duration-500"/>
+                                        <span>Force Refresh</span>
+                                    </>
+                                )}
+                            </span>
                         </button>
                     )}
                 </div>
-                <div className="mt-1 space-y-1">
-                    <p className={`text-sm ${
-                        isDataUpToDate
-                            ? 'text-green-700 dark:text-green-300'
-                            : 'text-yellow-700 dark:text-yellow-300'
-                    }`}>
-                        {isDataUpToDate
-                            ? 'All property data is complete through yesterday and ready for report generation.'
-                            : 'Property data may be outdated. Reports may not reflect the most recent changes.'}
+                <div className="mt-3 space-y-3">
+                    <p className={`text-sm leading-relaxed animate-in fade-in-0 duration-1000 delay-[1200ms] ${styles.description}`}>
+                        {message.description}
+                        {message.confidence && (
+                            <span className="block mt-1 text-xs opacity-80">
+                                {message.confidence}
+                            </span>
+                        )}
                     </p>
-                    {periodStartDate && periodEndDate && (
-                        <div
-                            className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
-                            <div className="flex items-center gap-1">
-                                <span className="font-medium">30-Day Period:</span>
-                                <span>
-                                    {formatExactDate(periodStartDate)}
-                                    {' - '}
-                                    {formatExactDate(periodEndDate)}
-                                    <span className="ml-1 text-xs text-gray-500">
-                                        (Data complete through end of day)
+                    <div className="h-[32px] transition-all duration-500">
+                        {periodStartDate && periodEndDate && (
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600 dark:text-gray-400
+                                animate-in fade-in-0 duration-1000 delay-[2000ms]">
+                                <div className="flex items-center gap-3">
+                                    <span className="font-medium animate-in fade-in-0 duration-1000 delay-[2200ms]">30-Day Period:</span>
+                                    <span className="relative px-4 py-1.5 rounded-lg
+                                        before:absolute before:inset-0 before:rounded-lg
+                                        before:bg-black/5 dark:before:bg-white/5 
+                                        before:backdrop-blur-sm
+                                        animate-in fade-in-0 slide-in-from-bottom-1 duration-1000 delay-[2400ms]">
+                                        <span className="relative z-10">
+                                            {formatExactDate(periodStartDate)}
+                                            {' - '}
+                                            {formatExactDate(periodEndDate)}
+                                            <span className="ml-2 text-xs text-gray-500 dark:text-gray-500
+                                                animate-in fade-in-0 duration-1000 delay-[2600ms]">
+                                                (Data complete through end of day)
+                                            </span>
+                                        </span>
                                     </span>
-                                </span>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

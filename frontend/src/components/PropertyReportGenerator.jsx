@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useEffect, useRef, useCallback} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from './ui/card';
 import {
     Search,
@@ -171,6 +171,8 @@ const PropertyReportGenerator = () => {
 
     const [isCachedResult, setIsCachedResult] = useState(false);
 
+    const [confidenceScore, setConfidenceScore] = useState(1.0);
+
     const checkDataAge = (data) => {
         if (data.length > 0) {
             const firstItem = data[0];
@@ -203,7 +205,7 @@ const PropertyReportGenerator = () => {
     };
 
     // Memoized debounced search function with caching
-    const debouncedSearch = React.useCallback(
+    const debouncedSearch = useCallback(
         debounce(async (term, page = 1, perPage = 20) => {
             // Only check for duplicate searches if there is a search term
             if (term.length > 0 && term === prevSearchTerm) {
@@ -252,6 +254,10 @@ const PropertyReportGenerator = () => {
                     setDataIssues([]);
                 }
 
+                // Set confidence score from API response
+                if (response.confidence_score !== undefined) {
+                    setConfidenceScore(response.confidence_score);
+                }
 
                 // Use the function for response data
                 checkDataAge(response.data);
@@ -663,7 +669,7 @@ const PropertyReportGenerator = () => {
                             onRefresh={handleForceRefresh}
                             isRefreshing={isRefreshing}
                             isAdmin={user?.role === 'admin'}
-                            formatDate={formatDate}
+                            confidenceScore={confidenceScore}
                         />
                     ) : (
                         // Add a spacer div when the indicator is not visible
@@ -734,10 +740,14 @@ const PropertyReportGenerator = () => {
 
                     {/* Properties Table - Add better hover states and transitions */}
                     <div
-                        className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1f2937]">
-                        <table className="w-full">
+                        className="relative overflow-hidden rounded-xl border border-gray-200/50 dark:border-gray-700/50 
+                        bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm backdrop-saturate-150
+                        before:absolute before:inset-0 before:bg-gradient-to-b before:from-white/50 before:to-transparent dark:before:from-gray-900/50
+                        before:pointer-events-none">
+                        <table className="w-full relative">
                             <thead>
-                            <tr className="bg-gray-50 dark:bg-[#2d3748] border-b border-gray-200 dark:border-gray-800">
+                            <tr className="bg-gray-50/80 dark:bg-gray-800/80 border-b border-gray-200/80 dark:border-gray-700/80
+                                    backdrop-blur-sm transition-colors duration-200">
                                 <th className="px-8 py-5 text-left">
                                         <input
                                             type="checkbox"
@@ -749,22 +759,26 @@ const PropertyReportGenerator = () => {
                                                     setSelectedProperties(properties.map(p => p.PropertyKey));
                                                 }
                                             }}
-                                            className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-500 focus:ring-blue-500"
+                                            className="rounded border-gray-300 dark:border-gray-600 bg-white/80 dark:bg-gray-700/80 
+                                            text-blue-600 dark:text-blue-400 focus:ring-blue-500/50 transition-colors duration-200
+                                            hover:border-blue-400 dark:hover:border-blue-300"
                                         />
                                     </th>
-                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Property
-                                    Name
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300">
+                                    Property Name
                                 </th>
-                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Units</th>
-                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Completion
-                                    Rate
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300">
+                                    Units
                                 </th>
-                                <th className="hidden md:table-cell px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400 min-w-[320px]">Work
-                                    Orders
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300">
+                                    Completion Rate
+                                </th>
+                                <th className="hidden md:table-cell px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300 min-w-[320px]">
+                                    Work Orders
                                 </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                            <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700/80">
                                 {isLoading ? (
                                     // Updated skeleton loading rows
                                     [...Array(5)].map((_, i) => (
@@ -861,12 +875,14 @@ const PropertyReportGenerator = () => {
                         </table>
                     </div>
 
-                    {/* Selection Counter*/}
-                    <div className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2 px-2">
-                        <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded">
+                    {/* Selection Counter with enhanced styling */}
+                    <div
+                        className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2 px-4 py-2">
+                        <span className="px-3.5 py-1.5 bg-gray-100/80 dark:bg-gray-800/80 rounded-full
+                            border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
                             {selectedProperties.length}
                         </span>
-                        of {properties.length} properties selected
+                        <span>of {properties.length} properties selected</span>
                     </div>
                 </CardContent>
             </Card>
