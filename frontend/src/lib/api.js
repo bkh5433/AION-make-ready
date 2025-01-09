@@ -14,7 +14,7 @@ export const API_BASE_URL = (() => {
     }
 
     // Convert HTTP to HTTPS if needed
-    let finalUrl = baseUrl || 'http://127.0.0.1:5000';
+    let finalUrl = baseUrl || 'http://localhost:3000';
     if (import.meta.env.PROD && finalUrl.startsWith('http://')) {
         finalUrl = 'https://' + finalUrl.substring(7);
         console.log('Converted to HTTPS URL:', finalUrl);

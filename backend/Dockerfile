@@ -36,7 +36,7 @@ CACHE_STALE_IF_ERROR=True" > /app/.env
 ENV PYTHONPATH=/app
 
 # Expose port
-EXPOSE 5000
+EXPOSE 3000
 
-# Run gunicorn
-CMD ["gunicorn", "--bind=0.0.0.0:5000", "--chdir=/app", "app:app"]
+# Run uvicorn
+CMD ["uvicorn", "app:create_asgi_app", "--host", "0.0.0.0", "--port", "3000", "--factory"]

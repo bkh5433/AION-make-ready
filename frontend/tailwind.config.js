@@ -73,39 +73,12 @@ module.exports = {
                     "0%, 100%": {transform: "translateY(0)"},
                     "50%": {transform: "translateY(-10px)"}
                 },
-                "glow-pulse": {
+                "gradient-flow": {
                     '0%': {
-                        transform: 'scale(1) rotate(0deg)',
-                        opacity: '0.4',
-                        filter: 'blur(0px)'
-                    },
-                    '50%': {
-                        transform: 'scale(1.3) rotate(180deg)',
-                        opacity: '0.2',
-                        filter: 'blur(2px)'
+                        backgroundPosition: '0% 50%',
                     },
                     '100%': {
-                        transform: 'scale(1) rotate(360deg)',
-                        opacity: '0.4',
-                        filter: 'blur(0px)'
-                    }
-                },
-                "sonar-ping": {
-                    '0%': {
-                        transform: 'scale(1)',
-                        opacity: '0.55'
-                    },
-                    '35%': {
-                        transform: 'scale(2)',
-                        opacity: '0.3'
-                    },
-                    '75%': {
-                        transform: 'scale(3.2)',
-                        opacity: '0.1'
-                    },
-                    '100%': {
-                        transform: 'scale(4)',
-                        opacity: '0'
+                        backgroundPosition: '200% 50%',
                     }
                 }
             },
@@ -114,8 +87,7 @@ module.exports = {
                 "accordion-up": "accordion-up 0.2s ease-out",
                 "progress-ring": "progress-ring 2s ease-out forwards",
                 "float-orb": "float-orb 3s ease-in-out infinite",
-                "glow-pulse": "glow-pulse 8s cubic-bezier(0.4, 0, 0.6, 1) infinite",
-                "sonar-ping": "sonar-ping 7.5s cubic-bezier(0.15, 0, 0.25, 1) infinite"
+                "gradient-flow": "gradient-flow 30s linear infinite"
             },
         },
     },

@@ -25,6 +25,7 @@ import psutil
 from ms_auth import MicrosoftAuth
 import os
 import secrets
+from asgiref.wsgi import WsgiToAsgi
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -103,13 +104,24 @@ async def fetch_make_ready_data():
     return await loop.run_in_executor(None, fetch_make_ready_data_sync)
 
 def run_async(coro):
-    """Run an async function in a new event loop"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """Run an async function in the current event loop or create a new one if needed"""
     try:
-        return loop.run_until_complete(coro)
+        loop = asyncio.get_running_loop()
+        should_close_loop = False
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        should_close_loop = True
+
+    try:
+        if asyncio.iscoroutine(coro):
+            return loop.run_until_complete(coro)
+        else:
+            # If it's a regular function, run it in an executor
+            return loop.run_in_executor(None, coro)
     finally:
-        loop.close()
+        if should_close_loop:
+            loop.close()
 
 @app.route('/api/data', methods=['GET'])
 @require_auth
@@ -398,15 +410,21 @@ def generate_report():
 @catch_exceptions
 @log_exceptions(logger)
 def refresh_data():
+    """Force refresh the cache data"""
     logger.info("POST /api/refresh endpoint accessed. Force refreshing data.")
     try:
-        # Start refresh in background thread to not block the response
+        # Create a new event loop for the background refresh
+        refresh_loop = asyncio.new_event_loop()
+
         def refresh_background():
             try:
-                run_async(cache.refresh_data(fetch_make_ready_data))
+                asyncio.set_event_loop(refresh_loop)
+                refresh_loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
                 logger.info("Background refresh completed successfully")
             except Exception as e:
                 logger.error(f"Background refresh failed: {str(e)}")
+            finally:
+                refresh_loop.close()
 
         thread = threading.Thread(target=refresh_background)
         thread.daemon = True
@@ -422,17 +440,18 @@ def refresh_data():
         logger.error(f"Error initiating refresh: {str(e)}")
         raise
 
-def cleanup_empty_directory(directory: Path):
-    """Clean up directory if empty after file removal."""
-    try:
-        # Only remove directory if it's empty and not the root output directory
-        if directory.exists() and directory.is_dir():
-            remaining_files = list(directory.glob('*'))
-            if not remaining_files and 'output' in directory.parts:
-                shutil.rmtree(directory)
-                logger.info(f"Cleaned up empty directory: {directory}")
-    except Exception as e:
-        logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
+
+# def cleanup_empty_directory(directory: Path):
+#     """Clean up directory if empty after file removal."""
+#     try:
+#         # Only remove directory if it's empty and not the root output directory
+#         if directory.exists() and directory.is_dir():
+#             remaining_files = list(directory.glob('*'))
+#             if not remaining_files and 'output' in directory.parts:
+#                 shutil.rmtree(directory)
+#                 logger.info(f"Cleaned up empty directory: {directory}")
+#     except Exception as e:
+#         logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
 
 @app.route('/api/reports/download', methods=['GET'])
 @require_auth
@@ -637,56 +656,6 @@ def cache_status():
             "error": str(e)
         }), 500
 
-def schedule_data_refresh():
-    """Enhanced dynamic scheduling for data refresh"""
-    from apscheduler.schedulers.background import BackgroundScheduler
-
-    async def calculate_interval():
-        """Get the next check interval from cache"""
-        interval = cache._calculate_next_check_interval()
-        logger.info(f"Calculated next check interval: {interval} seconds")
-        return interval
-    
-    def refresh_data_task():
-        """Wrapper for async refresh task"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # First refresh the data
-            loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
-
-            # Then calculate new interval
-            next_interval = loop.run_until_complete(calculate_interval())
-
-            # Update scheduler with new interval
-            logger.info(f"Rescheduling next refresh for {next_interval} seconds")
-            scheduler.reschedule_job(
-                'dynamic_refresh',
-                trigger='interval',
-                seconds=next_interval
-            )
-
-        except Exception as e:
-            logger.error(f"Error in refresh task: {str(e)}")
-        finally:
-            loop.close()
-
-    scheduler = BackgroundScheduler()
-
-    # Start with initial interval from cache
-    initial_interval = run_async(calculate_interval())
-    
-    scheduler.add_job(
-        refresh_data_task,
-        'interval',
-        seconds=initial_interval,
-        id='dynamic_refresh'
-    )
-
-    scheduler.start()
-    return scheduler
-
-app.scheduler = schedule_data_refresh()
 
 @app.route('/api/auth/login', methods=['POST'])
 @catch_exceptions
@@ -1418,9 +1387,113 @@ def auth_callback():
         logger.error(f"Error in Microsoft callback: {str(e)}", exc_info=True)
         return redirect(f"{frontend_base_url}/auth/callback?error=Internal server error")
 
+
+def schedule_data_refresh():
+    """Enhanced dynamic scheduling for data refresh"""
+    from apscheduler.schedulers.background import BackgroundScheduler
+    import multiprocessing
+
+    # Only initialize scheduler in the main process
+    if not hasattr(schedule_data_refresh, '_scheduler'):
+        def calculate_interval_sync():
+            """Synchronous version of interval calculation"""
+            return cache._calculate_next_check_interval()
+
+        async def refresh_data_task():
+            """Async wrapper for refresh task"""
+            try:
+                # Refresh the data
+                await cache.refresh_data(fetch_make_ready_data)
+
+                # Calculate new interval
+                next_interval = calculate_interval_sync()
+
+                # Update scheduler with new interval
+                logger.info(f"Rescheduling next refresh for {next_interval} seconds")
+                schedule_data_refresh._scheduler.reschedule_job(
+                    'dynamic_refresh',
+                    trigger='interval',
+                    seconds=next_interval
+                )
+            except Exception as e:
+                logger.error(f"Error in refresh task: {str(e)}")
+
+        # Create and store the scheduler as a static variable
+        schedule_data_refresh._scheduler = BackgroundScheduler()
+
+        # Add session cleanup job
+        from session import run_session_cleanup
+        schedule_data_refresh._scheduler.add_job(
+            run_session_cleanup,
+            'interval',
+            seconds=Config.SESSION_CLEANUP_INTERVAL,
+            id='session_cleanup'
+        )
+
+        # Start with initial interval
+        initial_interval = calculate_interval_sync()
+        logger.info(f"Initial refresh interval: {initial_interval} seconds")
+
+        # Create a wrapper that runs the async task in the event loop
+        def run_refresh_task():
+            asyncio.run(refresh_data_task())
+
+        schedule_data_refresh._scheduler.add_job(
+            run_refresh_task,
+            'interval',
+            seconds=initial_interval,
+            id='dynamic_refresh'
+        )
+
+        schedule_data_refresh._scheduler.start()
+        logger.info("Scheduler initialized and started in main process")
+
+    return schedule_data_refresh._scheduler
+
+
+def create_asgi_app():
+    """Create and configure the ASGI application"""
+    from asgiref.wsgi import WsgiToAsgi
+    import asyncio
+    from functools import partial
+
+    # Initialize scheduler only in the main process
+    if not hasattr(app, 'scheduler'):
+        app.scheduler = schedule_data_refresh()
+        logger.info("Scheduler initialized in ASGI factory")
+
+    wsgi_app = app
+    asgi_app = WsgiToAsgi(wsgi_app)
+
+    async def asgi_wrapper(scope, receive, send):
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        else:
+            await asgi_app(scope, receive, send)
+
+    return asgi_wrapper
+
 if __name__ == '__main__':
-    logger.info("Starting application and updating initial cache.")
-    app.run(debug=True)
+    import uvicorn
+
+    if Config.ENV.lower() is not ['prod', 'production']:
+        uvicorn.run(
+            "app:create_asgi_app",  # Use the factory function
+            host="0.0.0.0",
+            port=3000,
+            reload=True,  # Enable auto-reload during development
+            workers=1,  # Keep single worker to avoid scheduler duplication
+            factory=True  # Enable factory mode for proper WSGI app handling
+        )
+
+
+
 
 # @app.route('/api/some_endpoint', methods=['GET'])
 # @require_auth

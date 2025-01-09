@@ -42,7 +42,7 @@ class Config:
     FIREBASE_CONFIG = {
         'project_id': config('FIREBASE_PROJECT_ID'),
         'private_key_id': config('FIREBASE_PRIVATE_KEY_ID'),
-        'private_key': config('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
+        'private_key': config('FIREBASE_PRIVATE_KEY').replace('\\\\n', '\n'),
         'client_email': config('FIREBASE_CLIENT_EMAIL'),
         'client_id': config('FIREBASE_CLIENT_ID'),
         'auth_uri': config('FIREBASE_AUTH_URI'),
@@ -55,7 +55,7 @@ class Config:
         'client_secret': config('MICROSOFT_CLIENT_SECRET', default=None),
         'tenant_id': config('MICROSOFT_TENANT_ID', default=None),
         'redirect_uri': config('MICROSOFT_REDIRECT_URI', default='http://localhost:5173/auth/microsoft/callback'),
-        'scopes': ['openid', 'User.Read', 'https://graph.microsoft.com/User.Read'],
+        'scopes': ['https://graph.microsoft.com/.default'],
         'domain_hint': config('MICROSOFT_DOMAIN_HINT', default='aionmanagement.com'),
         'enabled': config('MICROSOFT_SSO_ENABLED', default='FALSE', cast=lambda x: x.upper() == 'TRUE')
     }

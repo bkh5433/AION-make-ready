@@ -1,20 +1,20 @@
 from msal import ConfidentialClientApplication
 from flask import url_for, current_app
-import os
 from datetime import datetime
 from typing import Optional, Dict
 import asyncio
 import aiohttp
 import jwt
+from config import Config
 
 
 class MicrosoftAuth:
     def __init__(self):
-        self.client_id = os.getenv('MICROSOFT_CLIENT_ID')
-        self.client_secret = os.getenv('MICROSOFT_CLIENT_SECRET')
-        self.tenant_id = os.getenv('MICROSOFT_TENANT_ID')
+        self.client_id = Config.MICROSOFT_CONFIG['client_id']
+        self.client_secret = Config.MICROSOFT_CONFIG['client_secret']
+        self.tenant_id = Config.MICROSOFT_CONFIG['tenant_id']
         self.authority = f"https://login.microsoftonline.com/{self.tenant_id}"
-        self.redirect_uri = os.getenv('MICROSOFT_REDIRECT_URI')
+        self.redirect_uri = Config.MICROSOFT_CONFIG['redirect_uri']
 
         self.msal_app = ConfidentialClientApplication(
             client_id=self.client_id,
@@ -23,7 +23,7 @@ class MicrosoftAuth:
         )
 
         # Use only the Microsoft Graph API scope
-        self.scopes = ["https://graph.microsoft.com/User.Read"]
+        self.scopes = Config.MICROSOFT_CONFIG['scopes']
 
     def get_auth_url(self) -> str:
         """Generate Microsoft login URL"""
@@ -31,7 +31,7 @@ class MicrosoftAuth:
             scopes=self.scopes,
             redirect_uri=self.redirect_uri,
             prompt="select_account",  # Force account selection
-            domain_hint=os.getenv('MICROSOFT_DOMAIN_HINT', '')
+            domain_hint=Config.MICROSOFT_CONFIG['domain_hint']
         )
 
     async def get_token_from_code(self, code: str) -> Optional[Dict]:

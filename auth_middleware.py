@@ -18,7 +18,7 @@ cred = credentials.Certificate({
     "type": "service_account",
     "project_id": Config.FIREBASE_CONFIG['project_id'],
     "private_key_id": Config.FIREBASE_CONFIG['private_key_id'],
-    "private_key": Config.FIREBASE_CONFIG['private_key'].replace('\\n', '\n'),
+    "private_key": Config.FIREBASE_CONFIG['private_key'],
     "client_email": Config.FIREBASE_CONFIG['client_email'],
     "client_id": Config.FIREBASE_CONFIG['client_id'],
     "auth_uri": Config.FIREBASE_CONFIG['auth_uri'],
