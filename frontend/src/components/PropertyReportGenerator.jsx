@@ -932,6 +932,16 @@ const PropertyReportGenerator = () => {
                 </div>
             )}
 
+            {/* Enhanced Footer */}
+            <div className="flex justify-center pb-12">
+                <div className="px-6 py-3 rounded-xl bg-white/50 dark:bg-gray-900/50 border border-gray-200/50 dark:border-gray-700/50 
+                    backdrop-blur-sm shadow-sm hover:shadow-md transition-all duration-300 transform hover:scale-[1.02]
+                    text-sm text-gray-600 dark:text-gray-400">
+                    <span className="flex items-center gap-2">
+                        Made with <span className="text-blue-600 dark:text-blue-400 animate-pulse">💙</span> in Philadelphia by Brandon Hightower
+                    </span>
+                </div>
+            </div>
         </div>
     );
 };
