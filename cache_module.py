@@ -791,21 +791,13 @@ class ConcurrentSQLCache:
 
     @property
     def is_stale(self) -> bool:
-        """Enhanced staleness check using dynamic intervals and business rules"""
-        if not self._last_refresh or not self._current_version:
+        """Simple staleness check based on hours since last refresh"""
+        if not self._last_refresh:
             return True
 
         now = datetime.now(timezone.utc)
-        last_modified = self._current_version['last_modified']
-        days_old = (now.date() - last_modified.date()).days
-
-        # Data is considered stale if it's 2 or more days old
-        if days_old >= 2:
-            return True
-
-        # For fresh data (1 day old), check the interval
-        age = now - self._last_refresh
-        return age.total_seconds() > self._next_check_interval
+        hours_since_refresh = (now - self._last_refresh).total_seconds() / 3600
+        return hours_since_refresh > 12
 
     @property
     def needs_force_refresh(self) -> bool:
@@ -827,7 +819,7 @@ class ConcurrentSQLCache:
 
     def _get_staleness_info(self) -> StalenessInfo:
         """
-        Enhanced staleness check using dynamic intervals and business rules.
+        Enhanced staleness check using 12-hour threshold.
         Returns detailed staleness information.
         """
         now = datetime.now(timezone.utc)
@@ -842,109 +834,49 @@ class ConcurrentSQLCache:
                 next_update_in=0.0
             )
 
-        # Calculate various time deltas
+        # Calculate time deltas
         time_since_refresh = (now - self._last_refresh).total_seconds() / 3600
         time_since_update = (now - self._current_version['last_modified']).total_seconds() / 3600
         expected_update_time = self.config.get_expected_update_time()
         hours_until_update = (expected_update_time - now).total_seconds() / 3600 if expected_update_time > now else 24
 
-        # Before expected update time (15:00 UTC)
-        if hours_until_update > 0:
-            if time_since_update <= 24:  # Yesterday's data is fine before update time
-                return self.StalenessInfo(
-                    is_stale=False,
-                    staleness_reason="Data current for pre-update period",
-                    severity="none",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            elif time_since_update <= 48:  # Two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data older than expected before update",
-                    severity="medium",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            else:  # More than two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data significantly outdated",
-                    severity="high",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-
-        # After expected update time
-        else:
-            grace_period = 2  # 2 hour grace period after expected update
-            hours_past_update = -hours_until_update
-
-            if hours_past_update <= grace_period:  # Within grace period
-                if time_since_update <= 24:
-                    return self.StalenessInfo(
-                        is_stale=False,
-                        staleness_reason="Data current within update grace period",
-                        severity="none",
-                        time_since_refresh=time_since_refresh,
-                        time_since_update=time_since_update,
-                        next_update_in=hours_until_update
-                    )
-
-            # Past grace period
-            if time_since_update <= 24:  # Today's data
-                if self._import_window_detected:
-                    return self.StalenessInfo(
-                        is_stale=True,
-                        staleness_reason="Import window in progress",
-                        severity="low",
-                        time_since_refresh=time_since_refresh,
-                        time_since_update=time_since_update,
-                        next_update_in=hours_until_update
-                    )
-                return self.StalenessInfo(
-                    is_stale=False,
-                    staleness_reason="Data current",
-                    severity="none",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            elif time_since_update <= 36:  # Missed today's update
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Today's update missing",
-                    severity="medium",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            elif time_since_update <= 48:  # Two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data two days old",
-                    severity="high",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            else:  # More than two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data critically outdated",
-                    severity="critical",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-
-    @property
-    def is_stale(self) -> bool:
-        """Legacy property for backward compatibility"""
-        return self._get_staleness_info().is_stale
+        # Determine staleness based on 12-hour threshold
+        if time_since_refresh <= 12:
+            return self.StalenessInfo(
+                is_stale=False,
+                staleness_reason="Data recently refreshed",
+                severity="none",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
+        elif time_since_refresh <= 18:  # Between 12 and 18 hours
+            return self.StalenessInfo(
+                is_stale=True,
+                staleness_reason="Data refresh approaching threshold",
+                severity="low",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
+        elif time_since_refresh <= 24:  # Between 18 and 24 hours
+            return self.StalenessInfo(
+                is_stale=True,
+                staleness_reason="Data refresh overdue",
+                severity="medium",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
+        else:  # More than 24 hours
+            return self.StalenessInfo(
+                is_stale=True,
+                staleness_reason="Data significantly outdated",
+                severity="high",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
 
     def get_cache_status(self) -> Dict[str, Any]:
         """Get detailed cache status information"""

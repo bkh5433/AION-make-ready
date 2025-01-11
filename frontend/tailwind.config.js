@@ -80,6 +80,34 @@ module.exports = {
                     '100%': {
                         backgroundPosition: '200% 50%',
                     }
+                },
+                "bounce-in": {
+                    '0%': {
+                        transform: 'scale(0)',
+                        opacity: '0'
+                    },
+                    '60%': {
+                        transform: 'scale(1.1)',
+                        opacity: '0.8'
+                    },
+                    '100%': {
+                        transform: 'scale(1)',
+                        opacity: '1'
+                    }
+                },
+                "bounce-out": {
+                    '0%': {
+                        transform: 'scale(1)',
+                        opacity: '1'
+                    },
+                    '40%': {
+                        transform: 'scale(1.1)',
+                        opacity: '0.8'
+                    },
+                    '100%': {
+                        transform: 'scale(0)',
+                        opacity: '0'
+                    }
                 }
             },
             animation: {
@@ -87,7 +115,9 @@ module.exports = {
                 "accordion-up": "accordion-up 0.2s ease-out",
                 "progress-ring": "progress-ring 2s ease-out forwards",
                 "float-orb": "float-orb 3s ease-in-out infinite",
-                "gradient-flow": "gradient-flow 30s linear infinite"
+                "gradient-flow": "gradient-flow 30s linear infinite",
+                "bounce-in": "bounce-in 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards",
+                "bounce-out": "bounce-out 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards"
             },
         },
     },

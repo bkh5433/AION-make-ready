@@ -157,6 +157,8 @@ const PropertyReportGenerator = () => {
     const searchInputRef = useRef(null);
 
     const [showScrollTop, setShowScrollTop] = useState(false);
+    const [isScrollTopVisible, setIsScrollTopVisible] = useState(false);
+    const scrollTopTimeout = useRef(null);
 
     // Add new state variables to hold the period start and end dates
     const [periodStartDate, setPeriodStartDate] = useState(null);
@@ -172,6 +174,26 @@ const PropertyReportGenerator = () => {
     const [isCachedResult, setIsCachedResult] = useState(false);
 
     const [confidenceScore, setConfidenceScore] = useState(1.0);
+
+    const [currentTask, setCurrentTask] = useState(null);
+    const [pollingIntervals, setPollingIntervals] = useState({});
+    const [taskStartedAt, setTaskStartedAt] = useState(null);
+
+    // Add isCompleted state
+    const [isCompleted, setIsCompleted] = useState(false);
+
+    // Replace single completion ref with a map of task completions
+    const completedTasksRef = useRef(new Set());
+
+    // Cleanup effect for polling intervals
+    useEffect(() => {
+        return () => {
+            // Clear all polling intervals on unmount
+            Object.values(pollingIntervals).forEach(interval => {
+                if (interval) clearInterval(interval);
+            });
+        };
+    }, [pollingIntervals]);
 
     const checkDataAge = (data) => {
         if (data.length > 0) {
@@ -346,6 +368,90 @@ const PropertyReportGenerator = () => {
         });
     };
 
+    const checkReportStatus = async (taskId) => {
+        // Don't proceed if this specific task is already completed
+        if (completedTasksRef.current.has(taskId)) {
+            return;
+        }
+
+        try {
+            const result = await api.checkReportStatus(taskId);
+
+            if (result.success) {
+                // Update started_at state
+                setTaskStartedAt(result.started_at);
+
+                if (result.status === 'completed') {
+                    // Mark this specific task as completed
+                    completedTasksRef.current.add(taskId);
+
+                    // Clear the specific interval for this task
+                    if (pollingIntervals[taskId]) {
+                        clearInterval(pollingIntervals[taskId]);
+                        setPollingIntervals(prev => {
+                            const updated = {...prev};
+                            delete updated[taskId];
+                            return updated;
+                        });
+                    }
+
+                    setIsGenerating(false);
+                    setCurrentTask(null);
+                    setTaskStartedAt(null); // Reset started_at when task completes
+
+                    // Show success notification and handle files
+                    setNotifications([]);
+                    addNotification('success', 'Reports generated successfully!');
+                    setSelectedProperties([]);
+
+                    if (result.files?.length) {
+                        showDownloadManager(result.files, result.directory || 'output');
+                    }
+                } else if (result.status === 'failed') {
+                    // Mark this specific task as completed
+                    completedTasksRef.current.add(taskId);
+
+                    // Clear the specific interval for this task
+                    if (pollingIntervals[taskId]) {
+                        clearInterval(pollingIntervals[taskId]);
+                        setPollingIntervals(prev => {
+                            const updated = {...prev};
+                            delete updated[taskId];
+                            return updated;
+                        });
+                    }
+
+                    setIsGenerating(false);
+                    setCurrentTask(null);
+                    setTaskStartedAt(null); // Reset started_at when task fails
+                    throw new Error(result.error || 'Report generation failed');
+                }
+                // Continue polling only if status is 'processing'
+            } else {
+                throw new Error(result.message || 'Failed to check report status');
+            }
+        } catch (error) {
+            // Mark this specific task as completed
+            completedTasksRef.current.add(taskId);
+
+            // Clear the specific interval for this task
+            if (pollingIntervals[taskId]) {
+                clearInterval(pollingIntervals[taskId]);
+                setPollingIntervals(prev => {
+                    const updated = {...prev};
+                    delete updated[taskId];
+                    return updated;
+                });
+            }
+
+            setIsGenerating(false);
+            setCurrentTask(null);
+            setTaskStartedAt(null); // Reset started_at when error occurs
+            console.error('Error checking report status:', error);
+            addNotification('error', `Error checking report status: ${error.message}`);
+        }
+    };
+
     const handleGenerateReports = async () => {
         if (selectedProperties.length === 0) {
             addNotification('error', 'Please select at least one property.');
@@ -353,10 +459,12 @@ const PropertyReportGenerator = () => {
         }
 
         setIsGenerating(true);
+        setTaskStartedAt(null); // Reset started_at when starting new generation
         addNotification('info', `Generating reports for ${selectedProperties.length} properties...`);
 
         try {
             const result = await api.generateReports(selectedProperties);
+            console.log('Generate reports response:', result);
 
             if (result.success) {
                 if (result.session_id) {
@@ -364,21 +472,45 @@ const PropertyReportGenerator = () => {
                     console.log('Session ID set after report generation:', result.session_id);
                 }
 
-                setNotifications([]);
-                addNotification('success', `Successfully generated ${result.output.propertyCount} reports!`);
-                setSelectedProperties([]);
+                if (!result.task_id) {
+                    console.error('No task_id received from server');
+                    throw new Error('No task ID received from server');
+                }
 
-                if (result.output?.files?.length) {
-                    showDownloadManager(result.output.files, result.output.directory);
+                console.log('Setting current task:', result.task_id);
+                setCurrentTask(result.task_id);
+
+                // Start polling for this specific task
+                if (!pollingIntervals[result.task_id]) {
+                    console.log('Starting polling for task:', result.task_id);
+                    const interval = setInterval(() => checkReportStatus(result.task_id), 2000);
+                    setPollingIntervals(prev => ({
+                        ...prev,
+                        [result.task_id]: interval
+                    }));
+                }
+
+                // Update notification to show processing status
+                setNotifications([]);
+                addNotification('info', 'Processing report generation...', 0);
+
+                // Handle any warnings or data issues
+                if (result.warnings?.length) {
+                    result.warnings.forEach(warning => {
+                        addNotification('warning', warning);
+                    });
+                }
+
+                if (result.data_issues?.length) {
+                    setDataIssues(result.data_issues);
                 }
             } else {
                 throw new Error(result.message || 'Failed to generate reports');
             }
         } catch (error) {
+            setIsGenerating(false);
             console.error('Error generating reports:', error);
             addNotification('error', `Failed to generate reports: ${error.message}`);
-        } finally {
-            setIsGenerating(false);
         }
     };
 
@@ -409,16 +541,14 @@ const PropertyReportGenerator = () => {
     const showDownloadManager = (files, outputDirectory) => {
         // Process files to ensure correct paths without duplication
         const processedFiles = files.map(file => {
-            // Remove any potential duplicate directory prefixes
-            let normalizedPath = file;
+            // Ensure we're working with a string
+            let normalizedPath = typeof file === 'string' ? file : file.path || '';
 
-            // Remove output directory prefix if it exists
-            if (file.startsWith(outputDirectory + '/')) {
-                normalizedPath = file.substring(outputDirectory.length + 1);
-            }
+            // Remove any duplicate 'output/' prefixes
+            normalizedPath = normalizedPath.replace(/^(output\/)+/, '');
 
-            // Build the correct file path
-            const fullPath = `${outputDirectory}/${normalizedPath}`;
+            // Build the correct file path with single output prefix
+            const fullPath = normalizedPath;
 
             return {
                 name: normalizedPath.split('/').pop(), // Get just the filename
@@ -426,8 +556,8 @@ const PropertyReportGenerator = () => {
                 downloaded: false,
                 downloading: false,
                 failed: false,
-                timestamp: new Date().toISOString(), // Add timestamp for sorting
-                outputDirectory // Store the output directory
+                timestamp: new Date().toISOString(),
+                outputDirectory
             };
         });
 
@@ -495,12 +625,31 @@ const PropertyReportGenerator = () => {
 
     useEffect(() => {
         const handleScroll = () => {
-            setShowScrollTop(window.scrollY > 400);
+            if (window.scrollY > 400) {
+                setShowScrollTop(true);
+                setIsScrollTopVisible(true);
+            } else {
+                setShowScrollTop(false);
+                // Keep the component mounted but start exit animation
+                if (isScrollTopVisible) {
+                    if (scrollTopTimeout.current) {
+                        clearTimeout(scrollTopTimeout.current);
+                    }
+                    scrollTopTimeout.current = setTimeout(() => {
+                        setIsScrollTopVisible(false);
+                    }, 500); // Match this with animation duration
+                }
+            }
         };
 
         window.addEventListener('scroll', handleScroll);
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
+        return () => {
+            window.removeEventListener('scroll', handleScroll);
+            if (scrollTopTimeout.current) {
+                clearTimeout(scrollTopTimeout.current);
+            }
+        };
+    }, [isScrollTopVisible]);
 
     useEffect(() => {
         if (properties.length > 0) {
@@ -724,9 +873,16 @@ const PropertyReportGenerator = () => {
                             >
                                 {isGenerating ? (
                                     <>
-                                        <div
-                                            className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
-                                        <span>Generating...</span>
+                                        <div className="flex items-center gap-2">
+                                            <div
+                                                className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
+                                            <span>Generating Reports</span>
+                                            <span className="text-xs opacity-75">
+                                                {currentTask ? (
+                                                    taskStartedAt ? '(Processing...)' : '(Requested...)'
+                                                ) : '(Starting...)'}
+                                            </span>
+                                        </div>
                                     </>
                                 ) : (
                                     <>
@@ -910,12 +1066,13 @@ const PropertyReportGenerator = () => {
                     </div>
                 )}
 
-            {showScrollTop && (
+            {isScrollTopVisible && (
                 <button
                     onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}
-                    className="fixed bottom-4 right-20 p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg 
+                    className={`fixed ${downloadManagerState.showFloatingButton && !downloadManagerState.isVisible ? 'bottom-20' : 'bottom-4'} right-4 
+                             p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg 
                              hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-200
-                             transform hover:scale-110"
+                             transform hover:scale-110 ${showScrollTop ? 'animate-bounce-in' : 'animate-bounce-out'}`}
                     aria-label="Scroll to top"
                 >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

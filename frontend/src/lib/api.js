@@ -158,6 +158,47 @@ export const api = {
         return data;
     },
 
+    async checkReportStatus(taskId) {
+        console.log('Checking status for task:', taskId);
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/reports/status/${taskId}`
+        );
+        const data = await response.json();
+
+        // Enhanced logging for task status
+        const status = data.status;
+        const queuePosition = data.queue_position;
+        const activeTasks = data.active_tasks;
+        const startedAt = data.started_at;
+
+        // Determine actual status based on started_at field
+        // If started_at is null, the task is requested but not processing yet
+        const actualStatus = (status === 'processing' && !startedAt) ? 'requested' : status;
+
+        if (actualStatus === 'requested') {
+            console.log(`Task ${taskId} is requested (Queue Position: ${queuePosition}, Active Tasks: ${activeTasks})`);
+        } else if (actualStatus === 'processing') {
+            console.log(`Task ${taskId} is processing (Active Tasks: ${activeTasks}, Started At: ${startedAt})`);
+        } else if (actualStatus === 'completed') {
+            console.log(`Task ${taskId} completed successfully with ${data.files?.length || 0} files`);
+        } else if (actualStatus === 'failed') {
+            console.error(`Task ${taskId} failed with error: ${data.error}`);
+        }
+
+        return {
+            ...data,
+            status: actualStatus,  // Override the status with our corrected version
+            // Add helper flags for frontend state management
+            isRequested: actualStatus === 'requested',
+            isProcessing: actualStatus === 'processing',
+            isCompleted: actualStatus === 'completed',
+            isFailed: actualStatus === 'failed',
+            queuePosition: queuePosition,
+            activeTasks: activeTasks,
+            startedAt: startedAt
+        };
+    },
+
     async downloadReport(filePath) {
         console.log('Downloading file:', filePath);
         const sessionId = getSessionId();

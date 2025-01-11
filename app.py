@@ -21,6 +21,7 @@ from config import Config
 from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
+from task_manager import task_manager
 import psutil
 from ms_auth import MicrosoftAuth
 import os
@@ -131,16 +132,16 @@ def get_make_ready_data():
     logger.info("GET /api/data endpoint accessed.")
     try:
         # Get data and check staleness
-        data, is_stale = run_async(cache.get_data())
+        data, is_stale, confidence = run_async(cache.get_data())
 
         if not data:
             # Initial cache population
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
-            data, is_stale = run_async(cache.get_data())
+            data, is_stale, confidence = run_async(cache.get_data())
         elif is_stale:
-            # Trigger background refresh
-            logger.info("Data is stale, triggering background refresh")
+            # Trigger background refresh for data older than 12 hours
+            logger.info("Data is stale (>12 hours old), triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
                 args=(cache.refresh_data(fetch_make_ready_data),)
@@ -148,12 +149,25 @@ def get_make_ready_data():
             thread.daemon = True
             thread.start()
 
+        # Get detailed staleness info
+        staleness_info = cache._get_staleness_info()
+
         return jsonify({
             "status": "success",
             "data": data,
             "total_records": len(data) if data else 0,
             "last_updated": cache._last_refresh.isoformat() if cache._last_refresh else None,
-            "is_stale": is_stale
+            "data_quality": {
+                "is_stale": is_stale,
+                "confidence_score": confidence,
+                "staleness_info": {
+                    "reason": staleness_info.staleness_reason,
+                    "severity": staleness_info.severity,
+                    "hours_since_refresh": round(staleness_info.time_since_refresh, 2),
+                    "hours_since_update": round(staleness_info.time_since_update, 2),
+                    "hours_until_next_update": round(staleness_info.next_update_in, 2)
+                }
+            }
         })
 
     except Exception as e:
@@ -194,7 +208,7 @@ def search_properties():
             run_async(cache.refresh_data(fetch_make_ready_data))
             data, is_stale, confidence = run_async(cache.get_data())
         elif is_stale and not cache._import_window_detected:
-            logger.info("Data is stale and not in import window, triggering background refresh")
+            logger.info("Data is stale (>12 hours old) and not in import window, triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
                 args=(cache.refresh_data(fetch_make_ready_data),)
@@ -219,11 +233,23 @@ def search_properties():
 
         logger.info(f"Search complete - found {result.count} properties")
 
+        # Get detailed staleness info
+        staleness_info = cache._get_staleness_info()
+
         response_data = {
             'count': result.count,
             'data': [property.model_dump() for property in result.data],
-            'is_stale': is_stale,
-            'confidence_score': confidence,
+            'data_quality': {
+                'is_stale': is_stale,
+                'confidence_score': confidence,
+                'staleness_info': {
+                    'reason': staleness_info.staleness_reason,
+                    'severity': staleness_info.severity,
+                    'hours_since_refresh': round(staleness_info.time_since_refresh, 2),
+                    'hours_since_update': round(staleness_info.time_since_update, 2),
+                    'hours_until_next_update': round(staleness_info.next_update_in, 2)
+                }
+            },
             'last_updated': result.last_updated.isoformat() if result.last_updated else None,
             'period_info': {
                 'start_date': result.period_info[
@@ -238,8 +264,8 @@ def search_properties():
             response_data['cache_stats'] = {
                 'last_refresh': cache._last_refresh.isoformat() if cache._last_refresh else None,
                 'is_refreshing': cache._refresh_state.is_refreshing,
-                'refresh_age': (
-                    (datetime.now(timezone.utc) - cache._last_refresh).total_seconds()
+                'refresh_age_hours': (
+                    (datetime.now(timezone.utc) - cache._last_refresh).total_seconds() / 3600
                     if cache._last_refresh else None
                 ),
                 'import_window_active': cache._import_window_detected,
@@ -331,77 +357,92 @@ def generate_report():
                 "data_issues": searcher.data_issues  # Include data issues in error response
             }, 404
 
-        try:
-            # Generate single report with multiple sheets
-            report_files = generate_multi_property_report(
-                template_name="break_even_template.xlsx",
-                properties=properties,
-                output_dir=str(output_dir),
-                api_url='http://127.0.0.1:5000/api/data',
-            )
+        # Create a task for report generation
+        def generate_report_background():
+            try:
+                # Generate single report with multiple sheets
+                report_files = generate_multi_property_report(
+                    template_name="break_even_template.xlsx",
+                    properties=properties,
+                    output_dir=str(output_dir),
+                    api_url='http://127.0.0.1:5000/api/data',
+                )
 
-            # Process the single file
-            files = []
-            for file_path in report_files:
-                try:
-                    path = Path(file_path)
-                    if not path.is_absolute():
-                        path = Path.cwd() / path
-                    rel_path = path.relative_to(Path.cwd() / 'output')
-                    files.append(str(rel_path))
-                except Exception as e:
-                    logger.error(f"Error processing file path {file_path}: {e}")
-                    continue
+                # Process the files
+                files = []
+                for file_path in report_files:
+                    try:
+                        path = Path(file_path)
+                        if not path.is_absolute():
+                            path = Path.cwd() / path
+                        rel_path = path.relative_to(Path.cwd() / 'output')
+                        files.append(str(rel_path))
+                    except Exception as e:
+                        logger.error(f"Error processing file path {file_path}: {e}")
+                        continue
 
-            logger.info(f"Generated file: {files}")
+                # Mark task as completed with the file list
+                task_manager.complete_task(task_id, files)
+                return files
 
-            response_data = ReportGenerationResponse(
-                success=True,
-                message=f"Report generated successfully with {len(properties)} property sheets",
-                output=ReportOutput(
-                    directory=str(output_dir.relative_to(Path('output'))),
-                    propertyCount=len(properties),
-                    files=files,
-                    metrics_included=True,
-                    period_covered={
-                        'start_date': report_request.start_date or (datetime.now() - timedelta(days=30)),
-                        'end_date': report_request.end_date or datetime.now()
-                    }
-                ),
-                warnings=warnings if warnings else None,
-                data_issues=searcher.data_issues if searcher.data_issues else None,
-                session_id=session_id,
-                data_quality={
-                    'is_stale': is_stale,
-                    'confidence_score': confidence,
-                    'import_window_active': cache._import_window_detected
-                }
-            ).model_dump()
+            except Exception as e:
+                logger.error(f"Error in report generation task: {str(e)}", exc_info=True)
+                if output_dir.exists():
+                    shutil.rmtree(output_dir)
+                # Mark task as failed
+                task_manager.fail_task(task_id, str(e))
+                raise
 
-            response = jsonify(response_data)
-            response.set_cookie(
-                'session_id',
-                session_id,
-                max_age=3600,
-                httponly=False,
-                samesite='Lax',
-                secure=False,
-                path='/'
-            )
+        # Start the background task in a new thread
+        thread = threading.Thread(target=generate_report_background)
+        thread.daemon = True
 
-            return response
+        # Add task to task manager
+        task_id = task_manager.add_task(thread)
 
-        except Exception as e:
-            logger.error(f"Error generating report: {str(e)}", exc_info=True)
-            if output_dir.exists():
-                shutil.rmtree(output_dir)
-            raise
+        # Get queue metrics to determine initial status
+        queue_metrics = task_manager.get_queue_metrics()
+        queue_position = queue_metrics.get("queue_position", {}).get(task_id, 0)
+
+        # If task has a queue position, it's in "requested" state
+        initial_status = "requested" if queue_position > 0 else "processing"
+
+        response_data = {
+            "success": True,
+            "message": "Report generation started",
+            "task_id": task_id,
+            "session_id": session_id,
+            "status": initial_status,
+            "queue_position": queue_position,
+            "active_tasks": queue_metrics.get("active_tasks", 0),
+            "data_quality": {
+                "is_stale": is_stale,
+                "confidence_score": confidence,
+                "import_window_active": cache._import_window_detected
+            },
+            "property_count": len(properties),
+            "warnings": warnings if warnings else None,
+            "data_issues": searcher.data_issues if searcher.data_issues else None,
+        }
+
+        response = jsonify(response_data)
+        response.set_cookie(
+            'session_id',
+            session_id,
+            max_age=3600,
+            httponly=False,
+            samesite='Lax',
+            secure=False,
+            path='/'
+        )
+
+        return response
 
     except Exception as e:
-        logger.error(f"Error generating report: {str(e)}", exc_info=True)
+        logger.error(f"Error initiating report generation: {str(e)}", exc_info=True)
         return {
             "success": False,
-            "message": f"Error generating report: {str(e)}"
+            "message": f"Error initiating report generation: {str(e)}"
         }, 500
 
 @app.route('/api/refresh', methods=['POST'])
@@ -1430,6 +1471,14 @@ def schedule_data_refresh():
             id='session_cleanup'
         )
 
+        # Add task cleanup job
+        schedule_data_refresh._scheduler.add_job(
+            task_manager.cleanup_old_tasks,
+            'interval',
+            hours=1,  # Run every hour
+            id='task_cleanup'
+        )
+
         # Start with initial interval
         initial_interval = calculate_interval_sync()
         logger.info(f"Initial refresh interval: {initial_interval} seconds")
@@ -1478,6 +1527,69 @@ def create_asgi_app():
             await asgi_app(scope, receive, send)
 
     return asgi_wrapper
+
+
+@app.route('/api/reports/status/<task_id>', methods=['GET'])
+@require_auth
+@catch_exceptions
+@log_exceptions(logger)
+def check_report_status(task_id):
+    """Check the status of a report generation task"""
+    try:
+        # Get task status from task manager
+        task_status = task_manager.get_task_status(task_id)
+
+        if task_status is None:
+            return jsonify({
+                "success": False,
+                "message": "Task not found",
+                "status": "not_found"
+            }), 404
+
+        if task_status.get("error"):
+            return jsonify({
+                "success": False,
+                "message": f"Report generation failed: {task_status['error']}",
+                "status": "failed",
+                "error": task_status["error"]
+            }), 500
+
+        # Get queue metrics
+        queue_metrics = task_manager.get_queue_metrics()
+        active_tasks = queue_metrics.get("active_tasks", 0)
+        queue_position = queue_metrics.get("queue_position", {}).get(task_id, 0)
+
+        if task_status.get("status") == "completed":
+            # If task is complete, return the full response with file information
+            response_data = {
+                "success": True,
+                "message": "Report generation completed",
+                "status": "completed",
+                "files": task_status.get("result", []),
+                "completed_at": task_status.get("completed_at"),
+                "active_tasks": active_tasks,
+                "queue_position": queue_position
+            }
+        else:
+            # If task is still running
+            response_data = {
+                "success": True,
+                "message": "Report generation in progress",
+                "status": "processing",
+                "started_at": task_status.get("started_at"),
+                "active_tasks": active_tasks,
+                "queue_position": queue_position
+            }
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Error checking report status: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "message": f"Error checking report status: {str(e)}",
+            "status": "error"
+        }), 500
 
 if __name__ == '__main__':
     import uvicorn
