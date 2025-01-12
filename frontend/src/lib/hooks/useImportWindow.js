@@ -13,7 +13,7 @@ export const useImportWindow = () => {
     const checkImportWindowStatus = async () => {
         try {
             const response = await api.getImportWindowStatus();
-            console.log('Import window status:', response); // Add logging
+            // console.log('Import window status:', response); // Add logging
             setIsInImportWindow(response.in_import_window);
             setLastImportWindow(response.last_import_window);
             setConsecutiveNulls(response.consecutive_null_count || 0);

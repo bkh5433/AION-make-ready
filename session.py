@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import logging
 from typing import Optional, Tuple, List
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +98,8 @@ def is_valid_session(session_id: str) -> bool:
         session_timestamp = datetime.fromisoformat(session_info_file.read_text())
         session_age = datetime.now() - session_timestamp
 
-        # Session valid if less than 24 hours old
-        return session_age < timedelta(hours=24)
+        # Session valid if less than 10 minutes old
+        return session_age < timedelta(minutes=Config.SESSION_MAX_AGE)
 
     except Exception as e:
         logger.error(f"Error validating session: {e}")
@@ -139,10 +140,10 @@ def cleanup_session(session_id: str) -> None:
             age = datetime.now() - session_timestamp
 
             # Clean up if session is over 10 minutes old
-            if age > timedelta(minutes=10):
+            if age > timedelta(seconds=Config.SESSION_MAX_AGE):
                 import shutil
                 shutil.rmtree(session_dir)
-                logger.info(f"Cleaned up old session: {session_id}")
+                logger.info(f"Cleaned up stale session: {session_id} (age: {age.total_seconds() / 60:.2f} minutes)")
 
     except Exception as e:
         logger.error(f"Error cleaning up session {session_id}: {e}")
@@ -216,8 +217,8 @@ def get_active_sessions() -> List[str]:
                     session_timestamp = datetime.fromisoformat(session_info_file.read_text())
                     age = datetime.now() - session_timestamp
 
-                    # Consider session active if less than 24 hours old
-                    if age < timedelta(hours=24):
+                    # Consider session active if less than 10 minutes old
+                    if age < timedelta(minutes=Config.SESSION_MAX_AGE):
                         active_sessions.append(session_dir.name)
                 except Exception:
                     continue

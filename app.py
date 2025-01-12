@@ -457,6 +457,69 @@ def generate_report():
             "message": f"Error initiating report generation: {str(e)}"
         }, 500
 
+
+@app.route('/api/reports/status/<task_id>', methods=['GET'])
+@require_auth
+@catch_exceptions
+@log_exceptions(logger)
+def check_report_status(task_id):
+    """Check the status of a report generation task"""
+    try:
+        # Get task status from task manager
+        task_status = task_manager.get_task_status(task_id)
+
+        if task_status is None:
+            return jsonify({
+                "success": False,
+                "message": "Task not found",
+                "status": "not_found"
+            }), 404
+
+        if task_status.get("error"):
+            return jsonify({
+                "success": False,
+                "message": f"Report generation failed: {task_status['error']}",
+                "status": "failed",
+                "error": task_status["error"]
+            }), 500
+
+        # Get queue metrics
+        queue_metrics = task_manager.get_queue_metrics()
+        active_tasks = queue_metrics.get("active_tasks", 0)
+        queue_position = queue_metrics.get("queue_position", {}).get(task_id, 0)
+
+        if task_status.get("status") == "completed":
+            # If task is complete, return the full response with file information
+            response_data = {
+                "success": True,
+                "message": "Report generation completed",
+                "status": "completed",
+                "files": task_status.get("result", []),
+                "completed_at": task_status.get("completed_at"),
+                "active_tasks": active_tasks,
+                "queue_position": queue_position
+            }
+        else:
+            # If task is still running
+            response_data = {
+                "success": True,
+                "message": "Report generation in progress",
+                "status": "processing",
+                "started_at": task_status.get("started_at"),
+                "active_tasks": active_tasks,
+                "queue_position": queue_position
+            }
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Error checking report status: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "message": f"Error checking report status: {str(e)}",
+            "status": "error"
+        }), 500
+
 @app.route('/api/refresh', methods=['POST'])
 @require_auth
 @require_role('admin')
@@ -1206,7 +1269,7 @@ def trigger_import_window():
 
         if action == 'start':
             # Force the import window state
-            cache._consecutive_null_count = 2
+            cache._consecutive_null_count = 15
             cache._import_window_detected = True
             cache._last_import_window = datetime.now(timezone.utc)
             message = "Import window started"
@@ -1487,7 +1550,7 @@ def schedule_data_refresh():
         schedule_data_refresh._scheduler.add_job(
             task_manager.cleanup_old_tasks,
             'interval',
-            hours=1,  # Run every hour
+            minutes=5,  # Run every 5 minutes
             id='task_cleanup'
         )
 
@@ -1541,67 +1604,7 @@ def create_asgi_app():
     return asgi_wrapper
 
 
-@app.route('/api/reports/status/<task_id>', methods=['GET'])
-@require_auth
-@catch_exceptions
-@log_exceptions(logger)
-def check_report_status(task_id):
-    """Check the status of a report generation task"""
-    try:
-        # Get task status from task manager
-        task_status = task_manager.get_task_status(task_id)
 
-        if task_status is None:
-            return jsonify({
-                "success": False,
-                "message": "Task not found",
-                "status": "not_found"
-            }), 404
-
-        if task_status.get("error"):
-            return jsonify({
-                "success": False,
-                "message": f"Report generation failed: {task_status['error']}",
-                "status": "failed",
-                "error": task_status["error"]
-            }), 500
-
-        # Get queue metrics
-        queue_metrics = task_manager.get_queue_metrics()
-        active_tasks = queue_metrics.get("active_tasks", 0)
-        queue_position = queue_metrics.get("queue_position", {}).get(task_id, 0)
-
-        if task_status.get("status") == "completed":
-            # If task is complete, return the full response with file information
-            response_data = {
-                "success": True,
-                "message": "Report generation completed",
-                "status": "completed",
-                "files": task_status.get("result", []),
-                "completed_at": task_status.get("completed_at"),
-                "active_tasks": active_tasks,
-                "queue_position": queue_position
-            }
-        else:
-            # If task is still running
-            response_data = {
-                "success": True,
-                "message": "Report generation in progress",
-                "status": "processing",
-                "started_at": task_status.get("started_at"),
-                "active_tasks": active_tasks,
-                "queue_position": queue_position
-            }
-
-        return jsonify(response_data)
-
-    except Exception as e:
-        logger.error(f"Error checking report status: {str(e)}", exc_info=True)
-        return jsonify({
-            "success": False,
-            "message": f"Error checking report status: {str(e)}",
-            "status": "error"
-        }), 500
 
 if __name__ == '__main__':
     import uvicorn

@@ -8,8 +8,7 @@ const DataFreshnessIndicator = ({
                                     periodEndDate,
                                     onRefresh,
                                     isRefreshing,
-                                    isAdmin = false,
-                                    confidenceScore = 1.0
+                                    isAdmin = false
                                 }) => {
     const formatExactDate = (date) => {
         if (!date) return null;
@@ -22,42 +21,19 @@ const DataFreshnessIndicator = ({
         }).format(utcDate);
     };
 
-    // Get status based on both freshness and confidence
-    const getStatus = () => {
-        if (!isDataUpToDate) return 'error';
-        if (confidenceScore >= 0.9) return 'success';
-        if (confidenceScore >= 0.7) return 'info';
-        if (confidenceScore >= 0.5) return 'warning';
-        return 'error';
-    };
-
-    const status = getStatus();
-    // const status = 'info';
+    // Simplified status based only on data freshness
+    const status = isDataUpToDate ? 'success' : 'error';
 
     // Get appropriate messaging based on status
     const getMessage = () => {
         if (!isDataUpToDate) return {
             title: 'Data Update Required',
-            description: 'Property data needs to be refreshed to ensure accuracy. Some information may not reflect recent changes.',
-            confidence: confidenceScore < 0.7 ? 'Data quality checks recommended' : null
-        };
-
-        if (confidenceScore >= 0.9) return {
-            title: 'Data Status: Excellent',
-            description: 'All property data is current and validated through yesterday. Reports will reflect the most recent information.',
-            confidence: 'All quality checks passed successfully'
-        };
-
-        if (confidenceScore >= 0.7) return {
-            title: 'Data Status: Good',
-            description: 'Property data is current, with minor validation checks pending. Reports can be generated with confidence.',
-            confidence: 'Most quality checks completed successfully'
+            description: 'Property data needs to be refreshed to ensure accuracy. Some information may not reflect recent changes.'
         };
 
         return {
-            title: 'Data Quality Notice',
-            description: 'While data is current, some quality metrics are below optimal levels. Consider refreshing data before generating reports.',
-            confidence: 'Additional validation recommended'
+            title: 'Data Status: Excellent',
+            description: 'All property data is current and validated through yesterday. Reports will reflect the most recent information.'
         };
     };
 
@@ -71,23 +47,11 @@ const DataFreshnessIndicator = ({
                 text: 'text-green-900 dark:text-green-100',
                 description: 'text-green-700 dark:text-green-300'
             },
-            warning: {
-                bg: 'before:bg-gradient-to-r before:from-yellow-50/90 before:to-orange-50/90 dark:before:from-yellow-900/30 dark:before:to-orange-900/20',
-                border: 'after:border-b-yellow-200/80 dark:after:border-b-yellow-700/50',
-                text: 'text-yellow-900 dark:text-yellow-100',
-                description: 'text-yellow-700 dark:text-yellow-300'
-            },
             error: {
                 bg: 'before:bg-gradient-to-r before:from-red-50/90 before:to-rose-50/90 dark:before:from-red-900/30 dark:before:to-rose-900/20',
                 border: 'after:border-b-red-200/80 dark:after:border-b-red-700/50',
                 text: 'text-red-900 dark:text-red-100',
                 description: 'text-red-700 dark:text-red-300'
-            },
-            info: {
-                bg: 'before:bg-gradient-to-r before:from-blue-50/90 before:to-sky-50/90 dark:before:from-blue-900/30 dark:before:to-sky-900/20',
-                border: 'after:border-b-blue-200/80 dark:after:border-b-blue-700/50',
-                text: 'text-blue-900 dark:text-blue-100',
-                description: 'text-blue-700 dark:text-blue-300'
             }
         };
         return styles[status];
@@ -100,12 +64,8 @@ const DataFreshnessIndicator = ({
         switch (status) {
             case 'success':
                 return <CheckCircle className={`${iconProps} text-green-600 dark:text-green-400`}/>;
-            case 'warning':
-                return <AlertTriangle className={`${iconProps} text-yellow-600 dark:text-yellow-400`}/>;
             case 'error':
                 return <AlertCircle className={`${iconProps} text-red-600 dark:text-red-400`}/>;
-            case 'info':
-                return <Info className={`${iconProps} text-blue-600 dark:text-blue-400`}/>;
             default:
                 return null;
         }
@@ -149,16 +109,6 @@ const DataFreshnessIndicator = ({
                                 animate-in fade-in-0 duration-1000 delay-[800ms]">
                                 {properties.length} Properties
                             </span>
-                            {confidenceScore !== undefined && (
-                                <span className={`px-3.5 py-1 text-xs font-medium rounded-full 
-                                    bg-white/60 dark:bg-gray-800/60
-                                    border border-white/80 dark:border-gray-700/80 
-                                    shadow-[0_2px_8px_-2px_rgba(0,0,0,0.1)] dark:shadow-[0_2px_8px_-2px_rgba(0,0,0,0.3)]
-                                    backdrop-blur-sm ${styles.text}
-                                    animate-in fade-in-0 duration-1000 delay-[900ms]`}>
-                                    {(confidenceScore * 100).toFixed(1)}% Confidence
-                                </span>
-                            )}
                         </div>
                     </div>
                     {!isDataUpToDate && isAdmin && (
@@ -197,11 +147,6 @@ const DataFreshnessIndicator = ({
                 <div className="mt-3 space-y-3">
                     <p className={`text-sm leading-relaxed animate-in fade-in-0 duration-1000 delay-[1200ms] ${styles.description}`}>
                         {message.description}
-                        {message.confidence && (
-                            <span className="block mt-1 text-xs opacity-80">
-                                {message.confidence}
-                            </span>
-                        )}
                     </p>
                     <div className="h-[32px] transition-all duration-500">
                         {periodStartDate && periodEndDate && (

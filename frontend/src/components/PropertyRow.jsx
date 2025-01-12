@@ -198,17 +198,45 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                 <div className="flex flex-col gap-4 group-hover:translate-x-1 transition-transform duration-200">
                     {/* Open Work Orders Section */}
                     <div className="flex flex-col">
-                        <span className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">
-                            Open WO
-                        </span>
-                        <div className="flex items-center gap-2">
-                            <span className={`text-lg font-medium transition-colors duration-200 ${
-                                workOrdersPerUnit >= 0.5 ? 'text-red-600 dark:text-red-400' :
-                                    workOrdersPerUnit >= 0.25 ? 'text-yellow-600 dark:text-yellow-400' :
-                                        'text-green-600 dark:text-green-400'
-                            }`}>
-                                {actual_open_work_orders}
+                        <Tooltip
+                            content={`Open Work Orders show active maintenance tasks for ${PropertyName}. This includes both new requests and ongoing work from the past 30 days that haven't been completed or cancelled.`}
+                            side="left"
+                            sideOffset={5}
+                            wide>
+                            <span
+                                className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1 cursor-help">
+                                Open WO
+                                <span className="ml-1 text-gray-400">ⓘ</span>
                             </span>
+                        </Tooltip>
+                        <div className="flex items-center gap-2">
+                            <Tooltip
+                                content={`
+                                    Status Overview for ${PropertyName}:
+                                    • ${actual_open_work_orders} active work orders
+                                    • ${workOrdersPerUnit.toFixed(2)} work orders per unit
+                                    • ${completed_work_orders} completed this period
+                                    ${cancelled_work_orders > 0 ? `\n• ${cancelled_work_orders} cancelled (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)` : ''}
+                                    ${workOrdersPerUnit >= 0.5
+                                    ? '\nAlert: High volume of open work orders may indicate maintenance backlog.'
+                                    : '\nStatus: Work order volume is within normal operational ranges.'
+                                }
+                                    ${average_days_to_complete > 5
+                                    ? `\nNote: Average completion time is ${average_days_to_complete.toFixed(1)} days`
+                                    : ''
+                                }
+                                `}
+                                side="left"
+                                sideOffset={5}
+                                wide>
+                                <span className={`text-lg font-medium transition-colors duration-200 cursor-help ${
+                                    workOrdersPerUnit >= 0.5 ? 'text-red-600 dark:text-red-400' :
+                                        workOrdersPerUnit >= 0.25 ? 'text-yellow-600 dark:text-yellow-400' :
+                                            'text-green-600 dark:text-green-400'
+                                }`}>
+                                    {actual_open_work_orders}
+                                </span>
+                            </Tooltip>
                             <StatusBadge
                                 value={workOrdersPerUnit}
                                 threshold={0.5}
@@ -222,17 +250,35 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
 
                     {/* Pending Work Orders Section */}
                     <div className="flex flex-col">
-                        <span className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">
-                            Pending WO
-                        </span>
-                        <div className="flex items-center gap-2">
-                            <span className={`text-lg font-medium transition-colors duration-200 ${
-                                pendingPerUnit >= 0.25 ? 'text-orange-600 dark:text-orange-400' :
-                                    pendingPerUnit >= 0.1 ? 'text-amber-600 dark:text-amber-400' :
-                                        'text-gray-600 dark:text-gray-400'
-                            }`}>
-                                {pending_work_orders}
+                        <Tooltip
+                            content={`Outstanding work orders at period end (Open + New - Cancelled - Completed = ${pending_work_orders})`}
+                            side="left"
+                            sideOffset={5}
+                            wide>
+                            <span
+                                className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1 cursor-help">
+                                Pending WO
+                                <span className="ml-1 text-gray-400">ⓘ</span>
                             </span>
+                        </Tooltip>
+                        <div className="flex items-center gap-2">
+                            <Tooltip
+                                content={`
+                                    • ${pending_work_orders} outstanding tasks (${((pending_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)
+                                    • ${completed_work_orders} completed, ${cancelled_work_orders} cancelled
+                                    • ${percentage_completed.toFixed(1)}% completion rate
+                                `}
+                                side="left"
+                                sideOffset={5}
+                                wide>
+                                <span className={`text-lg font-medium transition-colors duration-200 cursor-help ${
+                                    pendingPerUnit >= 0.25 ? 'text-orange-600 dark:text-orange-400' :
+                                        pendingPerUnit >= 0.1 ? 'text-amber-600 dark:text-amber-400' :
+                                            'text-gray-600 dark:text-gray-400'
+                                }`}>
+                                    {pending_work_orders}
+                                </span>
+                            </Tooltip>
                             <StatusBadge
                                 value={pendingPerUnit}
                                 threshold={0.25}

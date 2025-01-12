@@ -173,29 +173,45 @@ class TaskManager:
                 "queue_position": queue_positions
             }
 
-    def cleanup_old_tasks(self, max_age_hours: int = 24):
-        """Clean up completed tasks older than max_age_hours"""
-        logger.info(f"Starting cleanup of old tasks (max age: {max_age_hours} hours)")
+    def cleanup_old_tasks(self, max_age_minutes: int = 10):
+        """Clean up tasks older than max_age_minutes"""
+        logger.info(f"Starting cleanup of old tasks (max age: {max_age_minutes} minutes)")
         with self.lock:
             now = datetime.now()
             to_remove = []
 
             for task_id, task in self.tasks.items():
-                if task["status"] in ["completed", "failed"]:
+                # For completed or failed tasks, check completion time
+                if task["status"] in ["completed", "failed"] and task["completed_at"]:
                     completed_at = datetime.fromisoformat(task["completed_at"])
-                    age_hours = (now - completed_at).total_seconds() / 3600
-                    if age_hours > max_age_hours:
+                    age_minutes = (now - completed_at).total_seconds() / 60
+                    if age_minutes > max_age_minutes:
                         to_remove.append(task_id)
-                        logger.debug(f"Marking task {task_id} for removal (age: {age_hours:.2f} hours)")
+                        logger.debug(
+                            f"Marking completed/failed task {task_id} for removal (age: {age_minutes:.2f} minutes)")
+
+                # For requested or processing tasks, check creation time
+                elif task["status"] in ["requested", "processing"]:
+                    creation_time = None
+                    if task["started_at"]:
+                        creation_time = datetime.fromisoformat(task["started_at"])
+                    elif task["requested_at"]:
+                        creation_time = datetime.fromisoformat(task["requested_at"])
+
+                    if creation_time:
+                        age_minutes = (now - creation_time).total_seconds() / 60
+                        if age_minutes > max_age_minutes:
+                            to_remove.append(task_id)
+                            logger.debug(f"Marking stale task {task_id} for removal (age: {age_minutes:.2f} minutes)")
 
             for task_id in to_remove:
                 del self.tasks[task_id]
 
             if to_remove:
-                logger.info(f"Cleaned up {len(to_remove)} old tasks")
+                logger.info(f"Cleaned up {len(to_remove)} old/stale tasks")
             else:
                 logger.debug("No old tasks to clean up")
 
 
-# Create a global task manager instance with max 2 concurrent tasks
+# Create a global task manager instance with max 3 concurrent tasks
 task_manager = TaskManager(max_concurrent=3)
