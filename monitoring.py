@@ -6,6 +6,7 @@ from typing import Dict, Any, List
 import logging
 from collections import deque
 import time
+import statistics
 from logger_config import LogConfig
 
 log_config = LogConfig()
@@ -32,6 +33,24 @@ class SystemMonitor:
         self._errors = deque(maxlen=1000)
         self._request_count = 0
 
+        # Enhanced metrics tracking
+        self._route_counts = {
+            'search': 0,
+            'generation': 0,
+            'data_fetch': 0,
+            'other': 0
+        }
+
+        # Task manager metrics for report generation
+        self._active_tasks = 0
+        self._queued_tasks = 0
+        self._completed_tasks = 0
+        self._failed_tasks = 0
+
+        # Search metrics
+        self._search_results_count = deque(maxlen=100)  # Track number of results per search
+        self._search_query_times = deque(maxlen=100)  # Track query execution times
+
     def record_request_start(self) -> float:
         """Record the start time of a request"""
         return time.time()
@@ -48,10 +67,31 @@ class SystemMonitor:
 
         # Record response time for the appropriate category
         self._response_times[route_category].append(response_time)
+        self._route_counts[route_category] += 1
         self._request_count += 1
 
         if error:
             self._errors.append(end_time)
+
+    def update_task_metrics(self, active: int, queued: int, completed: int, failed: int):
+        """Update task manager metrics"""
+        self._active_tasks = active
+        self._queued_tasks = queued
+        self._completed_tasks = completed
+        self._failed_tasks = failed
+
+    def record_search_metrics(self, results_count: int, query_time: float):
+        """Record additional search-specific metrics"""
+        self._search_results_count.append(results_count)
+        self._search_query_times.append(query_time)
+
+    def _calculate_percentile(self, data: deque, percentile: float) -> float:
+        """Calculate percentile from deque data"""
+        if not data:
+            return 0.0
+        sorted_data = sorted(data)
+        index = int(len(sorted_data) * percentile)
+        return sorted_data[index]
 
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics"""
@@ -80,13 +120,41 @@ class SystemMonitor:
         recent_errors = sum(1 for error_time in self._errors if error_time > hour_ago)
         error_rate = (recent_errors / self._request_count * 100) if self._request_count > 0 else 0
 
-        return {
+        # Enhanced metrics
+        metrics = {
             "responseTime": round(avg_response_time, 2),
             "routeResponseTimes": response_times,
             "errorRate": round(error_rate, 2),
             "totalRequests": self._request_count,
-            "recentErrors": recent_errors
+            "recentErrors": recent_errors,
+
+            # Add enhanced metrics while maintaining backward compatibility
+            "routeCounts": self._route_counts,
+
+            # Enhanced search metrics
+            "searchMetrics": {
+                "count": self._route_counts['search'],
+                "avgResultsCount": round(
+                    statistics.mean(self._search_results_count) if self._search_results_count else 0, 2),
+                "avgQueryTime": round(statistics.mean(self._search_query_times) if self._search_query_times else 0, 2),
+                "p95QueryTime": round(self._calculate_percentile(self._search_query_times, 0.95), 2),
+                "maxQueryTime": round(max(self._search_query_times) if self._search_query_times else 0, 2),
+                "minQueryTime": round(min(self._search_query_times) if self._search_query_times else 0, 2)
+            },
+
+            # Task manager metrics for report generation
+            "taskMetrics": {
+                "activeTasks": self._active_tasks,
+                "queuedTasks": self._queued_tasks,
+                "completedTasks": self._completed_tasks,
+                "failedTasks": self._failed_tasks,
+                "successRate": round((self._completed_tasks / (self._completed_tasks + self._failed_tasks) * 100) if (
+                                                                                                                                 self._completed_tasks + self._failed_tasks) > 0 else 100,
+                                     2)
+            }
         }
+
+        return metrics
 
     def get_memory_usage(self) -> Dict[str, Any]:
         """Get memory usage statistics"""

@@ -679,11 +679,13 @@ Factors affecting score:
                         )}
                         details={
                             systemStatus?.performance?.searchMetrics ?
-                                `Avg: ${formatResponseTime(systemStatus.performance.searchMetrics.avg)}\n` +
-                                `Min: ${formatResponseTime(systemStatus.performance.searchMetrics.min)}\n` +
-                                `Max: ${formatResponseTime(systemStatus.performance.searchMetrics.max)}\n` +
-                                `Last hour: ${systemStatus.performance.searchMetrics.count} searches` :
-                                'No search metrics available'
+                                `Last ${systemStatus.performance.searchMetrics.count} searches:\n` +
+                                `Avg Time: ${formatResponseTime(systemStatus.performance.searchMetrics.avgQueryTime)}\n` +
+                                `P95: ${formatResponseTime(systemStatus.performance.searchMetrics.p95QueryTime)}\n` +
+                                `Avg Results: ${systemStatus.performance.searchMetrics.avgResultsCount}` :
+                                systemStatus?.performance?.routeResponseTimes?.search ?
+                                    `Average response time for search operations` :
+                                    'No search metrics available'
                         }
                     />
 
@@ -701,12 +703,15 @@ Factors affecting score:
                             'generation'
                         )}
                         details={
-                            systemStatus?.performance?.asyncMetrics ?
-                                `Based on ${systemStatus.performance.asyncMetrics.completedGenerations} generations\n` +
-                                `Active: ${systemStatus.performance.asyncMetrics.activeGenerations}\n` +
-                                `Queue Size: ${systemStatus.performance.asyncMetrics.queueSize}\n` +
-                                `Failed: ${systemStatus.performance.asyncMetrics.failedGenerations}` :
-                                'No generation metrics available'
+                            systemStatus?.performance?.taskMetrics ?
+                                `Queue Status:\n` +
+                                `Active: ${systemStatus.performance.taskMetrics.activeTasks}\n` +
+                                `Queued: ${systemStatus.performance.taskMetrics.queuedTasks}\n` +
+                                `Success Rate: ${systemStatus.performance.taskMetrics.successRate}%\n` +
+                                `Completed: ${systemStatus.performance.taskMetrics.completedTasks}` :
+                                systemStatus?.performance?.routeResponseTimes?.generation ?
+                                    `Average response time for report generation` :
+                                    'No generation metrics available'
                         }
                     />
 
@@ -721,11 +726,10 @@ Factors affecting score:
                                     systemStatus.performance.errorRate < 5 ? 'warning' : 'error'
                         }
                         details={
-                            systemStatus?.performance?.errorMetrics ?
+                            systemStatus?.performance ? 
                                 `Last Hour:\n` +
-                                `API Errors: ${systemStatus.performance.errorMetrics.apiErrors}\n` +
-                                `Auth Failures: ${systemStatus.performance.errorMetrics.authFailures}\n` +
-                                `Validation Errors: ${systemStatus.performance.errorMetrics.validationErrors}` :
+                                `Total Requests: ${systemStatus.performance.totalRequests}\n` +
+                                `Recent Errors: ${systemStatus.performance.recentErrors}` :
                                 'Error rate in last hour'
                         }
                     />
