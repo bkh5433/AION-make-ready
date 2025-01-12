@@ -131,6 +131,8 @@ WorkOrderMetrics AS (
 SELECT
     wm.PropertyKey,
     wm.PropertyName,
+    dp.PropertyStateProvinceCode,
+    dp.PropertyCity,
     fo.TotalUnitCount,
 
     wm.OpenWorkOrder_Current,
@@ -163,6 +165,9 @@ SELECT
 
 FROM WorkOrderMetrics wm
 LEFT JOIN dbo.FactOperationalKPI fo ON wm.PropertyKey = fo.PropertyKey
+LEFT JOIN dbo.DimProperty dp ON wm.PropertyKey = dp.PropertyKey 
+    AND dp.RowIsCurrent = 'Y' 
+    AND dp.IsDeleted = 'N'
 ORDER BY wm.PropertyName;
 
 """

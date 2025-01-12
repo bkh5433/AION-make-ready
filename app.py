@@ -203,10 +203,21 @@ def search_properties():
         # Get data with confidence score
         data, is_stale, confidence = run_async(cache.get_data())
 
+        logger.info(
+            f"Cache data retrieved - is_stale: {is_stale}, confidence: {confidence}, data_length: {len(data) if data else 0}")
+
         if not data:
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
             data, is_stale, confidence = run_async(cache.get_data())
+
+            if not data:
+                logger.error("Failed to populate cache data after refresh attempt")
+                return jsonify({
+                    "error": "Failed to retrieve property data",
+                    "status": "error"
+                }), 500
+                
         elif is_stale and not cache._import_window_detected:
             logger.info("Data is stale (>12 hours old) and not in import window, triggering background refresh")
             thread = threading.Thread(
@@ -217,7 +228,7 @@ def search_properties():
             thread.start()
 
         # Initialize searcher
-        logger.info("Initializing PropertySearch")
+        logger.info(f"Initializing PropertySearch with {len(data)} records")
         searcher = PropertySearch(data)
 
         # Get search results
@@ -289,17 +300,7 @@ def search_properties():
 def generate_report():
     """Generate Excel report for selected properties in a single workbook."""
     try:
-        # Generate new session ID
-        session_id = generate_session_id()
-        setup_session_directory(session_id)
-
-        # Get user's output directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = get_session_path(session_id) / timestamp
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        logger.info(f"Generated directory for session {session_id}: {output_dir}")
-
+        logger.info("POST /api/reports/generate endpoint accessed.")
         # Validate request data
         request_data = request.get_json()
         if not request_data:
@@ -393,7 +394,18 @@ def generate_report():
                 task_manager.fail_task(task_id, str(e))
                 raise
 
+        # Generate new session ID
+        session_id = generate_session_id()
+        setup_session_directory(session_id)
+
+        # Get user's output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = get_session_path(session_id) / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Generated directory for session {session_id}: {output_dir}")
         # Start the background task in a new thread
+
         thread = threading.Thread(target=generate_report_background)
         thread.daemon = True
 

@@ -133,6 +133,15 @@ const getTooltipContent = (property) => {
     };
 };
 
+const searchExamples = [
+    "Search properties",
+    "Main Street Apartments",
+    "New Jersey",
+    "MD",
+    "Philadelphia",
+    "Gotham City"
+];
+
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -194,6 +203,39 @@ const PropertyReportGenerator = () => {
             });
         };
     }, [pollingIntervals]);
+
+    const [currentPlaceholder, setCurrentPlaceholder] = useState(searchExamples[0]);
+    const [isSearchFocused, setIsSearchFocused] = useState(false);
+    const [isTransitioning, setIsTransitioning] = useState(false);
+    const [nextPlaceholder, setNextPlaceholder] = useState('');
+
+    // Enhanced animation effect
+    useEffect(() => {
+        if (isSearchFocused || searchTerm) return;
+
+        let currentIndex = 0;
+        const cycleInterval = setInterval(() => {
+            currentIndex = (currentIndex + 1) % searchExamples.length;
+
+            // First, clear the current placeholder and start fade out
+            setCurrentPlaceholder('');
+
+            // Wait for fade out to complete before showing next placeholder
+            setTimeout(() => {
+                setIsTransitioning(true);
+                setNextPlaceholder(searchExamples[currentIndex]);
+
+                // After overlay animation completes, update the placeholder
+                setTimeout(() => {
+                    setCurrentPlaceholder(searchExamples[currentIndex]);
+                    setIsTransitioning(false);
+                }, 300);
+            }, 300);
+
+        }, 5000);
+
+        return () => clearInterval(cycleInterval);
+    }, [isSearchFocused, searchTerm]);
 
     const checkDataAge = (data) => {
         if (data.length > 0) {
@@ -326,7 +368,7 @@ const PropertyReportGenerator = () => {
                 setIsLoading(false);
                 addNotification('error', 'Connection failed. Please refresh the page and try again.');
             }
-        }, 600),
+        }, 750),
         []
     );
 
@@ -492,7 +534,7 @@ const PropertyReportGenerator = () => {
 
                 // Update notification to show processing status
                 setNotifications([]);
-                addNotification('info', 'Processing report generation...', 0);
+                addNotification('info', 'Processing report...', 0);
 
                 // Handle any warnings or data issues
                 if (result.warnings?.length) {
@@ -832,32 +874,67 @@ const PropertyReportGenerator = () => {
                     <div className="px-8 pb-8">
                         <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
                             <div className="relative flex-grow animate-slide-up">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    {isLoading ? (
-                                        <div
-                                            className="animate-spin h-5 w-5 border-2 border-gray-500 border-t-transparent rounded-full"/>
-                                    ) : (
-                                        <Search className="h-5 w-5 text-gray-400"/>
+                                <div className={`relative transition-all duration-300
+                                    ${isSearchFocused ? 'ring-1 ring-blue-500/10 shadow-md' : 'shadow-sm hover:shadow-sm'}
+                                    rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm`}>
+                                    <div
+                                        className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        {isLoading ? (
+                                            <div
+                                                className="animate-spin h-5 w-5 border-2 border-gray-500 border-t-transparent rounded-full"/>
+                                        ) : (
+                                            <Search className={`h-5 w-5 transition-colors duration-300
+                                                ${isSearchFocused ? 'text-blue-500' : 'text-gray-400'}`}/>
+                                        )}
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            ref={searchInputRef}
+                                            type="text"
+                                            className={`pl-10 pr-10 py-3 w-full rounded-lg
+                                                bg-transparent
+                                                border border-gray-200/50 dark:border-gray-700/50
+                                                text-gray-900 dark:text-gray-100 
+                                                placeholder-gray-500 dark:placeholder-gray-400
+                                                focus:border-blue-500/10 focus:ring-0
+                                                transition-all duration-300
+                                                hover:border-gray-300/50 dark:hover:border-gray-600/50`}
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            onFocus={() => setIsSearchFocused(true)}
+                                            onBlur={() => setIsSearchFocused(false)}
+                                            placeholder={currentPlaceholder}
+                                            aria-label="Search properties by name or location"
+                                        />
+                                        {/* Overlay for transition effect - only show when searchTerm is empty */}
+                                        {isTransitioning && !isSearchFocused && !searchTerm && (
+                                            <div
+                                                className={`absolute inset-0 pointer-events-none
+                                                    flex items-center pl-10 pr-10 text-gray-500 dark:text-gray-400
+                                                    transition-opacity duration-300 ease-in-out
+                                                    animate-placeholder-show`}
+                                                aria-hidden="true"
+                                            >
+                                                {nextPlaceholder}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {searchTerm && (
+                                        <button
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 
+                                                hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-300"
+                                        >
+                                            <X className="h-5 w-5"/>
+                                        </button>
                                     )}
                                 </div>
-                                <input
-                                    ref={searchInputRef}
-                                    type="text"
-                                    placeholder="Search properties..."
-                                    className="pl-10 pr-10 py-3 w-full rounded-lg bg-gray-50 dark:bg-[#2d3748] border-gray-200 dark:border-gray-700 
-                                    text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 
-                                    focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200
-                                    hover:border-gray-300 dark:hover:border-gray-600"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
-                                {searchTerm && (
-                                    <button
-                                        onClick={() => setSearchTerm('')}
-                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                                    >
-                                        <X className="h-5 w-5"/>
-                                    </button>
+                                {/* Search Results Count */}
+                                {searchTerm && !isLoading && (
+                                    <div className="absolute -bottom-6 left-0 text-xs text-gray-400 dark:text-gray-500">
+                                        Found {properties.length} {properties.length === 1 ? 'match ' : 'matches '}
+                                        for "{searchTerm}"
+                                    </div>
                                 )}
                             </div>
                             <button

@@ -198,4 +198,4 @@ class TaskManager:
 
 
 # Create a global task manager instance with max 2 concurrent tasks
-task_manager = TaskManager(max_concurrent=2)
+task_manager = TaskManager(max_concurrent=3)

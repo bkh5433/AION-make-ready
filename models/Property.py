@@ -10,6 +10,7 @@ class Property(BaseModel):
     """Model for property data"""
     property_key: int = Field(gt=0)
     property_name: str
+    property_state_province_code: Optional[str] = None
     total_unit_count: int = Field(gt=0)
     latest_post_date: Optional[datetime] = None
     status: PropertyStatus = PropertyStatus.ACTIVE
@@ -70,6 +71,7 @@ class Property(BaseModel):
         summary = {
             'property_key': self.property_key,
             'property_name': self.property_name,
+            'property_state_province_code': self.property_state_province_code,
             'total_units': self.total_unit_count,
             'status': self.status,
             'last_updated': self.latest_post_date
