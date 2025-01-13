@@ -4,7 +4,7 @@ from typing import Optional, Dict
 from typing import Union
 from models.PropertyStatus import PropertyStatus
 from models.WorkOrderMetrics import WorkOrderMetrics
-
+from models.WorkOrderAnalytics import WorkOrderAnalytics
 
 class Property(BaseModel):
     """Model for property data"""
@@ -15,6 +15,7 @@ class Property(BaseModel):
     latest_post_date: Optional[datetime] = None
     status: PropertyStatus = PropertyStatus.ACTIVE
     metrics: Optional[WorkOrderMetrics] = None
+    analytics: Optional[WorkOrderAnalytics] = None
     period_start_date: Optional[datetime] = None
     period_end_date: Optional[datetime] = None
 

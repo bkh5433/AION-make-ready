@@ -9,8 +9,11 @@ import {
     Plus,
     AlertTriangle,
     Moon,
-    Sun
+    Sun,
+    Info,
+    AlertCircle
 } from 'lucide-react';
+import {motion, AnimatePresence} from 'framer-motion';
 import {useTheme} from "../lib/theme.jsx";
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
@@ -23,6 +26,33 @@ import {useAuth} from '../lib/auth';
 import DataFreshnessIndicator from './DataFreshnessIndicator';
 import {debounce} from '../lib/utils';
 import {searchCache} from '../lib/cache';
+
+// Add StatusBanner component
+const StatusBanner = ({status, message, icon: Icon}) => (
+    <motion.div
+        key={status}
+        initial={{opacity: 0, y: -20}}
+        animate={{opacity: 1, y: 0}}
+        exit={{opacity: 0, y: -20}}
+        transition={{duration: 0.2}}
+        className={`w-full py-2 px-4 text-sm text-center font-medium
+            ${status === 'critical'
+            ? 'bg-red-500/10 text-red-600 dark:text-red-500'
+            : status === 'extended'
+                ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-500'
+                : 'bg-blue-500/10 text-blue-600 dark:text-blue-500'}`}
+    >
+        <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            transition={{duration: 0.2, delay: 0.1}}
+            className="flex items-center justify-center gap-2 max-w-2xl mx-auto"
+        >
+            <Icon className="h-4 w-4"/>
+            <span>{message}</span>
+        </motion.div>
+    </motion.div>
+);
 
 const parseAPIDate = (dateStr) => {
     if (!dateStr) return null;
@@ -155,6 +185,33 @@ const PropertyReportGenerator = () => {
     const [isDataUpToDate, setIsDataUpToDate] = useState(null); // null, true, or false
     const {sessionId, updateSessionId} = useSessionManager();
     const {isDarkMode} = useTheme();
+
+    // Add state for remote info message
+    const [remoteInfo, setRemoteInfo] = useState(null);
+
+    // Add effect to fetch remote info
+    useEffect(() => {
+        const fetchRemoteInfo = async () => {
+            try {
+                const response = await api.getRemoteInfo();
+                if (response.success && response.info) {
+                    setRemoteInfo({
+                        message: response.info.message,
+                        status: response.info.status || 'info',
+                        icon: response.info.status === 'critical' ? AlertTriangle :
+                            response.info.status === 'extended' ? AlertTriangle : Info
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching remote info:', error);
+            }
+        };
+
+        fetchRemoteInfo();
+        // Fetch every 5 minutes
+        const interval = setInterval(fetchRemoteInfo, 5 * 60 * 1000);
+        return () => clearInterval(interval);
+    }, []);
 
     const [downloadManagerState, setDownloadManagerState] = useState({
         isVisible: false,
@@ -847,6 +904,17 @@ const PropertyReportGenerator = () => {
                 ))}
             </div>
 
+            {/* Remote Info Banner */}
+            <AnimatePresence mode="wait">
+                {remoteInfo && (
+                    <StatusBanner
+                        status={remoteInfo.status}
+                        message={remoteInfo.message}
+                        icon={remoteInfo.icon}
+                    />
+                )}
+            </AnimatePresence>
+
             <Card
                 className="bg-white dark:bg-[#1f2937] shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-200 overflow-hidden">
                 <CardContent className="space-y-10 p-0">
@@ -938,8 +1006,8 @@ const PropertyReportGenerator = () => {
                                 )}
                             </div>
                             <button
-                                className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white 
-                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
+                                className={`flex flex-col items-center justify-center gap-1 px-6 py-3 rounded-lg text-white 
+                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] min-w-[200px]
                                 ${isGenerating ? 'animate-pulse-shadow' : ''} ${
                                     isGenerating || selectedProperties.length === 0
                                         ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-75'
@@ -954,18 +1022,18 @@ const PropertyReportGenerator = () => {
                                             <div
                                                 className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
                                             <span>Generating Reports</span>
-                                            <span className="text-xs opacity-75">
-                                                {currentTask ? (
-                                                    taskStartedAt ? '(Processing...)' : '(Requested...)'
-                                                ) : '(Starting...)'}
-                                            </span>
                                         </div>
+                                        <span className="text-xs opacity-75 font-normal">
+                                            {currentTask ? (
+                                                taskStartedAt ? 'Processing...' : 'Requested...'
+                                            ) : 'Starting...'}
+                                        </span>
                                     </>
                                 ) : (
-                                    <>
+                                    <div className="flex items-center gap-2">
                                         <Download className="h-5 w-5"/>
                                         <span>Generate Reports {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
-                                    </>
+                                    </div>
                                 )}
                             </button>
                         </div>

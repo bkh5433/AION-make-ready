@@ -6,6 +6,7 @@ from models.Property import Property, PropertyStatus
 from models.WorkOrderMetrics import WorkOrderMetrics
 from models.WorkOrderAnalytics import WorkOrderAnalytics
 from models.PropertySearchResult import PropertySearchResult
+from monitoring import SystemMonitor
 import time
 from difflib import get_close_matches
 
@@ -13,6 +14,9 @@ from difflib import get_close_matches
 # Setup logging
 log_config = LogConfig()
 logger = log_config.get_logger('property_search')
+
+# Initialize system monitor
+system_monitor = SystemMonitor()
 
 # State name to code mapping
 STATE_MAPPING = {
@@ -136,7 +140,7 @@ class PropertySearch:
 
             end_time = time.perf_counter()
             logger.info(
-                f"PropertySearch initialized with {len(cache_data)} properties in {(end_time - start_time):.3f}s")
+                f"PropertySearch initialized with {len(cache_data)} properties in {(end_time - start_time) * 1000:.3f}ms")
         except (TypeError, KeyError) as e:
             logger.error(f"Error initializing PropertySearch: {str(e)}")
             logger.error(f"Cache data type: {type(cache_data)}")
@@ -270,6 +274,7 @@ class PropertySearch:
                           include_analytics: bool = False) -> List[Property]:
         """Search properties by name, property keys, state/province code, or city with optional analytics"""
         start_time = time.perf_counter()
+        request_start = system_monitor.record_request_start()  # Record request start for route timing
 
         matching_keys = []
 
@@ -364,13 +369,30 @@ class PropertySearch:
 
         end_time = time.perf_counter()
 
+        # Calculate search metrics
+        search_time = end_time - start_time
+        results_count = len(results)
+
+        # Update monitoring metrics (convert search_time to milliseconds)
+        system_monitor.record_search_metrics(
+            results_count=results_count,
+            query_time=search_time * 1000  # Convert seconds to milliseconds
+        )
+
+        # Record route timing
+        system_monitor.record_request_end(
+            start_time=request_start,
+            error=False,
+            path='/api/properties/search'
+        )
+
         # Log final performance metrics
         conversion_time = end_time - conversion_start
         total_time = end_time - start_time
         success_rate = (len(results) / len(matching_keys)) * 100 if matching_keys else 0
 
         logger.info(
-            f"Search completed in {total_time:.3f}s (conversion: {conversion_time:.3f}s) - "
+            f"Search completed in {total_time * 1000:.2f}ms (conversion: {conversion_time * 1000:.3f}ms) - "
             f"Converted: {len(results)}/{len(matching_keys)} ({success_rate:.1f}%) - "
             f"Errors: {conversion_errors}"
         )

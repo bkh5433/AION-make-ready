@@ -109,6 +109,9 @@ const SystemStatus = () => {
     const [isTogglingSSO, setIsTogglingSSO] = useState({dev: false, prod: false});
     const [showSSOWarning, setShowSSOWarning] = useState(false);
     const [pendingSSOAction, setPendingSSOAction] = useState(null);
+    const [remoteInfo, setRemoteInfo] = useState(null);
+    const [isSettingRemoteInfo, setIsSettingRemoteInfo] = useState(false);
+    const [remoteInfoInput, setRemoteInfoInput] = useState({message: '', status: 'info'});
 
     useEffect(() => {
         fetchStatus();
@@ -125,6 +128,25 @@ const SystemStatus = () => {
         return () => {
             if (interval) clearInterval(interval);
         };
+    }, [autoRefresh, refreshInterval]);
+
+    useEffect(() => {
+        const fetchRemoteInfo = async () => {
+            try {
+                const response = await api.getRemoteInfo();
+                if (response.success) {
+                    setRemoteInfo(response.info);
+                }
+            } catch (error) {
+                console.error('Error fetching remote info:', error);
+            }
+        };
+
+        fetchRemoteInfo();
+        if (autoRefresh) {
+            const interval = setInterval(fetchRemoteInfo, refreshInterval);
+            return () => clearInterval(interval);
+        }
     }, [autoRefresh, refreshInterval]);
 
     const fetchStatus = async () => {
@@ -525,6 +547,38 @@ Factors affecting score:
         </div>
     );
 
+    const handleSetRemoteInfo = async () => {
+        try {
+            setIsSettingRemoteInfo(true);
+            const response = await api.setRemoteInfo(remoteInfoInput.message, remoteInfoInput.status);
+            if (response.success) {
+                const updatedInfo = await api.getRemoteInfo();
+                if (updatedInfo.success) {
+                    setRemoteInfo(updatedInfo.info);
+                }
+                setRemoteInfoInput({message: '', status: 'info'});
+            }
+        } catch (error) {
+            console.error('Error setting remote info:', error);
+        } finally {
+            setIsSettingRemoteInfo(false);
+        }
+    };
+
+    const handleClearRemoteInfo = async () => {
+        try {
+            setIsSettingRemoteInfo(true);
+            const response = await api.clearRemoteInfo();
+            if (response.success) {
+                setRemoteInfo(null);
+            }
+        } catch (error) {
+            console.error('Error clearing remote info:', error);
+        } finally {
+            setIsSettingRemoteInfo(false);
+        }
+    };
+
     return (
         <div className="space-y-8 p-6">
             {/* Controls */}
@@ -735,6 +789,64 @@ Factors affecting score:
                     />
                 </div>
             </div>
+
+            {/* Remote Info Message */}
+            <MetricCard
+                title="Remote Info Message"
+                icon={AlertCircle}
+                status={remoteInfo ? remoteInfo.status : 'info'}
+                value={remoteInfo ? remoteInfo.message : 'No message set'}
+                details={
+                    <div className="space-y-4">
+                        <div className="flex flex-col gap-2">
+                            <input
+                                type="text"
+                                value={remoteInfoInput.message}
+                                onChange={(e) => setRemoteInfoInput(prev => ({...prev, message: e.target.value}))}
+                                placeholder="Enter message"
+                                className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <select
+                                value={remoteInfoInput.status}
+                                onChange={(e) => setRemoteInfoInput(prev => ({...prev, status: e.target.value}))}
+                                className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="info">Info</option>
+                                <option value="extended">Warning</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleSetRemoteInfo}
+                                disabled={isSettingRemoteInfo || !remoteInfoInput.message}
+                                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                                    ${isSettingRemoteInfo || !remoteInfoInput.message
+                                    ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                            >
+                                {isSettingRemoteInfo ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin"/>
+                                ) : (
+                                    'Set Message'
+                                )}
+                            </button>
+                            {remoteInfo && (
+                                <button
+                                    onClick={handleClearRemoteInfo}
+                                    disabled={isSettingRemoteInfo}
+                                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors
+                                        ${isSettingRemoteInfo
+                                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                        : 'bg-red-600/20 text-red-400 hover:bg-red-600/30'}`}
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                }
+            />
 
             {importWindowCard}
             {ssoWarningDialog}

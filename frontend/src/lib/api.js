@@ -521,5 +521,56 @@ export const api = {
             }
         );
         return response.json();
+    },
+
+    // Get remote info
+    async getRemoteInfo() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/remote-info`, {
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                }
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching remote info:', error);
+            return {success: false, error: error.message};
+        }
+    },
+
+    // Set remote info (admin only)
+    async setRemoteInfo(message, status = 'info') {
+        try {
+            const response = await fetch(`${API_BASE_URL}/remote-info`, {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({message, status})
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('Error setting remote info:', error);
+            return {success: false, error: error.message};
+        }
+    },
+
+    // Clear remote info (admin only)
+    async clearRemoteInfo() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/remote-info`, {
+                method: 'DELETE',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                }
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('Error clearing remote info:', error);
+            return {success: false, error: error.message};
+        }
     }
 };

@@ -5,28 +5,26 @@ import threading
 import asyncio
 from flask_cors import CORS
 from models.ReportGenerationRequest import ReportGenerationRequest
-from models.ReportGenerationResponse import ReportGenerationResponse
-from models.ReportOutput import ReportOutput
 from datetime import datetime, timedelta, timezone
-from typing import List
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
-from session import get_session_path, cleanup_session, run_session_cleanup, generate_session_id, \
+from session import get_session_path, cleanup_session, generate_session_id, \
     setup_session_directory
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
-from auth_middleware import AuthMiddleware, require_auth, require_role, db
+from auth_middleware import (
+    AuthMiddleware, require_auth, require_role,
+    get_remote_info_sync, set_remote_info_sync, clear_remote_info_sync,
+    db
+)
 from config import Config
-from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
 from task_manager import task_manager
-import psutil
 from ms_auth import MicrosoftAuth
 import os
-import secrets
-from asgiref.wsgi import WsgiToAsgi
+from asgiref.sync import async_to_sync
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -46,6 +44,7 @@ CORS(app, resources={
 def before_request():
     """Record the start time of each request"""
     request.start_time = system_monitor.record_request_start()
+
 
 @app.after_request
 def after_request(response):
@@ -71,6 +70,7 @@ def after_request(response):
 
     return response
 
+
 # Setup logging
 log_config = LogConfig()
 logger = log_config.get_logger('api')
@@ -84,6 +84,7 @@ auth = AuthMiddleware()
 
 # Initialize SystemMonitor with other initializations
 system_monitor = SystemMonitor()
+
 
 def fetch_make_ready_data_sync():
     """Synchronous function to fetch data from SQL"""
@@ -99,10 +100,12 @@ def fetch_make_ready_data_sync():
         logger.error(f"Error fetching make ready data: {str(e)}")
         raise
 
+
 async def fetch_make_ready_data():
     """Async wrapper for the synchronous fetch function"""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, fetch_make_ready_data_sync)
+
 
 def run_async(coro):
     """Run an async function in the current event loop or create a new one if needed"""
@@ -124,8 +127,10 @@ def run_async(coro):
         if should_close_loop:
             loop.close()
 
+
 @app.route('/api/data', methods=['GET'])
 @require_auth
+@require_role('admin')
 @catch_exceptions
 @log_exceptions(logger)
 def get_make_ready_data():
@@ -184,6 +189,7 @@ def health_check():
         'version': '1.0.0'
     }), 200
 
+
 @app.route('/api/properties/search', methods=['GET'])
 @require_auth
 @catch_exceptions
@@ -217,7 +223,7 @@ def search_properties():
                     "error": "Failed to retrieve property data",
                     "status": "error"
                 }), 500
-                
+
         elif is_stale and not cache._import_window_detected:
             logger.info("Data is stale (>12 hours old) and not in import window, triggering background refresh")
             thread = threading.Thread(
@@ -292,6 +298,7 @@ def search_properties():
             'error': str(e),
             'status': 'error'
         }), 500
+
 
 @app.route('/api/reports/generate', methods=['POST'])
 @require_auth
@@ -520,6 +527,7 @@ def check_report_status(task_id):
             "status": "error"
         }), 500
 
+
 @app.route('/api/refresh', methods=['POST'])
 @require_auth
 @require_role('admin')
@@ -640,6 +648,7 @@ def download_report():
             "message": "Error processing download request"
         }), 500
 
+
 @app.route('/api/session/end', methods=['POST'])
 @catch_exceptions
 @log_exceptions(logger)
@@ -662,6 +671,7 @@ def end_session():
             "success": False,
             "message": "Error ending session"
         }), 500
+
 
 @app.route('/api/cache/status', methods=['GET'])
 @require_auth
@@ -801,7 +811,7 @@ def login():
                 'message': 'Username and password required'
             }), 400
 
-        result = auth.authenticate(username, password)
+        result = auth.authenticate_sync(username, password)
         if result:
             logger.info(f"Successful login for user: {username}")  # Add success logging
             return jsonify({
@@ -822,6 +832,7 @@ def login():
             'success': False,
             'message': 'An error occurred during login'
         }), 500
+
 
 @app.route('/api/auth/register', methods=['POST'])
 @require_auth
@@ -854,7 +865,7 @@ def register():
                 'message': 'Invalid role'
             }), 400
 
-        user_data = auth.create_user(username, password, name, role)
+        user_data = auth.create_user_sync(username, password, name, role)
 
         return jsonify({
             'success': True,
@@ -874,13 +885,20 @@ def register():
             'message': 'An error occurred during registration'
         }), 500
 
+
 @app.route('/api/auth/me', methods=['GET'])
 @require_auth
 def get_current_user():
     """Get current user information"""
-    return jsonify({
-        'user': request.user
-    })
+
+    @async_to_sync
+    async def async_get_user():
+        return jsonify({
+            'user': request.user
+        })
+
+    return async_get_user()
+
 
 @app.route('/api/users', methods=['GET'])
 @require_auth
@@ -905,6 +923,7 @@ def list_users():
             'message': f'Error fetching users: {str(e)}'
         }), 500
 
+
 @app.route('/api/users/<email>/role', methods=['PUT'])
 @require_auth
 @require_role('admin')
@@ -923,7 +942,7 @@ def update_user_role(email):
             'message': 'Invalid role'
         }), 400
 
-    success = auth.update_user_role(email, new_role)
+    success = auth.update_user_role_sync(email, new_role)
     if success:
         return jsonify({
             'message': f'Role updated for {email}'
@@ -932,6 +951,7 @@ def update_user_role(email):
     return jsonify({
         'message': 'User not found'
     }), 404
+
 
 @app.route('/api/admin/users', methods=['GET'])
 @require_auth
@@ -1021,6 +1041,7 @@ def manage_user(user_id):
             'success': False,
             'message': f'Error managing user: {str(e)}'
         }), 500
+
 
 @app.route('/api/admin/logs', methods=['GET'])
 @require_auth
@@ -1154,11 +1175,16 @@ def change_password():
         # Update password
         new_hash, new_salt = auth._hash_password(new_password)
         user_ref = auth.users_ref.document(user['user_id'])
-        user_ref.update({
-            'password_hash': new_hash,
-            'salt': new_salt,
-            'requirePasswordChange': False
-        })
+        # Use run_async for the Firestore update
+        run_async(asyncio.get_event_loop().run_in_executor(
+            None,
+            user_ref.update,
+            {
+                'password_hash': new_hash,
+                'salt': new_salt,
+                'requirePasswordChange': False
+            }
+        ))
 
         return jsonify({
             'success': True,
@@ -1397,6 +1423,7 @@ def toggle_microsoft_sso():
             'error': str(e)
         }), 500
 
+
 @app.route('/api/auth/microsoft/login', methods=['GET'])
 @catch_exceptions
 def microsoft_login():
@@ -1604,6 +1631,45 @@ def create_asgi_app():
     return asgi_wrapper
 
 
+# Add remote info endpoints
+@app.route('/api/remote-info', methods=['GET'])
+@require_auth
+def get_remote_info_endpoint():
+    info = get_remote_info_sync()
+    return jsonify({
+        'success': True,
+        'info': info
+    })
+
+
+@app.route('/api/remote-info', methods=['POST'])
+@require_auth
+@require_role('admin')
+def set_remote_info_endpoint():
+    data = request.get_json()
+    message = data.get('message')
+    status = data.get('status', 'info')
+
+    if not message:
+        return jsonify({
+            'success': False,
+            'error': 'Message is required'
+        }), 400
+
+    success = set_remote_info_sync(message, status)
+    return jsonify({
+        'success': success
+    })
+
+
+@app.route('/api/remote-info', methods=['DELETE'])
+@require_auth
+@require_role('admin')
+def clear_remote_info_endpoint():
+    success = clear_remote_info_sync()
+    return jsonify({
+        'success': success
+    })
 
 
 if __name__ == '__main__':
@@ -1618,9 +1684,6 @@ if __name__ == '__main__':
             workers=1,  # Keep single worker to avoid scheduler duplication
             factory=True  # Enable factory mode for proper WSGI app handling
         )
-
-
-
 
 # @app.route('/api/some_endpoint', methods=['GET'])
 # @require_auth

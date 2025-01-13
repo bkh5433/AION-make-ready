@@ -8,6 +8,8 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import hashlib
 import secrets
+import asyncio
+from asgiref.sync import async_to_sync
 
 from logger_config import LogConfig
 from utils.path_resolver import PathResolver
@@ -34,6 +36,95 @@ SECRET_KEY = Config.JWT_SECRET_KEY
 logger_config = LogConfig()
 logger = logger_config.get_logger("auth_middleware")
 
+
+def run_async(coro):
+    """Helper function to run async code in sync context"""
+    if not asyncio.iscoroutine(coro):
+        return coro
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        should_close = True
+    else:
+        should_close = False
+
+    try:
+        result = loop.run_until_complete(coro)
+        return result
+    finally:
+        if should_close:
+            loop.close()
+
+
+def wrap_async(f):
+    """Decorator to wrap async functions for sync contexts"""
+
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        return run_async(f(*args, **kwargs))
+
+    return wrapped
+
+
+# Remote Info Management
+@wrap_async
+async def get_remote_info():
+    try:
+        doc_ref = db.collection('system').document('remote_info')
+        doc = await asyncio.get_event_loop().run_in_executor(None, doc_ref.get)
+        if doc.exists:
+            return doc.to_dict()
+        return None
+    except Exception as e:
+        logger.error(f"Error getting remote info: {e}")
+        return None
+
+
+def get_remote_info_sync():
+    """Synchronous wrapper for get_remote_info"""
+    return run_async(get_remote_info())
+
+
+@wrap_async
+async def set_remote_info(message, status='info'):
+    try:
+        doc_ref = db.collection('system').document('remote_info')
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            doc_ref.set,
+            {
+                'message': message,
+                'status': status,
+                'updated_at': firestore.SERVER_TIMESTAMP
+            }
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error setting remote info: {e}")
+        return False
+
+
+def set_remote_info_sync(message, status='info'):
+    """Synchronous wrapper for set_remote_info"""
+    return run_async(set_remote_info(message, status))
+
+
+@wrap_async
+async def clear_remote_info():
+    try:
+        doc_ref = db.collection('system').document('remote_info')
+        await asyncio.get_event_loop().run_in_executor(None, doc_ref.delete)
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing remote info: {e}")
+        return False
+
+
+def clear_remote_info_sync():
+    """Synchronous wrapper for clear_remote_info"""
+    return run_async(clear_remote_info())
 
 class AuthMiddleware:
     def __init__(self):
@@ -66,11 +157,12 @@ class AuthMiddleware:
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
             return None
 
-    def authenticate(self, username: str, password: str) -> Optional[dict]:
+    async def authenticate(self, username: str, password: str) -> Optional[dict]:
         """Authenticate user with username/password"""
         try:
             # Query Firestore for user
-            users = self.users_ref.where('username', '==', username).limit(1).stream()
+            query = self.users_ref.where('username', '==', username).limit(1)
+            users = await asyncio.get_event_loop().run_in_executor(None, query.stream)
             user = next((user.to_dict() for user in users), None)
 
             if not user:
@@ -85,16 +177,18 @@ class AuthMiddleware:
 
             # Update last login with UTC timezone
             user_ref = self.users_ref.document(user.get('user_id', user.get('uid')))
-            user_ref.update({
-                'lastLogin': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            })
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                user_ref.update,
+                {'lastLogin': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')}
+            )
 
             # Calculate token expiration time
             expiration_time = datetime.utcnow() + timedelta(hours=24)
 
-            # Generate token with complete user data, handling both user_id and uid
+            # Generate token with complete user data
             token = self.generate_token({
-                'user_id': user.get('user_id', user.get('uid')),  # Try user_id first, fall back to uid
+                'user_id': user.get('user_id', user.get('uid')),
                 'username': user['username'],
                 'email': user['email'],
                 'name': user['name'],
@@ -117,11 +211,16 @@ class AuthMiddleware:
             logger.warning(f"Authentication error: {e}, username: {username}")
             return None
 
-    def create_user(self, username: str, password: str, name: str, role: str = 'user') -> dict:
+    def authenticate_sync(self, username: str, password: str) -> Optional[dict]:
+        """Synchronous wrapper for authenticate"""
+        return run_async(self.authenticate(username, password))
+
+    async def create_user(self, username: str, password: str, name: str, role: str = 'user') -> dict:
         """Create a new user with role"""
         try:
             # Check if user already exists
-            existing_users = self.users_ref.where('username', '==', username).limit(1).stream()
+            query = self.users_ref.where('username', '==', username).limit(1)
+            existing_users = await asyncio.get_event_loop().run_in_executor(None, query.stream)
             if next((user for user in existing_users), None):
                 raise ValueError("User with this username already exists")
 
@@ -135,17 +234,21 @@ class AuthMiddleware:
             user_data = {
                 'user_id': self.users_ref.document().id,
                 'username': username,
-                'email': username,  # Using username as email for now
+                'email': username,
                 'password_hash': password_hash,
                 'salt': salt,
                 'name': name,
                 'isActive': True,
                 'createdAt': now,
                 'lastLogin': None,
-                'role': role  # Add role to user data
+                'role': role
             }
 
-            self.users_ref.document(user_data['user_id']).set(user_data)
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                self.users_ref.document(user_data['user_id']).set,
+                user_data
+            )
 
             # Return a sanitized version without sensitive data
             return {
@@ -158,34 +261,50 @@ class AuthMiddleware:
             logger.warning(f"Error creating user: {e}")
             raise
 
-    def get_user_role(self, email: str) -> Optional[str]:
+    def create_user_sync(self, username: str, password: str, name: str, role: str = 'user') -> dict:
+        """Synchronous wrapper for create_user"""
+        return run_async(self.create_user(username, password, name, role))
+
+    async def get_user_role(self, email: str) -> Optional[str]:
         """Get user's role"""
         try:
-            users = self.users_ref.where('email', '==', email).limit(1).stream()
+            query = self.users_ref.where('email', '==', email).limit(1)
+            users = await asyncio.get_event_loop().run_in_executor(None, query.stream)
             user = next((user.to_dict() for user in users), None)
             return user.get('role') if user else None
         except Exception as e:
-            print(f"Error getting user role: {e}")
+            logger.error(f"Error getting user role: {e}")
             return None
 
-    def update_user_role(self, email: str, new_role: str) -> bool:
+    def get_user_role_sync(self, email: str) -> Optional[str]:
+        """Synchronous wrapper for get_user_role"""
+        return run_async(self.get_user_role(email))
+
+    async def update_user_role(self, email: str, new_role: str) -> bool:
         """Update user's role (admin only)"""
         try:
-            users = self.users_ref.where('email', '==', email).limit(1).stream()
+            query = self.users_ref.where('email', '==', email).limit(1)
+            users = await asyncio.get_event_loop().run_in_executor(None, query.stream)
             user_doc = next((doc for doc in users), None)
 
             if user_doc:
-                user_doc.reference.update({'role': new_role})
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    user_doc.reference.update,
+                    {'role': new_role}
+                )
                 return True
             return False
         except Exception as e:
-            print(f"Error updating user role: {e}")
+            logger.error(f"Error updating user role: {e}")
             return False
 
+    def update_user_role_sync(self, email: str, new_role: str) -> bool:
+        """Synchronous wrapper for update_user_role"""
+        return run_async(self.update_user_role(email, new_role))
 
 def require_auth(f):
     """Decorator to require authentication for routes"""
-
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
@@ -202,42 +321,48 @@ def require_auth(f):
                 return jsonify({'message': 'Invalid or expired token'}), 401
 
             request.user = payload
+
+            if asyncio.iscoroutinefunction(f):
+                return wrap_async(f)(*args, **kwargs)
             return f(*args, **kwargs)
         except Exception as e:
+            logger.error(f"Auth error: {str(e)}")
             return jsonify({'message': 'Invalid token format'}), 401
 
     return decorated
 
-
 def require_role(required_role):
     """Decorator to require specific role for routes"""
-
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
-            # Get user from the @require_auth decorator
             user = request.user
 
-            # Query Firestore for user's role
             try:
                 auth = AuthMiddleware()
-                user_doc = auth.users_ref.where('email', '==', user['email']).limit(1).stream()
-                user_data = next((doc.to_dict() for doc in user_doc), None)
+                user_role = auth.get_user_role_sync(user['email'])
 
-                if not user_data:
+                if not user_role:
                     return jsonify({'message': 'User not found'}), 404
 
-                user_role = user_data.get('role', 'user')
-
-                # Check if user has required role
                 if required_role == 'admin' and user_role != 'admin':
                     return jsonify({'message': 'Admin access required'}), 403
 
+                if asyncio.iscoroutinefunction(f):
+                    return wrap_async(f)(*args, **kwargs)
                 return f(*args, **kwargs)
             except Exception as e:
-                print(f"Role verification error: {e}")
+                logger.error(f"Role verification error: {e}")
                 return jsonify({'message': 'Error verifying user role'}), 500
 
         return decorated
-
     return decorator
+
+
+# Export sync functions
+__all__ = [
+    'get_remote_info', 'get_remote_info_sync',
+    'set_remote_info', 'set_remote_info_sync',
+    'clear_remote_info', 'clear_remote_info_sync',
+    'AuthMiddleware', 'require_auth', 'require_role'
+]
