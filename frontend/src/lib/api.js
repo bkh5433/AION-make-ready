@@ -2,28 +2,13 @@ import {getSessionId, setSessionId, clearSessionId} from './session';
 
 // Ensure the base URL always uses HTTPS and ends with /api
 export const API_BASE_URL = (() => {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL;
-    console.log('API Base URL from env:', baseUrl);
-
-    if (!baseUrl) {
-        console.error('VITE_API_BASE_URL environment variable is not set. Please set EC2_HOST in your Amplify environment variables.');
-        // In production, we want to make it obvious that the environment is not configured correctly
-        if (import.meta.env.PROD) {
-            alert('API URL is not configured. Please contact the administrator.');
-        }
+    // In development, use the Vite proxy configuration
+    if (import.meta.env.DEV) {
+        return '/api';
     }
 
-    // Convert HTTP to HTTPS if needed
-    let finalUrl = baseUrl || 'http://localhost:3000';
-    if (import.meta.env.PROD && finalUrl.startsWith('http://')) {
-        finalUrl = 'https://' + finalUrl.substring(7);
-        console.log('Converted to HTTPS URL:', finalUrl);
-    }
-
-    // Add /api if needed
-    finalUrl = finalUrl.endsWith('/api') ? finalUrl : `${finalUrl}/api`;
-    console.log('Final API URL:', finalUrl);
-    return finalUrl;
+    // In production, API is served from the same domain
+    return '/api';
 })();
 
 // Add this helper function at the top of the file
