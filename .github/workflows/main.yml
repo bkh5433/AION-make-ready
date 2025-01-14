@@ -20,49 +20,124 @@ jobs:
           missing_secrets=()
           
           # Check AWS credentials (required for deployment)
-          for secret in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY EC2_HOST EC2_USERNAME SSH_PRIVATE_KEY; do
-            if [[ -z "${{ secrets[format('{0}', secret)] }}" ]]; then
-              missing_secrets+=("$secret")
-              echo "::warning::Missing required secret: $secret"
-            fi
-          done
+          if [[ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]]; then
+            missing_secrets+=("AWS_ACCESS_KEY_ID")
+          fi
+          if [[ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]]; then
+            missing_secrets+=("AWS_SECRET_ACCESS_KEY")
+          fi
+          if [[ -z "${{ secrets.EC2_HOST }}" ]]; then
+            missing_secrets+=("EC2_HOST")
+          fi
+          if [[ -z "${{ secrets.EC2_USERNAME }}" ]]; then
+            missing_secrets+=("EC2_USERNAME")
+          fi
+          if [[ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]]; then
+            missing_secrets+=("SSH_PRIVATE_KEY")
+          fi
           
           # Check environment-specific secrets based on branch
           if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            for secret in DEV_DB_SERVER DEV_DB_NAME DEV_DB_USER DEV_DB_PASSWORD DEV_CORS_ORIGINS; do
-              if [[ -z "${{ secrets[format('{0}', secret)] }}" ]]; then
-                missing_secrets+=("$secret")
-                echo "::warning::Missing required secret: $secret"
-              fi
-            done
+            # Development environment secrets
+            if [[ -z "${{ secrets.DEV_DB_SERVER }}" ]]; then
+              missing_secrets+=("DEV_DB_SERVER")
+            fi
+            if [[ -z "${{ secrets.DEV_DB_NAME }}" ]]; then
+              missing_secrets+=("DEV_DB_NAME")
+            fi
+            if [[ -z "${{ secrets.DEV_DB_USER }}" ]]; then
+              missing_secrets+=("DEV_DB_USER")
+            fi
+            if [[ -z "${{ secrets.DEV_DB_PASSWORD }}" ]]; then
+              missing_secrets+=("DEV_DB_PASSWORD")
+            fi
+            if [[ -z "${{ secrets.DEV_CORS_ORIGINS }}" ]]; then
+              missing_secrets+=("DEV_CORS_ORIGINS")
+            fi
           else
-            for secret in PROD_DB_SERVER PROD_DB_NAME PROD_DB_USER PROD_DB_PASSWORD PROD_CORS_ORIGINS PROD_FRONTEND_URL; do
-              if [[ -z "${{ secrets[format('{0}', secret)] }}" ]]; then
-                missing_secrets+=("$secret")
-                echo "::warning::Missing required secret: $secret"
-              fi
-            done
+            # Production environment secrets
+            if [[ -z "${{ secrets.PROD_DB_SERVER }}" ]]; then
+              missing_secrets+=("PROD_DB_SERVER")
+            fi
+            if [[ -z "${{ secrets.PROD_DB_NAME }}" ]]; then
+              missing_secrets+=("PROD_DB_NAME")
+            fi
+            if [[ -z "${{ secrets.PROD_DB_USER }}" ]]; then
+              missing_secrets+=("PROD_DB_USER")
+            fi
+            if [[ -z "${{ secrets.PROD_DB_PASSWORD }}" ]]; then
+              missing_secrets+=("PROD_DB_PASSWORD")
+            fi
+            if [[ -z "${{ secrets.PROD_CORS_ORIGINS }}" ]]; then
+              missing_secrets+=("PROD_CORS_ORIGINS")
+            fi
+            if [[ -z "${{ secrets.PROD_FRONTEND_URL }}" ]]; then
+              missing_secrets+=("PROD_FRONTEND_URL")
+            fi
           fi
           
-          # Check optional secrets (warn but don't fail if missing)
-          for secret in FIREBASE_PROJECT_ID FIREBASE_PRIVATE_KEY_ID FIREBASE_PRIVATE_KEY FIREBASE_CLIENT_EMAIL FIREBASE_CLIENT_ID FIREBASE_AUTH_URI FIREBASE_TOKEN_URI; do
-            if [[ -z "${{ secrets[format('{0}', secret)] }}" ]]; then
-              echo "::warning::Missing optional Firebase secret: $secret"
-            fi
-          done
+          # Check optional Firebase secrets
+          if [[ -z "${{ secrets.FIREBASE_PROJECT_ID }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_PROJECT_ID"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_PRIVATE_KEY_ID"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_PRIVATE_KEY }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_PRIVATE_KEY"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_CLIENT_EMAIL }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_CLIENT_EMAIL"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_CLIENT_ID }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_CLIENT_ID"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_AUTH_URI }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_AUTH_URI"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_TOKEN_URI }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_TOKEN_URI"
+          fi
           
+          # Check optional Microsoft SSO secrets
           if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            for secret in DEV_MICROSOFT_SSO_ENABLED DEV_MICROSOFT_CLIENT_ID DEV_MICROSOFT_CLIENT_SECRET DEV_MICROSOFT_TENANT_ID DEV_MICROSOFT_DOMAIN_HINT DEV_MICROSOFT_REDIRECT_URI; do
-              if [[ -z "${{ secrets[format('{0}', secret)] }}" ]]; then
-                echo "::warning::Missing optional Microsoft SSO secret: $secret"
-              fi
-            done
+            if [[ -z "${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_SSO_ENABLED"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_CLIENT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_CLIENT_ID"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_CLIENT_SECRET"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_TENANT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_TENANT_ID"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_DOMAIN_HINT"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_REDIRECT_URI"
+            fi
           else
-            for secret in PROD_MICROSOFT_SSO_ENABLED PROD_MICROSOFT_CLIENT_ID PROD_MICROSOFT_CLIENT_SECRET PROD_MICROSOFT_TENANT_ID PROD_MICROSOFT_DOMAIN_HINT PROD_MICROSOFT_REDIRECT_URI; do
-              if [[ -z "${{ secrets[format('{0}', secret)] }}" ]]; then
-                echo "::warning::Missing optional Microsoft SSO secret: $secret"
-              fi
-            done
+            if [[ -z "${{ secrets.PROD_MICROSOFT_SSO_ENABLED }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_SSO_ENABLED"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_CLIENT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_CLIENT_ID"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_CLIENT_SECRET"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_TENANT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_TENANT_ID"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_DOMAIN_HINT"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_REDIRECT_URI"
+            fi
           fi
           
           if (( ${#missing_secrets[@]} > 0 )); then
