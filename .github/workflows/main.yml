@@ -240,7 +240,7 @@ jobs:
             echo "🏗️ Building and starting services..."
             if [ "\$DEPLOY_BRANCH" = "dev" ]; then
               echo "🔧 Using development environment variables..."
-              docker-compose up -d --build \
+              docker compose up -d --build \
                 -e ENVIRONMENT='development' \
                 -e DB_SERVER='${{ secrets.DEV_DB_SERVER }}' \
                 -e DB_NAME='${{ secrets.DEV_DB_NAME }}' \
@@ -274,7 +274,7 @@ jobs:
                 exit 0
               fi
           
-              docker-compose up -d --build \
+              docker compose up -d --build \
                 -e ENVIRONMENT='production' \
                 -e DB_SERVER='${{ secrets.PROD_DB_SERVER }}' \
                 -e DB_NAME='${{ secrets.PROD_DB_NAME }}' \
@@ -303,13 +303,13 @@ jobs:
             # Check if services are running
             if ! docker ps | grep -q "aion-api"; then
               echo "❌ API service failed to start"
-              docker-compose logs api
+              docker compose logs api
               exit 1
             fi
           
             if ! docker ps | grep -q "aion-frontend"; then
               echo "❌ Frontend service failed to start"
-              docker-compose logs frontend
+              docker compose logs frontend
               exit 1
             fi
           
@@ -328,7 +328,7 @@ jobs:
                 RETRY_COUNT=\$((RETRY_COUNT + 1))
                 if [ \$RETRY_COUNT -eq \$MAX_RETRIES ]; then
                   echo "❌ API failed to become healthy. Showing logs:"
-                  docker-compose logs
+                  docker compose logs
                   exit 1
                 fi
                 sleep \$SLEEP_TIME
