@@ -331,7 +331,6 @@ class ExcelGeneratorService:
 def generate_multi_property_report(
         template_name: str,
         properties: List[Property],
-        api_url: str,
         output_dir: Union[str, Path] = None
 ) -> List[Path]:
     """
@@ -341,7 +340,6 @@ def generate_multi_property_report(
     Args:
         template_name: Name of the template file
         properties: List of Property objects
-        api_url: API URL for data retrieval
         output_dir: Optional output directory path
 
     Returns:

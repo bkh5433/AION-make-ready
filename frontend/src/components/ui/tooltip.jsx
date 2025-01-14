@@ -27,22 +27,22 @@ export const Tooltip = ({content, children, wide = false}) => {
             let top = '100%';
             let left = '50%';
             let transform = 'translateX(-50%)';
-            let arrowClass = '-top-2 left-1/2 -translate-x-1/2 border-b-gray-800/95';
+            let arrowClass = '-top-2 left-1/2 -translate-x-1/2 border-b-gray-900';
 
             if (bottomOverflow) {
                 top = 'auto';
                 transform = 'translateX(-50%) translateY(-100%)';
-                arrowClass = '-bottom-2 left-1/2 -translate-x-1/2 border-t-gray-800/95 !border-b-transparent';
+                arrowClass = '-bottom-2 left-1/2 -translate-x-1/2 border-t-gray-900 !border-b-transparent';
             }
 
             if (rightOverflow) {
                 left = '0';
                 transform = 'translateX(-10%)';
-                arrowClass = `-${bottomOverflow ? 'bottom' : 'top'}-2 left-[10%] -translate-x-1/2 border-${bottomOverflow ? 't' : 'b'}-gray-800/95`;
+                arrowClass = `-${bottomOverflow ? 'bottom' : 'top'}-2 left-[10%] -translate-x-1/2 border-${bottomOverflow ? 't' : 'b'}-gray-900`;
             } else if (leftOverflow) {
                 left = '100%';
                 transform = 'translateX(-90%)';
-                arrowClass = `-${bottomOverflow ? 'bottom' : 'top'}-2 right-[10%] translate-x-1/2 border-${bottomOverflow ? 't' : 'b'}-gray-800/95`;
+                arrowClass = `-${bottomOverflow ? 'bottom' : 'top'}-2 right-[10%] translate-x-1/2 border-${bottomOverflow ? 't' : 'b'}-gray-900`;
             }
 
             setPosition({top, left, transform, arrowClass});
@@ -66,10 +66,10 @@ export const Tooltip = ({content, children, wide = false}) => {
                         left: position.left,
                         transform: position.transform
                     }}
-                    className={`absolute z-50 ${wide ? 'w-64' : 'max-w-xs'} p-2 text-sm 
-                              text-gray-100 bg-gray-800/95 
-                              backdrop-blur-sm rounded-lg shadow-xl 
-                              border border-gray-700/50
+                    className={`absolute z-[100] ${wide ? 'w-64' : 'max-w-xs'} p-2 text-sm 
+                              text-gray-100 bg-gray-900/95 
+                              backdrop-blur-md rounded-lg shadow-xl 
+                              border border-gray-700
                               ${wide ? 'whitespace-pre-line' : 'whitespace-nowrap'}
                               animate-in fade-in duration-200`}
                 >

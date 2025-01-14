@@ -144,7 +144,13 @@ class ConcurrentSQLCache:
 
         self._last_version_check: Optional[datetime] = None
         self._version_check_interval: int = 120  # Minimum seconds between version checks
-        self._version_check_lock = asyncio.Lock()
+        self._version_check_lock = None  # Initialize as None
+
+    async def _get_lock(self):
+        """Get or create the lock in the current event loop"""
+        if self._version_check_lock is None:
+            self._version_check_lock = asyncio.Lock()
+        return self._version_check_lock
 
     def _detect_import_window(self, version_info: Optional[Dict], error: Optional[str] = None) -> bool:
         """
@@ -220,94 +226,220 @@ class ConcurrentSQLCache:
 
         return self._import_window_detected
 
+    @staticmethod
+    def calculate_age_score(age_hours: float, hours_until_update: float) -> float:
+        """
+        Calculate age score with focus on previous day's data being considered current.
+        The database updates daily around 15:00 UTC with previous day's data.
+        More lenient scoring up to 48 hours, then gradual degradation.
+        """
+        if hours_until_update > 0:  # Before update time (before 15:00 UTC)
+            if age_hours <= 48:  # Up to two days old is considered current
+                return 1.0
+            elif age_hours <= 72:  # Three days old starts degradation
+                return 0.8
+            elif age_hours <= 96:  # Four days old
+                return 0.6
+            else:  # More than four days old
+                return max(0.2, 0.6 - ((age_hours - 96) / 24) * 0.1)  # Degrade by 0.1 per day
+        else:  # After update time (after 15:00 UTC)
+            if age_hours <= 4:  # Very fresh update
+                return 1.0
+            elif age_hours <= 48:  # Up to two days old is still good after update
+                return 1.0
+            elif age_hours <= 72:  # Three days old starts degradation
+                return 0.8
+            elif age_hours <= 96:  # Four days old
+                return 0.6
+            else:  # More than four days old
+                return max(0.2, 0.6 - ((age_hours - 96) / 24) * 0.1)  # Degrade by 0.1 per day
+
+    @staticmethod
+    def calculate_import_score(import_window: bool, consecutive_null_count: int,
+                               consecutive_success_count: int) -> float:
+        """Calculate import score with gradual recovery"""
+        if not import_window:
+            return 1.0
+
+        # Gradual degradation based on consecutive nulls
+        if consecutive_null_count > 5:
+            return 0.2
+        elif consecutive_null_count > 3:
+            return 0.3
+
+        # Gradual recovery based on consecutive successes
+        if consecutive_success_count > 0:
+            return min(0.8, 0.4 + (consecutive_success_count * 0.2))
+
+        return 0.4
+
+    @staticmethod
+    def calculate_completeness_score(current_count: int, expected_count: int, historical_max: int) -> float:
+        """Calculate completeness score with historical context"""
+        if expected_count <= 0:
+            return 0.0
+
+        ratio = current_count / expected_count
+        historical_ratio = current_count / historical_max if historical_max > 0 else 0
+
+        # Severe penalty for less than 80% completeness
+        if ratio < 0.8:
+            base_score = ratio * 0.5
+        elif ratio < 0.9:
+            base_score = 0.7
+        elif ratio < 0.95:
+            base_score = 0.85
+        else:
+            base_score = 1.0
+
+        # Factor in historical context
+        historical_factor = min(1.0, historical_ratio + 0.2)
+
+        return base_score * historical_factor
+
+    @staticmethod
+    def calculate_refresh_score(failed_refreshes: int, total_refreshes: int, last_refresh_age: float) -> float:
+        """Calculate refresh score with more context"""
+        if total_refreshes == 0:
+            return 0.5
+
+        # Consider failure rate instead of absolute failures
+        failure_rate = failed_refreshes / total_refreshes
+        base_score = max(0.2, 1.0 - (failure_rate * 1.5))
+
+        # Factor in refresh age
+        if last_refresh_age > 3600:  # More than an hour
+            age_penalty = min(0.3, last_refresh_age / 7200)  # Max 30% penalty
+            base_score *= (1 - age_penalty)
+
+        return base_score
+
     def _calculate_confidence_score(self, cache_data: CacheData) -> float:
         """
-        Calculate confidence score for cached data based on multiple factors:
-        1. Data age and business hours (weighted: 40%)
-        2. Import window status (weighted: 20%)
-        3. Data completeness (weighted: 20%)
-        4. Refresh history (weighted: 20%)
-        
-        Returns a score between 0.0 and 1.0
+        Calculate confidence score for cached data based on multiple factors with improved algorithms
         """
         if not cache_data:
             return 0.0
 
         now = datetime.now(timezone.utc)
 
-        # 1. Data Age Score (40%) - More granular age-based scoring with business hours awareness
+        # Calculate age-related metrics
         age_hours = (now - cache_data.last_modified).total_seconds() / 3600
-
-        # Get the expected update time for reference
         expected_update_time = self.config.get_expected_update_time()
         hours_until_update = (expected_update_time - now).total_seconds() / 3600 if expected_update_time > now else 24
 
-        # If we're before today's update time, data from yesterday is considered fresh
-        if hours_until_update > 0 and age_hours < 24:
-            age_score = 1.0
-        # If we're after today's update time, we expect today's data
-        elif hours_until_update <= 0:
-            if age_hours <= 6:  # Very fresh data (within 6 hours of update)
-                age_score = 1.0
-            elif age_hours <= 12:  # Fresh data (within 12 hours)
-                age_score = 0.9
-            elif age_hours <= 24:  # Today's data
-                age_score = 0.8
-            elif age_hours <= 36:  # Yesterday's data after missing today's update
-                age_score = 0.6
-            elif age_hours <= 48:  # Two days old
-                age_score = 0.4
-            else:  # More than two days old
-                age_score = max(0.0, 1.0 - ((age_hours - 48) / 24) * 0.2)  # Decrease by 0.2 for each additional day
-        else:
-            # We're before update time, grade more leniently
-            if age_hours <= 24:  # Yesterday's data
-                age_score = 1.0
-            elif age_hours <= 48:  # Two days old
-                age_score = 0.7
-            else:  # More than two days old
-                age_score = max(0.0, 0.7 - ((age_hours - 48) / 24) * 0.2)
+        # Calculate individual scores
+        age_score = self.calculate_age_score(age_hours, hours_until_update)
 
-        # 2. Import Window Score (20%)
-        if self._import_window_detected:
-            import_score = 0.3  # Reduced confidence during import
-        else:
-            import_score = 1.0
-
-        # 3. Data Completeness Score (20%)
-        expected_record_count = self._current_version['record_count'] if self._current_version else 0
-        if expected_record_count > 0:
-            completeness_score = min(1.0, cache_data.record_count / expected_record_count)
-            # Severely penalize if we have less than 50% of expected records
-            if completeness_score < 0.5:
-                completeness_score *= 0.5
-        else:
-            completeness_score = 0.0
-
-        # 4. Refresh History Score (20%)
-        if self._failed_refreshes == 0:
-            refresh_score = 1.0
-        else:
-            # More aggressive penalty for failed refreshes
-            refresh_score = max(0.0, 1.0 - (self._failed_refreshes * 0.25))
-
-        # Calculate weighted average
-        final_score = (
-                (age_score * 0.4) +  # Age weight: 40%
-                (import_score * 0.2) +  # Import window weight: 20%
-                (completeness_score * 0.2) +  # Completeness weight: 20%
-                (refresh_score * 0.2)  # Refresh history weight: 20%
+        import_score = self.calculate_import_score(
+            self._import_window_detected,
+            self._consecutive_null_count,
+            self._consecutive_success_count
         )
+
+        # Get historical max record count
+        historical_max = max(
+            self._current_version['record_count'] if self._current_version else 0,
+            cache_data.record_count,
+            getattr(self._fallback_cache, 'record_count', 0) or 0
+        )
+
+        completeness_score = self.calculate_completeness_score(
+            cache_data.record_count,
+            self._current_version['record_count'] if self._current_version else 0,
+            historical_max
+        )
+
+        # Calculate refresh score with more context
+        last_refresh_age = (now - self._last_refresh).total_seconds() if self._last_refresh else float('inf')
+        refresh_score = self.calculate_refresh_score(
+            self._failed_refreshes,
+            self._refresh_count,
+            last_refresh_age
+        )
+
+        # Determine circumstances for dynamic weighting
+        circumstances = {
+            'in_business_hours': 8 <= now.hour <= 17,  # 8 AM to 5 PM UTC
+            'high_traffic_period': 13 <= now.hour <= 16,  # Peak hours
+            'near_update_time': abs(hours_until_update) < 2,  # Within 2 hours of update time
+            'post_update_window': -4 <= hours_until_update <= 0,  # Up to 4 hours after expected update
+            'pre_update_window': 0 < hours_until_update <= 2,  # Up to 2 hours before expected update
+            'data_older_than_48h': age_hours > 48  # Flag for data older than 48 hours
+        }
+
+        # Base weights with higher emphasis on age and completeness
+        weights = {
+            'age': 0.5,  # Maintained high weight for age
+            'import': 0.15,  # Maintained import weight
+            'completeness': 0.25,  # Maintained completeness weight
+            'refresh': 0.1  # Maintained refresh weight
+        }
+
+        # Adjust weights based on circumstances
+        if circumstances['in_business_hours']:
+            if not circumstances['data_older_than_48h']:
+                # Normal business hours with current data
+                weights['age'] = 0.5
+                weights['completeness'] = 0.3
+                weights['import'] = 0.15
+                weights['refresh'] = 0.05
+            else:
+                # Increase age importance if data is old during business hours
+                weights['age'] = 0.6
+                weights['completeness'] = 0.25
+                weights['import'] = 0.1
+                weights['refresh'] = 0.05
+
+        if circumstances['high_traffic_period']:
+            if circumstances['data_older_than_48h']:
+                # If data is old during high traffic, emphasize age more
+                weights['age'] = 0.6
+                weights['completeness'] = 0.25
+                weights['import'] = 0.1
+                weights['refresh'] = 0.05
+
+        if circumstances['pre_update_window']:
+            weights['age'] = 0.55
+            weights['completeness'] = 0.25
+            weights['import'] = 0.15
+            weights['refresh'] = 0.05
+
+        if circumstances['post_update_window']:
+            weights['age'] = 0.45
+            weights['import'] = 0.35
+            weights['completeness'] = 0.15
+            weights['refresh'] = 0.05
+
+        # Calculate final score
+        scores = {
+            'age': age_score,
+            'import': import_score,
+            'completeness': completeness_score,
+            'refresh': refresh_score
+        }
+
+        final_score = sum(scores[key] * weights[key] for key in weights)
+
+        # Apply penalties for old data
+        if circumstances['data_older_than_48h']:
+            if circumstances['in_business_hours'] or circumstances['high_traffic_period']:
+                final_score *= 0.95  # 5% penalty for old data during important periods
+            else:
+                final_score *= 0.98  # 2% penalty for old data during off-hours
 
         # Log detailed scoring components for debugging
         logger.debug(
             f"Confidence Score Components:\n"
-            f"  Age Score (40%): {age_score:.2f} (Data is {age_hours:.1f} hours old, "
-            f"Hours until update: {hours_until_update:.1f})\n"
-            f"  Import Score (20%): {import_score:.2f} (Import Window: {self._import_window_detected})\n"
-            f"  Completeness Score (20%): {completeness_score:.2f} "
-            f"(Records: {cache_data.record_count}/{expected_record_count})\n"
-            f"  Refresh Score (20%): {refresh_score:.2f} (Failed Refreshes: {self._failed_refreshes})\n"
+            f"  Age Score ({weights['age'] * 100:.0f}%): {age_score:.2f} "
+            f"(Data is {age_hours:.1f} hours old, Hours until update: {hours_until_update:.1f})\n"
+            f"  Import Score ({weights['import'] * 100:.0f}%): {import_score:.2f} "
+            f"(Import Window: {self._import_window_detected}, Null Count: {self._consecutive_null_count})\n"
+            f"  Completeness Score ({weights['completeness'] * 100:.0f}%): {completeness_score:.2f} "
+            f"(Records: {cache_data.record_count}/{self._current_version['record_count'] if self._current_version else 0})\n"
+            f"  Refresh Score ({weights['refresh'] * 100:.0f}%): {refresh_score:.2f} "
+            f"(Failed/Total: {self._failed_refreshes}/{self._refresh_count})\n"
+            f"  Circumstances: {circumstances}\n"
             f"  Final Score: {final_score:.2f}"
         )
 
@@ -369,7 +501,8 @@ class ConcurrentSQLCache:
 
     async def _check_version(self) -> bool:
         """Check if data version has changed with rate limiting and import window detection"""
-        async with self._version_check_lock:
+        lock = await self._get_lock()
+        async with lock:
             if not await self._should_check_version():
                 return False
 
@@ -658,21 +791,13 @@ class ConcurrentSQLCache:
 
     @property
     def is_stale(self) -> bool:
-        """Enhanced staleness check using dynamic intervals and business rules"""
-        if not self._last_refresh or not self._current_version:
+        """Simple staleness check based on hours since last refresh"""
+        if not self._last_refresh:
             return True
 
         now = datetime.now(timezone.utc)
-        last_modified = self._current_version['last_modified']
-        days_old = (now.date() - last_modified.date()).days
-
-        # Data is considered stale if it's 2 or more days old
-        if days_old >= 2:
-            return True
-
-        # For fresh data (1 day old), check the interval
-        age = now - self._last_refresh
-        return age.total_seconds() > self._next_check_interval
+        hours_since_refresh = (now - self._last_refresh).total_seconds() / 3600
+        return hours_since_refresh > 12
 
     @property
     def needs_force_refresh(self) -> bool:
@@ -694,7 +819,7 @@ class ConcurrentSQLCache:
 
     def _get_staleness_info(self) -> StalenessInfo:
         """
-        Enhanced staleness check using dynamic intervals and business rules.
+        Enhanced staleness check using 12-hour threshold.
         Returns detailed staleness information.
         """
         now = datetime.now(timezone.utc)
@@ -709,109 +834,49 @@ class ConcurrentSQLCache:
                 next_update_in=0.0
             )
 
-        # Calculate various time deltas
+        # Calculate time deltas
         time_since_refresh = (now - self._last_refresh).total_seconds() / 3600
         time_since_update = (now - self._current_version['last_modified']).total_seconds() / 3600
         expected_update_time = self.config.get_expected_update_time()
         hours_until_update = (expected_update_time - now).total_seconds() / 3600 if expected_update_time > now else 24
 
-        # Before expected update time (15:00 UTC)
-        if hours_until_update > 0:
-            if time_since_update <= 24:  # Yesterday's data is fine before update time
-                return self.StalenessInfo(
-                    is_stale=False,
-                    staleness_reason="Data current for pre-update period",
-                    severity="none",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            elif time_since_update <= 48:  # Two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data older than expected before update",
-                    severity="medium",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            else:  # More than two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data significantly outdated",
-                    severity="high",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-
-        # After expected update time
-        else:
-            grace_period = 2  # 2 hour grace period after expected update
-            hours_past_update = -hours_until_update
-
-            if hours_past_update <= grace_period:  # Within grace period
-                if time_since_update <= 24:
-                    return self.StalenessInfo(
-                        is_stale=False,
-                        staleness_reason="Data current within update grace period",
-                        severity="none",
-                        time_since_refresh=time_since_refresh,
-                        time_since_update=time_since_update,
-                        next_update_in=hours_until_update
-                    )
-
-            # Past grace period
-            if time_since_update <= 24:  # Today's data
-                if self._import_window_detected:
-                    return self.StalenessInfo(
-                        is_stale=True,
-                        staleness_reason="Import window in progress",
-                        severity="low",
-                        time_since_refresh=time_since_refresh,
-                        time_since_update=time_since_update,
-                        next_update_in=hours_until_update
-                    )
-                return self.StalenessInfo(
-                    is_stale=False,
-                    staleness_reason="Data current",
-                    severity="none",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            elif time_since_update <= 36:  # Missed today's update
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Today's update missing",
-                    severity="medium",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            elif time_since_update <= 48:  # Two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data two days old",
-                    severity="high",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-            else:  # More than two days old
-                return self.StalenessInfo(
-                    is_stale=True,
-                    staleness_reason="Data critically outdated",
-                    severity="critical",
-                    time_since_refresh=time_since_refresh,
-                    time_since_update=time_since_update,
-                    next_update_in=hours_until_update
-                )
-
-    @property
-    def is_stale(self) -> bool:
-        """Legacy property for backward compatibility"""
-        return self._get_staleness_info().is_stale
+        # Determine staleness based on 12-hour threshold
+        if time_since_refresh <= 12:
+            return self.StalenessInfo(
+                is_stale=False,
+                staleness_reason="Data recently refreshed",
+                severity="none",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
+        elif time_since_refresh <= 18:  # Between 12 and 18 hours
+            return self.StalenessInfo(
+                is_stale=True,
+                staleness_reason="Data refresh approaching threshold",
+                severity="low",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
+        elif time_since_refresh <= 24:  # Between 18 and 24 hours
+            return self.StalenessInfo(
+                is_stale=True,
+                staleness_reason="Data refresh overdue",
+                severity="medium",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
+        else:  # More than 24 hours
+            return self.StalenessInfo(
+                is_stale=True,
+                staleness_reason="Data significantly outdated",
+                severity="high",
+                time_since_refresh=time_since_refresh,
+                time_since_update=time_since_update,
+                next_update_in=hours_until_update
+            )
 
     def get_cache_status(self) -> Dict[str, Any]:
         """Get detailed cache status information"""

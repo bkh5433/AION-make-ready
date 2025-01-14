@@ -6,24 +6,147 @@ from models.Property import Property, PropertyStatus
 from models.WorkOrderMetrics import WorkOrderMetrics
 from models.WorkOrderAnalytics import WorkOrderAnalytics
 from models.PropertySearchResult import PropertySearchResult
+from monitoring import SystemMonitor
 import time
+from difflib import get_close_matches
 
 
 # Setup logging
 log_config = LogConfig()
 logger = log_config.get_logger('property_search')
 
+# Initialize system monitor
+system_monitor = SystemMonitor()
+
+# State name to code mapping
+STATE_MAPPING = {
+    'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA',
+    'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE', 'florida': 'FL', 'georgia': 'GA',
+    'hawaii': 'HI', 'idaho': 'ID', 'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA',
+    'kansas': 'KS', 'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+    'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS', 'missouri': 'MO',
+    'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+    'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH',
+    'oklahoma': 'OK', 'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+    'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT', 'vermont': 'VT',
+    'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV', 'wisconsin': 'WI', 'wyoming': 'WY',
+    'district of columbia': 'DC', 'puerto rico': 'PR',
+    # # Add Canadian provinces if needed
+    # 'alberta': 'AB', 'british columbia': 'BC', 'manitoba': 'MB', 'new brunswick': 'NB',
+    # 'newfoundland and labrador': 'NL', 'nova scotia': 'NS', 'ontario': 'ON', 'prince edward island': 'PE',
+    # 'quebec': 'QC', 'saskatchewan': 'SK'
+}
+
+# Create reverse mapping (code to name) and add codes as keys too
+STATE_SEARCH_MAPPING = {**STATE_MAPPING}
+STATE_SEARCH_MAPPING.update({v.lower(): v for v in STATE_MAPPING.values()})
+
+
+def get_fuzzy_state_match(search_term: str, cutoff: float = 0.6) -> Optional[str]:
+    """Find closest matching state name or code using fuzzy matching"""
+    search_term_lower = search_term.lower().strip()
+
+    # Try exact match first
+    if search_term_lower in STATE_SEARCH_MAPPING:
+        return STATE_SEARCH_MAPPING[search_term_lower]
+
+    # Try fuzzy matching against state names and codes
+    matches = get_close_matches(
+        search_term_lower,
+        STATE_SEARCH_MAPPING.keys(),
+        n=3,
+        cutoff=cutoff
+    )
+
+    if matches:
+        best_match = matches[0]
+        logger.debug(f"Fuzzy matched state '{search_term}' to '{best_match}' (other possibilities: {matches[1:]})")
+        return STATE_SEARCH_MAPPING[best_match]
+
+    return None
+
+
+def get_fuzzy_name_matches(search_term: str, names: Dict[int, str], cutoff: float = 0.6) -> set:
+    """Find property keys with names that fuzzy match the search term"""
+    search_term_lower = search_term.lower().strip()
+
+    # Create reverse mapping of names to keys for easier lookup
+    name_to_keys = {}
+    for key, name in names.items():
+        name_lower = name.lower()
+        if name_lower in name_to_keys:
+            name_to_keys[name_lower].add(key)
+        else:
+            name_to_keys[name_lower] = {key}
+
+    # Try exact substring match first
+    exact_matches = {
+        key for name_lower, keys in name_to_keys.items()
+        for key in keys
+        if search_term_lower in name_lower
+    }
+
+    if exact_matches:
+        logger.debug(f"Found exact substring matches for '{search_term}': {len(exact_matches)} properties")
+        return exact_matches
+
+    # Try fuzzy matching if no exact matches
+    matches = get_close_matches(
+        search_term_lower,
+        name_to_keys.keys(),
+        n=5,
+        cutoff=cutoff
+    )
+
+    if matches:
+        fuzzy_matches = set()
+        for match in matches:
+            fuzzy_matches.update(name_to_keys[match])
+        logger.debug(f"Fuzzy matched name '{search_term}' to: {matches}")
+        return fuzzy_matches
+
+    return set()
+
 
 class PropertySearch:
     def __init__(self, cache_data: List[Dict]):
         start_time = time.perf_counter()
-        # Index raw data by PropertyKey and create name index for search
-        self._raw_cache = {item['PropertyKey']: item for item in cache_data}
-        self._name_index = {item['PropertyKey']: item['PropertyName'].lower() for item in cache_data}
-        self.data_issues = []
 
-        end_time = time.perf_counter()
-        logger.info(f"PropertySearch initialized with {len(cache_data)} properties in {(end_time - start_time):.3f}s")
+        if not cache_data:
+            logger.error("Attempted to initialize PropertySearch with empty cache data")
+            raise ValueError("Cache data cannot be None or empty")
+
+        # Index raw data by PropertyKey and create indexes for search
+        try:
+            self._raw_cache = {item['PropertyKey']: item for item in cache_data}
+            self._name_index = {item['PropertyKey']: item['PropertyName'].lower() for item in cache_data}
+            # Create state code index with normalized state codes
+            self._state_index = {
+                item['PropertyKey']: item.get('PropertyStateProvinceCode', '').lower().strip()
+                for item in cache_data
+            }
+
+            # Create city index with normalized city names
+            self._city_index = {
+                item['PropertyKey']: item.get('PropertyCity', '').lower().strip()
+                for item in cache_data
+            }
+
+            # Log unique states in the index for debugging
+            unique_states = set(state for state in self._state_index.values() if state)
+            logger.debug(f"Initialized with unique states: {unique_states}")
+
+            self.data_issues = []
+
+            end_time = time.perf_counter()
+            logger.info(
+                f"PropertySearch initialized with {len(cache_data)} properties in {(end_time - start_time) * 1000:.3f}ms")
+        except (TypeError, KeyError) as e:
+            logger.error(f"Error initializing PropertySearch: {str(e)}")
+            logger.error(f"Cache data type: {type(cache_data)}")
+            if cache_data:
+                logger.error(f"First item type: {type(cache_data[0]) if len(cache_data) > 0 else 'no items'}")
+            raise ValueError(f"Invalid cache data format: {str(e)}")
 
     def _convert_property(self, property_data: Dict) -> Optional[Property]:
         """Convert a single property's raw data to a Property model"""
@@ -51,6 +174,7 @@ class PropertySearch:
             return Property(
                 property_key=property_data['PropertyKey'],
                 property_name=property_data['PropertyName'],
+                property_state_province_code=property_data.get('PropertyStateProvinceCode'),
                 total_unit_count=property_data['TotalUnitCount'],
                 latest_post_date=latest_post_date,
                 status=PropertyStatus.ACTIVE,
@@ -65,12 +189,92 @@ class PropertySearch:
             self._handle_error(property_data, 'processing_error', str(e))
         return None
 
+    def _normalize_state_code(self, state_term: str) -> Optional[str]:
+        """Convert state name or code to normalized state code"""
+        if not state_term:
+            return None
+
+        # Clean up the input string
+        state_term_lower = state_term.lower().strip()
+
+        # Log the normalization attempt
+        logger.debug(f"Attempting to normalize state term: '{state_term}' -> '{state_term_lower}'")
+
+        # Try exact match first
+        normalized_code = STATE_SEARCH_MAPPING.get(state_term_lower)
+        if normalized_code:
+            logger.debug(f"Found exact mapping for '{state_term_lower}' -> '{normalized_code}'")
+            return normalized_code
+
+        # Try fuzzy matching
+        fuzzy_match = get_fuzzy_state_match(state_term_lower)
+        if fuzzy_match:
+            logger.debug(f"Found fuzzy match for '{state_term_lower}' -> '{fuzzy_match}'")
+            return fuzzy_match
+
+        # If not found, log available mappings that are close
+        close_matches = [
+            (key, value) for key, value in STATE_SEARCH_MAPPING.items()
+            if state_term_lower in key or key in state_term_lower
+        ]
+        if close_matches:
+            logger.debug(f"No exact match found for '{state_term_lower}', but found similar: {close_matches}")
+        else:
+            logger.debug(f"No matches found for '{state_term_lower}'")
+
+        # If not found, return the original term uppercase for code comparison
+        return state_term.strip().upper()
+
+    def get_fuzzy_city_matches(self, search_term: str, cutoff: float = 0.6) -> set:
+        """Find property keys with cities that fuzzy match the search term"""
+        search_term_lower = search_term.lower().strip()
+
+        # Create reverse mapping of cities to keys for easier lookup
+        city_to_keys = {}
+        for key, city in self._city_index.items():
+            if city:  # Only index non-empty cities
+                if city in city_to_keys:
+                    city_to_keys[city].add(key)
+                else:
+                    city_to_keys[city] = {key}
+
+        # Try exact substring match first
+        exact_matches = {
+            key for city, keys in city_to_keys.items()
+            for key in keys
+            if search_term_lower in city
+        }
+
+        if exact_matches:
+            logger.debug(f"Found exact city substring matches for '{search_term}': {len(exact_matches)} properties")
+            return exact_matches
+
+        # Try fuzzy matching if no exact matches
+        matches = get_close_matches(
+            search_term_lower,
+            city_to_keys.keys(),
+            n=5,
+            cutoff=cutoff
+        )
+
+        if matches:
+            fuzzy_matches = set()
+            for match in matches:
+                fuzzy_matches.update(city_to_keys[match])
+            logger.debug(f"Fuzzy matched city '{search_term}' to: {matches}")
+            return fuzzy_matches
+
+        return set()
+
     def search_properties(self,
                           search_term: Optional[str] = None,
                           property_keys: Optional[List[int]] = None,
+                          state_province_code: Optional[str] = None,
+                          city: Optional[str] = None,
                           include_analytics: bool = False) -> List[Property]:
-        """Search properties by name or property keys with optional analytics"""
+        """Search properties by name, property keys, state/province code, or city with optional analytics"""
         start_time = time.perf_counter()
+        request_start = system_monitor.record_request_start()  # Record request start for route timing
 
         matching_keys = []
 
@@ -79,18 +283,62 @@ class PropertySearch:
             matching_keys = [key for key in property_keys if key in self._raw_cache]
             logger.info(f"Key-based search found {len(matching_keys)} of {len(property_keys)} requested keys")
         else:
-            # If we have a search term, use the name index
-            search_term_lower = search_term.lower() if search_term else None
+            # If we have a search term, use name, state, and city indexes
+            search_term_lower = search_term.lower().strip() if search_term else None
             if search_term_lower:
-                matching_keys = [
-                    key for key, name in self._name_index.items()
-                    if search_term_lower in name
-                ]
-                logger.info(f"Text search '{search_term}' found {len(matching_keys)} matches")
+                # Search in property names with fuzzy matching
+                name_matches = get_fuzzy_name_matches(search_term, self._name_index)
+
+                # Try to normalize state search term
+                normalized_state = self._normalize_state_code(search_term)
+                if normalized_state:
+                    # Search in state codes (case-insensitive)
+                    normalized_state_lower = normalized_state.lower()
+                    state_matches = {
+                        key for key, state in self._state_index.items()
+                        if state and (
+                                state == normalized_state_lower or
+                                STATE_MAPPING.get(state) == normalized_state
+                        )
+                    }
+                else:
+                    state_matches = set()
+
+                # Search in cities
+                city_matches = self.get_fuzzy_city_matches(search_term)
+
+                # Combine matches
+                matching_keys = list(name_matches | state_matches | city_matches)
+                logger.info(f"Text search '{search_term}' found {len(matching_keys)} matches "
+                            f"(Names: {len(name_matches)}, States: {len(state_matches)}, Cities: {len(city_matches)})")
+
+                # Log matched property names for debugging
+                if name_matches:
+                    matched_names = [self._raw_cache[key]['PropertyName'] for key in name_matches]
+                    logger.debug(f"Matched property names: {matched_names}")
             else:
                 # For empty searches, return all keys
                 matching_keys = list(self._raw_cache.keys())
                 logger.info(f"Empty search returning all {len(matching_keys)} properties")
+
+        # Filter by state/province code if provided
+        if state_province_code and matching_keys:
+            normalized_filter_state = self._normalize_state_code(state_province_code)
+            if normalized_filter_state:
+                normalized_filter_state_lower = normalized_filter_state.lower()
+                matching_keys = [
+                    key for key in matching_keys
+                    if self._state_index[key] == normalized_filter_state_lower
+                ]
+                logger.info(f"State/province filter '{state_province_code}' (normalized: {normalized_filter_state}) "
+                            f"reduced matches to {len(matching_keys)}")
+
+        # Filter by city if provided
+        if city and matching_keys:
+            city_lower = city.lower().strip()
+            city_matches = self.get_fuzzy_city_matches(city_lower)
+            matching_keys = [key for key in matching_keys if key in city_matches]
+            logger.info(f"City filter '{city}' reduced matches to {len(matching_keys)}")
 
         # Convert matching properties
         results = []
@@ -121,13 +369,30 @@ class PropertySearch:
 
         end_time = time.perf_counter()
 
+        # Calculate search metrics
+        search_time = end_time - start_time
+        results_count = len(results)
+
+        # Update monitoring metrics (convert search_time to milliseconds)
+        system_monitor.record_search_metrics(
+            results_count=results_count,
+            query_time=search_time * 1000  # Convert seconds to milliseconds
+        )
+
+        # Record route timing
+        system_monitor.record_request_end(
+            start_time=request_start,
+            error=False,
+            path='/api/properties/search'
+        )
+
         # Log final performance metrics
         conversion_time = end_time - conversion_start
         total_time = end_time - start_time
         success_rate = (len(results) / len(matching_keys)) * 100 if matching_keys else 0
 
         logger.info(
-            f"Search completed in {total_time:.3f}s (conversion: {conversion_time:.3f}s) - "
+            f"Search completed in {total_time * 1000:.2f}ms (conversion: {conversion_time * 1000:.3f}ms) - "
             f"Converted: {len(results)}/{len(matching_keys)} ({success_rate:.1f}%) - "
             f"Errors: {conversion_errors}"
         )
@@ -171,10 +436,17 @@ class PropertySearch:
     def get_search_result(self,
                           search_term: Optional[str] = None,
                           property_keys: Optional[List[int]] = None,
+                          state_province_code: Optional[str] = None,
+                          city: Optional[str] = None,
                           last_updated: Optional[datetime] = None,
                           period_info: Optional[Dict[str, datetime]] = None) -> PropertySearchResult:
         """Get formatted search result with metadata"""
-        properties = self.search_properties(search_term, property_keys)
+        properties = self.search_properties(
+            search_term=search_term,
+            property_keys=property_keys,
+            state_province_code=state_province_code,
+            city=city
+        )
 
         result = PropertySearchResult(
             count=len(properties),

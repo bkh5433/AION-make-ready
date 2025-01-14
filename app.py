@@ -5,26 +5,26 @@ import threading
 import asyncio
 from flask_cors import CORS
 from models.ReportGenerationRequest import ReportGenerationRequest
-from models.ReportGenerationResponse import ReportGenerationResponse
-from models.ReportOutput import ReportOutput
 from datetime import datetime, timedelta, timezone
-from typing import List
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
-from session import get_session_path, cleanup_session, run_session_cleanup, generate_session_id, \
+from session import get_session_path, cleanup_session, generate_session_id, \
     setup_session_directory
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
-from auth_middleware import AuthMiddleware, require_auth, require_role, db
+from auth_middleware import (
+    AuthMiddleware, require_auth, require_role,
+    get_remote_info_sync, set_remote_info_sync, clear_remote_info_sync,
+    db
+)
 from config import Config
-from queue_manager import queue_manager, queue_requests
 from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
-import psutil
+from task_manager import task_manager
 from ms_auth import MicrosoftAuth
 import os
-import secrets
+from asgiref.sync import async_to_sync
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -44,6 +44,7 @@ CORS(app, resources={
 def before_request():
     """Record the start time of each request"""
     request.start_time = system_monitor.record_request_start()
+
 
 @app.after_request
 def after_request(response):
@@ -69,6 +70,7 @@ def after_request(response):
 
     return response
 
+
 # Setup logging
 log_config = LogConfig()
 logger = log_config.get_logger('api')
@@ -82,6 +84,7 @@ auth = AuthMiddleware()
 
 # Initialize SystemMonitor with other initializations
 system_monitor = SystemMonitor()
+
 
 def fetch_make_ready_data_sync():
     """Synchronous function to fetch data from SQL"""
@@ -97,38 +100,53 @@ def fetch_make_ready_data_sync():
         logger.error(f"Error fetching make ready data: {str(e)}")
         raise
 
+
 async def fetch_make_ready_data():
     """Async wrapper for the synchronous fetch function"""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, fetch_make_ready_data_sync)
 
+
 def run_async(coro):
-    """Run an async function in a new event loop"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """Run an async function in the current event loop or create a new one if needed"""
     try:
-        return loop.run_until_complete(coro)
+        loop = asyncio.get_running_loop()
+        should_close_loop = False
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        should_close_loop = True
+
+    try:
+        if asyncio.iscoroutine(coro):
+            return loop.run_until_complete(coro)
+        else:
+            # If it's a regular function, run it in an executor
+            return loop.run_in_executor(None, coro)
     finally:
-        loop.close()
+        if should_close_loop:
+            loop.close()
+
 
 @app.route('/api/data', methods=['GET'])
 @require_auth
+@require_role('admin')
 @catch_exceptions
 @log_exceptions(logger)
 def get_make_ready_data():
     logger.info("GET /api/data endpoint accessed.")
     try:
         # Get data and check staleness
-        data, is_stale = run_async(cache.get_data())
+        data, is_stale, confidence = run_async(cache.get_data())
 
         if not data:
             # Initial cache population
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
-            data, is_stale = run_async(cache.get_data())
+            data, is_stale, confidence = run_async(cache.get_data())
         elif is_stale:
-            # Trigger background refresh
-            logger.info("Data is stale, triggering background refresh")
+            # Trigger background refresh for data older than 12 hours
+            logger.info("Data is stale (>12 hours old), triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
                 args=(cache.refresh_data(fetch_make_ready_data),)
@@ -136,12 +154,25 @@ def get_make_ready_data():
             thread.daemon = True
             thread.start()
 
+        # Get detailed staleness info
+        staleness_info = cache._get_staleness_info()
+
         return jsonify({
             "status": "success",
             "data": data,
             "total_records": len(data) if data else 0,
             "last_updated": cache._last_refresh.isoformat() if cache._last_refresh else None,
-            "is_stale": is_stale
+            "data_quality": {
+                "is_stale": is_stale,
+                "confidence_score": confidence,
+                "staleness_info": {
+                    "reason": staleness_info.staleness_reason,
+                    "severity": staleness_info.severity,
+                    "hours_since_refresh": round(staleness_info.time_since_refresh, 2),
+                    "hours_since_update": round(staleness_info.time_since_update, 2),
+                    "hours_until_next_update": round(staleness_info.next_update_in, 2)
+                }
+            }
         })
 
     except Exception as e:
@@ -158,6 +189,7 @@ def health_check():
         'version': '1.0.0'
     }), 200
 
+
 @app.route('/api/properties/search', methods=['GET'])
 @require_auth
 @catch_exceptions
@@ -168,7 +200,9 @@ def search_properties():
     - q: Search term for property name (optional)
     - include_metrics: Whether to include full metrics (default: true)
     """
+
     try:
+        logger.info("GET /api/properties/search endpoint accessed.")
         search_term = request.args.get('q', None)
         include_metrics = request.args.get('include_metrics', 'true').lower() == 'true'
 
@@ -177,12 +211,23 @@ def search_properties():
         # Get data with confidence score
         data, is_stale, confidence = run_async(cache.get_data())
 
+        logger.info(
+            f"Cache data retrieved - is_stale: {is_stale}, confidence: {confidence}, data_length: {len(data) if data else 0}")
+
         if not data:
             logger.info("Cache empty, performing initial population")
             run_async(cache.refresh_data(fetch_make_ready_data))
             data, is_stale, confidence = run_async(cache.get_data())
+
+            if not data:
+                logger.error("Failed to populate cache data after refresh attempt")
+                return jsonify({
+                    "error": "Failed to retrieve property data",
+                    "status": "error"
+                }), 500
+
         elif is_stale and not cache._import_window_detected:
-            logger.info("Data is stale and not in import window, triggering background refresh")
+            logger.info("Data is stale (>12 hours old) and not in import window, triggering background refresh")
             thread = threading.Thread(
                 target=run_async,
                 args=(cache.refresh_data(fetch_make_ready_data),)
@@ -191,7 +236,7 @@ def search_properties():
             thread.start()
 
         # Initialize searcher
-        logger.info("Initializing PropertySearch")
+        logger.info(f"Initializing PropertySearch with {len(data)} records")
         searcher = PropertySearch(data)
 
         # Get search results
@@ -207,11 +252,23 @@ def search_properties():
 
         logger.info(f"Search complete - found {result.count} properties")
 
+        # Get detailed staleness info
+        staleness_info = cache._get_staleness_info()
+
         response_data = {
             'count': result.count,
             'data': [property.model_dump() for property in result.data],
-            'is_stale': is_stale,
-            'confidence_score': confidence,
+            'data_quality': {
+                'is_stale': is_stale,
+                'confidence_score': confidence,
+                'staleness_info': {
+                    'reason': staleness_info.staleness_reason,
+                    'severity': staleness_info.severity,
+                    'hours_since_refresh': round(staleness_info.time_since_refresh, 2),
+                    'hours_since_update': round(staleness_info.time_since_update, 2),
+                    'hours_until_next_update': round(staleness_info.next_update_in, 2)
+                }
+            },
             'last_updated': result.last_updated.isoformat() if result.last_updated else None,
             'period_info': {
                 'start_date': result.period_info[
@@ -226,8 +283,8 @@ def search_properties():
             response_data['cache_stats'] = {
                 'last_refresh': cache._last_refresh.isoformat() if cache._last_refresh else None,
                 'is_refreshing': cache._refresh_state.is_refreshing,
-                'refresh_age': (
-                    (datetime.now(timezone.utc) - cache._last_refresh).total_seconds()
+                'refresh_age_hours': (
+                    (datetime.now(timezone.utc) - cache._last_refresh).total_seconds() / 3600
                     if cache._last_refresh else None
                 ),
                 'import_window_active': cache._import_window_detected,
@@ -244,6 +301,7 @@ def search_properties():
             'status': 'error'
         }), 500
 
+
 @app.route('/api/reports/generate', methods=['POST'])
 @require_auth
 @catch_exceptions
@@ -251,17 +309,7 @@ def search_properties():
 def generate_report():
     """Generate Excel report for selected properties in a single workbook."""
     try:
-        # Generate new session ID
-        session_id = generate_session_id()
-        setup_session_directory(session_id)
-
-        # Get user's output directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = get_session_path(session_id) / timestamp
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        logger.info(f"Generated directory for session {session_id}: {output_dir}")
-
+        logger.info("POST /api/reports/generate endpoint accessed.")
         # Validate request data
         request_data = request.get_json()
         if not request_data:
@@ -319,78 +367,167 @@ def generate_report():
                 "data_issues": searcher.data_issues  # Include data issues in error response
             }, 404
 
-        try:
-            # Generate single report with multiple sheets
-            report_files = generate_multi_property_report(
-                template_name="break_even_template.xlsx",
-                properties=properties,
-                output_dir=str(output_dir),
-                api_url='http://127.0.0.1:5000/api/data',
-            )
+        # Create a task for report generation
+        def generate_report_background():
+            try:
+                # Generate single report with multiple sheets
+                report_files = generate_multi_property_report(
+                    template_name="break_even_template.xlsx",
+                    properties=properties,
+                    output_dir=str(output_dir)
+                )
 
-            # Process the single file
-            files = []
-            for file_path in report_files:
-                try:
-                    path = Path(file_path)
-                    if not path.is_absolute():
-                        path = Path.cwd() / path
-                    rel_path = path.relative_to(Path.cwd() / 'output')
-                    files.append(str(rel_path))
-                except Exception as e:
-                    logger.error(f"Error processing file path {file_path}: {e}")
-                    continue
+                # Process the files
+                files = []
+                for file_path in report_files:
+                    try:
+                        path = Path(file_path)
+                        if not path.is_absolute():
+                            path = Path.cwd() / path
+                        rel_path = path.relative_to(Path.cwd() / 'output')
+                        files.append(str(rel_path))
+                    except Exception as e:
+                        logger.error(f"Error processing file path {file_path}: {e}")
+                        continue
 
-            logger.info(f"Generated file: {files}")
+                # Mark task as completed with the file list
+                task_manager.complete_task(task_id, files)
+                return files
 
-            response_data = ReportGenerationResponse(
-                success=True,
-                message=f"Report generated successfully with {len(properties)} property sheets",
-                output=ReportOutput(
-                    directory=str(output_dir.relative_to(Path('output'))),
-                    propertyCount=len(properties),
-                    files=files,
-                    metrics_included=True,
-                    period_covered={
-                        'start_date': report_request.start_date or (datetime.now() - timedelta(days=30)),
-                        'end_date': report_request.end_date or datetime.now()
-                    }
-                ),
-                warnings=warnings if warnings else None,
-                data_issues=searcher.data_issues if searcher.data_issues else None,
-                session_id=session_id,
-                data_quality={
-                    'is_stale': is_stale,
-                    'confidence_score': confidence,
-                    'import_window_active': cache._import_window_detected
-                }
-            ).model_dump()
+            except Exception as e:
+                logger.error(f"Error in report generation task: {str(e)}", exc_info=True)
+                if output_dir.exists():
+                    shutil.rmtree(output_dir)
+                # Mark task as failed
+                task_manager.fail_task(task_id, str(e))
+                raise
 
-            response = jsonify(response_data)
-            response.set_cookie(
-                'session_id',
-                session_id,
-                max_age=3600,
-                httponly=False,
-                samesite='Lax',
-                secure=False,
-                path='/'
-            )
+        # Generate new session ID
+        session_id = generate_session_id()
+        setup_session_directory(session_id)
 
-            return response
+        # Get user's output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = get_session_path(session_id) / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-        except Exception as e:
-            logger.error(f"Error generating report: {str(e)}", exc_info=True)
-            if output_dir.exists():
-                shutil.rmtree(output_dir)
-            raise
+        logger.info(f"Generated directory for session {session_id}: {output_dir}")
+        # Start the background task in a new thread
+
+        thread = threading.Thread(target=generate_report_background)
+        thread.daemon = True
+
+        # Add task to task manager
+        task_id = task_manager.add_task(thread)
+
+        # Get queue metrics to determine initial status
+        queue_metrics = task_manager.get_queue_metrics()
+        queue_position = queue_metrics.get("queue_position", {}).get(task_id, 0)
+
+        # If task has a queue position, it's in "requested" state
+        initial_status = "requested" if queue_position > 0 else "processing"
+
+        response_data = {
+            "success": True,
+            "message": "Report generation started",
+            "task_id": task_id,
+            "session_id": session_id,
+            "status": initial_status,
+            "queue_position": queue_position,
+            "active_tasks": queue_metrics.get("active_tasks", 0),
+            "data_quality": {
+                "is_stale": is_stale,
+                "confidence_score": confidence,
+                "import_window_active": cache._import_window_detected
+            },
+            "property_count": len(properties),
+            "warnings": warnings if warnings else None,
+            "data_issues": searcher.data_issues if searcher.data_issues else None,
+        }
+
+        response = jsonify(response_data)
+        response.set_cookie(
+            'session_id',
+            session_id,
+            max_age=3600,
+            httponly=False,
+            samesite='Lax',
+            secure=False,
+            path='/'
+        )
+
+        return response
 
     except Exception as e:
-        logger.error(f"Error generating report: {str(e)}", exc_info=True)
+        logger.error(f"Error initiating report generation: {str(e)}", exc_info=True)
         return {
             "success": False,
-            "message": f"Error generating report: {str(e)}"
+            "message": f"Error initiating report generation: {str(e)}"
         }, 500
+
+
+@app.route('/api/reports/status/<task_id>', methods=['GET'])
+@require_auth
+@catch_exceptions
+@log_exceptions(logger)
+def check_report_status(task_id):
+    """Check the status of a report generation task"""
+    try:
+        # Get task status from task manager
+        task_status = task_manager.get_task_status(task_id)
+
+        if task_status is None:
+            return jsonify({
+                "success": False,
+                "message": "Task not found",
+                "status": "not_found"
+            }), 404
+
+        if task_status.get("error"):
+            return jsonify({
+                "success": False,
+                "message": f"Report generation failed: {task_status['error']}",
+                "status": "failed",
+                "error": task_status["error"]
+            }), 500
+
+        # Get queue metrics
+        queue_metrics = task_manager.get_queue_metrics()
+        active_tasks = queue_metrics.get("active_tasks", 0)
+        queue_position = queue_metrics.get("queue_position", {}).get(task_id, 0)
+
+        if task_status.get("status") == "completed":
+            # If task is complete, return the full response with file information
+            response_data = {
+                "success": True,
+                "message": "Report generation completed",
+                "status": "completed",
+                "files": task_status.get("result", []),
+                "completed_at": task_status.get("completed_at"),
+                "active_tasks": active_tasks,
+                "queue_position": queue_position
+            }
+        else:
+            # If task is still running
+            response_data = {
+                "success": True,
+                "message": "Report generation in progress",
+                "status": "processing",
+                "started_at": task_status.get("started_at"),
+                "active_tasks": active_tasks,
+                "queue_position": queue_position
+            }
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Error checking report status: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "message": f"Error checking report status: {str(e)}",
+            "status": "error"
+        }), 500
+
 
 @app.route('/api/refresh', methods=['POST'])
 @require_auth
@@ -398,15 +535,21 @@ def generate_report():
 @catch_exceptions
 @log_exceptions(logger)
 def refresh_data():
+    """Force refresh the cache data"""
     logger.info("POST /api/refresh endpoint accessed. Force refreshing data.")
     try:
-        # Start refresh in background thread to not block the response
+        # Create a new event loop for the background refresh
+        refresh_loop = asyncio.new_event_loop()
+
         def refresh_background():
             try:
-                run_async(cache.refresh_data(fetch_make_ready_data))
+                asyncio.set_event_loop(refresh_loop)
+                refresh_loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
                 logger.info("Background refresh completed successfully")
             except Exception as e:
                 logger.error(f"Background refresh failed: {str(e)}")
+            finally:
+                refresh_loop.close()
 
         thread = threading.Thread(target=refresh_background)
         thread.daemon = True
@@ -422,17 +565,18 @@ def refresh_data():
         logger.error(f"Error initiating refresh: {str(e)}")
         raise
 
-def cleanup_empty_directory(directory: Path):
-    """Clean up directory if empty after file removal."""
-    try:
-        # Only remove directory if it's empty and not the root output directory
-        if directory.exists() and directory.is_dir():
-            remaining_files = list(directory.glob('*'))
-            if not remaining_files and 'output' in directory.parts:
-                shutil.rmtree(directory)
-                logger.info(f"Cleaned up empty directory: {directory}")
-    except Exception as e:
-        logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
+
+# def cleanup_empty_directory(directory: Path):
+#     """Clean up directory if empty after file removal."""
+#     try:
+#         # Only remove directory if it's empty and not the root output directory
+#         if directory.exists() and directory.is_dir():
+#             remaining_files = list(directory.glob('*'))
+#             if not remaining_files and 'output' in directory.parts:
+#                 shutil.rmtree(directory)
+#                 logger.info(f"Cleaned up empty directory: {directory}")
+#     except Exception as e:
+#         logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
 
 @app.route('/api/reports/download', methods=['GET'])
 @require_auth
@@ -505,6 +649,7 @@ def download_report():
             "message": "Error processing download request"
         }), 500
 
+
 @app.route('/api/session/end', methods=['POST'])
 @catch_exceptions
 @log_exceptions(logger)
@@ -527,6 +672,7 @@ def end_session():
             "success": False,
             "message": "Error ending session"
         }), 500
+
 
 @app.route('/api/cache/status', methods=['GET'])
 @require_auth
@@ -637,56 +783,6 @@ def cache_status():
             "error": str(e)
         }), 500
 
-def schedule_data_refresh():
-    """Enhanced dynamic scheduling for data refresh"""
-    from apscheduler.schedulers.background import BackgroundScheduler
-
-    async def calculate_interval():
-        """Get the next check interval from cache"""
-        interval = cache._calculate_next_check_interval()
-        logger.info(f"Calculated next check interval: {interval} seconds")
-        return interval
-    
-    def refresh_data_task():
-        """Wrapper for async refresh task"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # First refresh the data
-            loop.run_until_complete(cache.refresh_data(fetch_make_ready_data))
-
-            # Then calculate new interval
-            next_interval = loop.run_until_complete(calculate_interval())
-
-            # Update scheduler with new interval
-            logger.info(f"Rescheduling next refresh for {next_interval} seconds")
-            scheduler.reschedule_job(
-                'dynamic_refresh',
-                trigger='interval',
-                seconds=next_interval
-            )
-
-        except Exception as e:
-            logger.error(f"Error in refresh task: {str(e)}")
-        finally:
-            loop.close()
-
-    scheduler = BackgroundScheduler()
-
-    # Start with initial interval from cache
-    initial_interval = run_async(calculate_interval())
-    
-    scheduler.add_job(
-        refresh_data_task,
-        'interval',
-        seconds=initial_interval,
-        id='dynamic_refresh'
-    )
-
-    scheduler.start()
-    return scheduler
-
-app.scheduler = schedule_data_refresh()
 
 @app.route('/api/auth/login', methods=['POST'])
 @catch_exceptions
@@ -716,7 +812,7 @@ def login():
                 'message': 'Username and password required'
             }), 400
 
-        result = auth.authenticate(username, password)
+        result = auth.authenticate_sync(username, password)
         if result:
             logger.info(f"Successful login for user: {username}")  # Add success logging
             return jsonify({
@@ -737,6 +833,7 @@ def login():
             'success': False,
             'message': 'An error occurred during login'
         }), 500
+
 
 @app.route('/api/auth/register', methods=['POST'])
 @require_auth
@@ -769,7 +866,7 @@ def register():
                 'message': 'Invalid role'
             }), 400
 
-        user_data = auth.create_user(username, password, name, role)
+        user_data = auth.create_user_sync(username, password, name, role)
 
         return jsonify({
             'success': True,
@@ -789,13 +886,20 @@ def register():
             'message': 'An error occurred during registration'
         }), 500
 
+
 @app.route('/api/auth/me', methods=['GET'])
 @require_auth
 def get_current_user():
     """Get current user information"""
-    return jsonify({
-        'user': request.user
-    })
+
+    @async_to_sync
+    async def async_get_user():
+        return jsonify({
+            'user': request.user
+        })
+
+    return async_get_user()
+
 
 @app.route('/api/users', methods=['GET'])
 @require_auth
@@ -820,6 +924,7 @@ def list_users():
             'message': f'Error fetching users: {str(e)}'
         }), 500
 
+
 @app.route('/api/users/<email>/role', methods=['PUT'])
 @require_auth
 @require_role('admin')
@@ -838,7 +943,7 @@ def update_user_role(email):
             'message': 'Invalid role'
         }), 400
 
-    success = auth.update_user_role(email, new_role)
+    success = auth.update_user_role_sync(email, new_role)
     if success:
         return jsonify({
             'message': f'Role updated for {email}'
@@ -847,6 +952,7 @@ def update_user_role(email):
     return jsonify({
         'message': 'User not found'
     }), 404
+
 
 @app.route('/api/admin/users', methods=['GET'])
 @require_auth
@@ -936,6 +1042,7 @@ def manage_user(user_id):
             'success': False,
             'message': f'Error managing user: {str(e)}'
         }), 500
+
 
 @app.route('/api/admin/logs', methods=['GET'])
 @require_auth
@@ -1069,11 +1176,16 @@ def change_password():
         # Update password
         new_hash, new_salt = auth._hash_password(new_password)
         user_ref = auth.users_ref.document(user['user_id'])
-        user_ref.update({
-            'password_hash': new_hash,
-            'salt': new_salt,
-            'requirePasswordChange': False
-        })
+        # Use run_async for the Firestore update
+        run_async(asyncio.get_event_loop().run_in_executor(
+            None,
+            user_ref.update,
+            {
+                'password_hash': new_hash,
+                'salt': new_salt,
+                'requirePasswordChange': False
+            }
+        ))
 
         return jsonify({
             'success': True,
@@ -1184,7 +1296,7 @@ def trigger_import_window():
 
         if action == 'start':
             # Force the import window state
-            cache._consecutive_null_count = 2
+            cache._consecutive_null_count = 15
             cache._import_window_detected = True
             cache._last_import_window = datetime.now(timezone.utc)
             message = "Import window started"
@@ -1312,6 +1424,7 @@ def toggle_microsoft_sso():
             'error': str(e)
         }), 500
 
+
 @app.route('/api/auth/microsoft/login', methods=['GET'])
 @catch_exceptions
 def microsoft_login():
@@ -1418,9 +1531,160 @@ def auth_callback():
         logger.error(f"Error in Microsoft callback: {str(e)}", exc_info=True)
         return redirect(f"{frontend_base_url}/auth/callback?error=Internal server error")
 
+
+def schedule_data_refresh():
+    """Enhanced dynamic scheduling for data refresh"""
+    from apscheduler.schedulers.background import BackgroundScheduler
+    import multiprocessing
+
+    # Only initialize scheduler in the main process
+    if not hasattr(schedule_data_refresh, '_scheduler'):
+        def calculate_interval_sync():
+            """Synchronous version of interval calculation"""
+            return cache._calculate_next_check_interval()
+
+        async def refresh_data_task():
+            """Async wrapper for refresh task"""
+            try:
+                # Refresh the data
+                await cache.refresh_data(fetch_make_ready_data)
+
+                # Calculate new interval
+                next_interval = calculate_interval_sync()
+
+                # Update scheduler with new interval
+                logger.info(f"Rescheduling next refresh for {next_interval} seconds")
+                schedule_data_refresh._scheduler.reschedule_job(
+                    'dynamic_refresh',
+                    trigger='interval',
+                    seconds=next_interval
+                )
+            except Exception as e:
+                logger.error(f"Error in refresh task: {str(e)}")
+
+        # Create and store the scheduler as a static variable
+        schedule_data_refresh._scheduler = BackgroundScheduler()
+
+        # Add session cleanup job
+        from session import run_session_cleanup
+        schedule_data_refresh._scheduler.add_job(
+            run_session_cleanup,
+            'interval',
+            seconds=Config.SESSION_CLEANUP_INTERVAL,
+            id='session_cleanup'
+        )
+
+        # Add task cleanup job
+        schedule_data_refresh._scheduler.add_job(
+            task_manager.cleanup_old_tasks,
+            'interval',
+            minutes=5,  # Run every 5 minutes
+            id='task_cleanup'
+        )
+
+        # Start with initial interval
+        initial_interval = calculate_interval_sync()
+        logger.info(f"Initial refresh interval: {initial_interval} seconds")
+
+        # Create a wrapper that runs the async task in the event loop
+        def run_refresh_task():
+            asyncio.run(refresh_data_task())
+
+        schedule_data_refresh._scheduler.add_job(
+            run_refresh_task,
+            'interval',
+            seconds=initial_interval,
+            id='dynamic_refresh'
+        )
+
+        schedule_data_refresh._scheduler.start()
+        logger.info("Scheduler initialized and started in main process")
+
+    return schedule_data_refresh._scheduler
+
+
+def create_asgi_app():
+    """Create and configure the ASGI application"""
+    from asgiref.wsgi import WsgiToAsgi
+    import asyncio
+    from functools import partial
+
+    # Initialize scheduler only in the main process
+    if not hasattr(app, 'scheduler'):
+        app.scheduler = schedule_data_refresh()
+        logger.info("Scheduler initialized in ASGI factory")
+
+    wsgi_app = app
+    asgi_app = WsgiToAsgi(wsgi_app)
+
+    async def asgi_wrapper(scope, receive, send):
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        else:
+            await asgi_app(scope, receive, send)
+
+    return asgi_wrapper
+
+
+# Add remote info endpoints
+@app.route('/api/remote-info', methods=['GET'])
+@require_auth
+def get_remote_info_endpoint():
+    info = get_remote_info_sync()
+    return jsonify({
+        'success': True,
+        'info': info
+    })
+
+
+@app.route('/api/remote-info', methods=['POST'])
+@require_auth
+@require_role('admin')
+def set_remote_info_endpoint():
+    data = request.get_json()
+    message = data.get('message')
+    status = data.get('status', 'info')
+
+    if not message:
+        return jsonify({
+            'success': False,
+            'error': 'Message is required'
+        }), 400
+
+    success = set_remote_info_sync(message, status)
+    return jsonify({
+        'success': success
+    })
+
+
+@app.route('/api/remote-info', methods=['DELETE'])
+@require_auth
+@require_role('admin')
+def clear_remote_info_endpoint():
+    success = clear_remote_info_sync()
+    return jsonify({
+        'success': success
+    })
+
+
 if __name__ == '__main__':
-    logger.info("Starting application and updating initial cache.")
-    app.run(debug=True)
+    import uvicorn
+
+    if Config.ENV.lower() is not ['prod', 'production']:
+        uvicorn.run(
+            "app:create_asgi_app",  # Use the factory function
+            host="0.0.0.0",
+            port=3000,
+            reload=True,  # Enable auto-reload during development
+            workers=1,  # Keep single worker to avoid scheduler duplication
+            factory=True  # Enable factory mode for proper WSGI app handling
+        )
 
 # @app.route('/api/some_endpoint', methods=['GET'])
 # @require_auth

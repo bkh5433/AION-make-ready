@@ -109,6 +109,9 @@ const SystemStatus = () => {
     const [isTogglingSSO, setIsTogglingSSO] = useState({dev: false, prod: false});
     const [showSSOWarning, setShowSSOWarning] = useState(false);
     const [pendingSSOAction, setPendingSSOAction] = useState(null);
+    const [remoteInfo, setRemoteInfo] = useState(null);
+    const [isSettingRemoteInfo, setIsSettingRemoteInfo] = useState(false);
+    const [remoteInfoInput, setRemoteInfoInput] = useState({message: '', status: 'info'});
 
     useEffect(() => {
         fetchStatus();
@@ -125,6 +128,25 @@ const SystemStatus = () => {
         return () => {
             if (interval) clearInterval(interval);
         };
+    }, [autoRefresh, refreshInterval]);
+
+    useEffect(() => {
+        const fetchRemoteInfo = async () => {
+            try {
+                const response = await api.getRemoteInfo();
+                if (response.success) {
+                    setRemoteInfo(response.info);
+                }
+            } catch (error) {
+                console.error('Error fetching remote info:', error);
+            }
+        };
+
+        fetchRemoteInfo();
+        if (autoRefresh) {
+            const interval = setInterval(fetchRemoteInfo, refreshInterval);
+            return () => clearInterval(interval);
+        }
     }, [autoRefresh, refreshInterval]);
 
     const fetchStatus = async () => {
@@ -525,6 +547,38 @@ Factors affecting score:
         </div>
     );
 
+    const handleSetRemoteInfo = async () => {
+        try {
+            setIsSettingRemoteInfo(true);
+            const response = await api.setRemoteInfo(remoteInfoInput.message, remoteInfoInput.status);
+            if (response.success) {
+                const updatedInfo = await api.getRemoteInfo();
+                if (updatedInfo.success) {
+                    setRemoteInfo(updatedInfo.info);
+                }
+                setRemoteInfoInput({message: '', status: 'info'});
+            }
+        } catch (error) {
+            console.error('Error setting remote info:', error);
+        } finally {
+            setIsSettingRemoteInfo(false);
+        }
+    };
+
+    const handleClearRemoteInfo = async () => {
+        try {
+            setIsSettingRemoteInfo(true);
+            const response = await api.clearRemoteInfo();
+            if (response.success) {
+                setRemoteInfo(null);
+            }
+        } catch (error) {
+            console.error('Error clearing remote info:', error);
+        } finally {
+            setIsSettingRemoteInfo(false);
+        }
+    };
+
     return (
         <div className="space-y-8 p-6">
             {/* Controls */}
@@ -679,11 +733,13 @@ Factors affecting score:
                         )}
                         details={
                             systemStatus?.performance?.searchMetrics ?
-                                `Avg: ${formatResponseTime(systemStatus.performance.searchMetrics.avg)}\n` +
-                                `Min: ${formatResponseTime(systemStatus.performance.searchMetrics.min)}\n` +
-                                `Max: ${formatResponseTime(systemStatus.performance.searchMetrics.max)}\n` +
-                                `Last hour: ${systemStatus.performance.searchMetrics.count} searches` :
-                                'No search metrics available'
+                                `Last ${systemStatus.performance.searchMetrics.count} searches:\n` +
+                                `Avg Time: ${formatResponseTime(systemStatus.performance.searchMetrics.avgQueryTime)}\n` +
+                                `P95: ${formatResponseTime(systemStatus.performance.searchMetrics.p95QueryTime)}\n` +
+                                `Avg Results: ${systemStatus.performance.searchMetrics.avgResultsCount}` :
+                                systemStatus?.performance?.routeResponseTimes?.search ?
+                                    `Average response time for search operations` :
+                                    'No search metrics available'
                         }
                     />
 
@@ -701,12 +757,15 @@ Factors affecting score:
                             'generation'
                         )}
                         details={
-                            systemStatus?.performance?.asyncMetrics ?
-                                `Based on ${systemStatus.performance.asyncMetrics.completedGenerations} generations\n` +
-                                `Active: ${systemStatus.performance.asyncMetrics.activeGenerations}\n` +
-                                `Queue Size: ${systemStatus.performance.asyncMetrics.queueSize}\n` +
-                                `Failed: ${systemStatus.performance.asyncMetrics.failedGenerations}` :
-                                'No generation metrics available'
+                            systemStatus?.performance?.taskMetrics ?
+                                `Queue Status:\n` +
+                                `Active: ${systemStatus.performance.taskMetrics.activeTasks}\n` +
+                                `Queued: ${systemStatus.performance.taskMetrics.queuedTasks}\n` +
+                                `Success Rate: ${systemStatus.performance.taskMetrics.successRate}%\n` +
+                                `Completed: ${systemStatus.performance.taskMetrics.completedTasks}` :
+                                systemStatus?.performance?.routeResponseTimes?.generation ?
+                                    `Average response time for report generation` :
+                                    'No generation metrics available'
                         }
                     />
 
@@ -721,16 +780,73 @@ Factors affecting score:
                                     systemStatus.performance.errorRate < 5 ? 'warning' : 'error'
                         }
                         details={
-                            systemStatus?.performance?.errorMetrics ?
+                            systemStatus?.performance ? 
                                 `Last Hour:\n` +
-                                `API Errors: ${systemStatus.performance.errorMetrics.apiErrors}\n` +
-                                `Auth Failures: ${systemStatus.performance.errorMetrics.authFailures}\n` +
-                                `Validation Errors: ${systemStatus.performance.errorMetrics.validationErrors}` :
+                                `Total Requests: ${systemStatus.performance.totalRequests}\n` +
+                                `Recent Errors: ${systemStatus.performance.recentErrors}` :
                                 'Error rate in last hour'
                         }
                     />
                 </div>
             </div>
+
+            {/* Remote Info Message */}
+            <MetricCard
+                title="Remote Info Message"
+                icon={AlertCircle}
+                status={remoteInfo ? remoteInfo.status : 'info'}
+                value={remoteInfo ? remoteInfo.message : 'No message set'}
+                details={
+                    <div className="space-y-4">
+                        <div className="flex flex-col gap-2">
+                            <input
+                                type="text"
+                                value={remoteInfoInput.message}
+                                onChange={(e) => setRemoteInfoInput(prev => ({...prev, message: e.target.value}))}
+                                placeholder="Enter message"
+                                className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <select
+                                value={remoteInfoInput.status}
+                                onChange={(e) => setRemoteInfoInput(prev => ({...prev, status: e.target.value}))}
+                                className="px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="info">Info</option>
+                                <option value="extended">Warning</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleSetRemoteInfo}
+                                disabled={isSettingRemoteInfo || !remoteInfoInput.message}
+                                className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                                    ${isSettingRemoteInfo || !remoteInfoInput.message
+                                    ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                            >
+                                {isSettingRemoteInfo ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin"/>
+                                ) : (
+                                    'Set Message'
+                                )}
+                            </button>
+                            {remoteInfo && (
+                                <button
+                                    onClick={handleClearRemoteInfo}
+                                    disabled={isSettingRemoteInfo}
+                                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors
+                                        ${isSettingRemoteInfo
+                                        ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                                        : 'bg-red-600/20 text-red-400 hover:bg-red-600/30'}`}
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                }
+            />
 
             {importWindowCard}
             {ssoWarningDialog}

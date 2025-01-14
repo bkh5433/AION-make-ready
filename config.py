@@ -31,6 +31,7 @@ class Config:
         'enable_monitoring': config('CACHE_ENABLE_MONITORING', default=True, cast=bool),
         'stale_if_error': config('CACHE_STALE_IF_ERROR', default=True, cast=bool)
     }
+    MAX_CONCURRENT_TASKS = config('MAX_CONCURRENT_TASKS', default=3, cast=int)
 
     # Security
     JWT_SECRET_KEY = config('JWT_SECRET_KEY', default=os.urandom(32).hex(), cast=str)
@@ -42,7 +43,7 @@ class Config:
     FIREBASE_CONFIG = {
         'project_id': config('FIREBASE_PROJECT_ID'),
         'private_key_id': config('FIREBASE_PRIVATE_KEY_ID'),
-        'private_key': config('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
+        'private_key': config('FIREBASE_PRIVATE_KEY').replace('\\\\n', '\n'),
         'client_email': config('FIREBASE_CLIENT_EMAIL'),
         'client_id': config('FIREBASE_CLIENT_ID'),
         'auth_uri': config('FIREBASE_AUTH_URI'),
@@ -55,13 +56,13 @@ class Config:
         'client_secret': config('MICROSOFT_CLIENT_SECRET', default=None),
         'tenant_id': config('MICROSOFT_TENANT_ID', default=None),
         'redirect_uri': config('MICROSOFT_REDIRECT_URI', default='http://localhost:5173/auth/microsoft/callback'),
-        'scopes': ['openid', 'User.Read', 'https://graph.microsoft.com/User.Read'],
+        'scopes': ['https://graph.microsoft.com/.default'],
         'domain_hint': config('MICROSOFT_DOMAIN_HINT', default='aionmanagement.com'),
         'enabled': config('MICROSOFT_SSO_ENABLED', default='FALSE', cast=lambda x: x.upper() == 'TRUE')
     }
 
     # Session
-    SESSION_CLEANUP_INTERVAL = config('SESSION_CLEANUP_INTERVAL', default=3600, cast=int)
+    SESSION_CLEANUP_INTERVAL = config('SESSION_CLEANUP_INTERVAL', default=600, cast=int)
     SESSION_MAX_AGE = config('SESSION_MAX_AGE', default=86400, cast=int)
 
     # Logging

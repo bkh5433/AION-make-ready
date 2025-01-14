@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useRef} from 'react';
+import React, {useState, useEffect, useRef, useCallback} from 'react';
 import {Card, CardContent, CardHeader, CardTitle} from './ui/card';
 import {
     Search,
@@ -9,8 +9,11 @@ import {
     Plus,
     AlertTriangle,
     Moon,
-    Sun
+    Sun,
+    Info,
+    AlertCircle
 } from 'lucide-react';
+import {motion, AnimatePresence} from 'framer-motion';
 import {useTheme} from "../lib/theme.jsx";
 import {api} from '../lib/api';
 import DownloadManager from './DownloadManager';
@@ -23,6 +26,33 @@ import {useAuth} from '../lib/auth';
 import DataFreshnessIndicator from './DataFreshnessIndicator';
 import {debounce} from '../lib/utils';
 import {searchCache} from '../lib/cache';
+
+// Add StatusBanner component
+const StatusBanner = ({status, message, icon: Icon}) => (
+    <motion.div
+        key={status}
+        initial={{opacity: 0, y: -20}}
+        animate={{opacity: 1, y: 0}}
+        exit={{opacity: 0, y: -20}}
+        transition={{duration: 0.2}}
+        className={`w-full py-2 px-4 text-sm text-center font-medium
+            ${status === 'critical'
+            ? 'bg-red-500/10 text-red-600 dark:text-red-500'
+            : status === 'extended'
+                ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-500'
+                : 'bg-blue-500/10 text-blue-600 dark:text-blue-500'}`}
+    >
+        <motion.div
+            initial={{opacity: 0}}
+            animate={{opacity: 1}}
+            transition={{duration: 0.2, delay: 0.1}}
+            className="flex items-center justify-center gap-2 max-w-2xl mx-auto"
+        >
+            <Icon className="h-4 w-4"/>
+            <span>{message}</span>
+        </motion.div>
+    </motion.div>
+);
 
 const parseAPIDate = (dateStr) => {
     if (!dateStr) return null;
@@ -133,6 +163,15 @@ const getTooltipContent = (property) => {
     };
 };
 
+const searchExamples = [
+    "Search properties",
+    "Main Street Apartments",
+    "New Jersey",
+    "MD",
+    "Philadelphia",
+    "Gotham City"
+];
+
 const PropertyReportGenerator = () => {
     const [properties, setProperties] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -147,6 +186,33 @@ const PropertyReportGenerator = () => {
     const {sessionId, updateSessionId} = useSessionManager();
     const {isDarkMode} = useTheme();
 
+    // Add state for remote info message
+    const [remoteInfo, setRemoteInfo] = useState(null);
+
+    // Add effect to fetch remote info
+    useEffect(() => {
+        const fetchRemoteInfo = async () => {
+            try {
+                const response = await api.getRemoteInfo();
+                if (response.success && response.info) {
+                    setRemoteInfo({
+                        message: response.info.message,
+                        status: response.info.status || 'info',
+                        icon: response.info.status === 'critical' ? AlertTriangle :
+                            response.info.status === 'extended' ? AlertTriangle : Info
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching remote info:', error);
+            }
+        };
+
+        fetchRemoteInfo();
+        // Fetch every 5 minutes
+        const interval = setInterval(fetchRemoteInfo, 5 * 60 * 1000);
+        return () => clearInterval(interval);
+    }, []);
+
     const [downloadManagerState, setDownloadManagerState] = useState({
         isVisible: false,
         showFloatingButton: false,
@@ -157,6 +223,8 @@ const PropertyReportGenerator = () => {
     const searchInputRef = useRef(null);
 
     const [showScrollTop, setShowScrollTop] = useState(false);
+    const [isScrollTopVisible, setIsScrollTopVisible] = useState(false);
+    const scrollTopTimeout = useRef(null);
 
     // Add new state variables to hold the period start and end dates
     const [periodStartDate, setPeriodStartDate] = useState(null);
@@ -170,6 +238,61 @@ const PropertyReportGenerator = () => {
     const [dataIssues, setDataIssues] = useState([]);
 
     const [isCachedResult, setIsCachedResult] = useState(false);
+
+    const [confidenceScore, setConfidenceScore] = useState(1.0);
+
+    const [currentTask, setCurrentTask] = useState(null);
+    const [pollingIntervals, setPollingIntervals] = useState({});
+    const [taskStartedAt, setTaskStartedAt] = useState(null);
+
+    // Add isCompleted state
+    const [isCompleted, setIsCompleted] = useState(false);
+
+    // Replace single completion ref with a map of task completions
+    const completedTasksRef = useRef(new Set());
+
+    // Cleanup effect for polling intervals
+    useEffect(() => {
+        return () => {
+            // Clear all polling intervals on unmount
+            Object.values(pollingIntervals).forEach(interval => {
+                if (interval) clearInterval(interval);
+            });
+        };
+    }, [pollingIntervals]);
+
+    const [currentPlaceholder, setCurrentPlaceholder] = useState(searchExamples[0]);
+    const [isSearchFocused, setIsSearchFocused] = useState(false);
+    const [isTransitioning, setIsTransitioning] = useState(false);
+    const [nextPlaceholder, setNextPlaceholder] = useState('');
+
+    // Enhanced animation effect
+    useEffect(() => {
+        if (isSearchFocused || searchTerm) return;
+
+        let currentIndex = 0;
+        const cycleInterval = setInterval(() => {
+            currentIndex = (currentIndex + 1) % searchExamples.length;
+
+            // First, clear the current placeholder and start fade out
+            setCurrentPlaceholder('');
+
+            // Wait for fade out to complete before showing next placeholder
+            setTimeout(() => {
+                setIsTransitioning(true);
+                setNextPlaceholder(searchExamples[currentIndex]);
+
+                // After overlay animation completes, update the placeholder
+                setTimeout(() => {
+                    setCurrentPlaceholder(searchExamples[currentIndex]);
+                    setIsTransitioning(false);
+                }, 300);
+            }, 300);
+
+        }, 5000);
+
+        return () => clearInterval(cycleInterval);
+    }, [isSearchFocused, searchTerm]);
 
     const checkDataAge = (data) => {
         if (data.length > 0) {
@@ -203,7 +326,7 @@ const PropertyReportGenerator = () => {
     };
 
     // Memoized debounced search function with caching
-    const debouncedSearch = React.useCallback(
+    const debouncedSearch = useCallback(
         debounce(async (term, page = 1, perPage = 20) => {
             // Only check for duplicate searches if there is a search term
             if (term.length > 0 && term === prevSearchTerm) {
@@ -252,6 +375,10 @@ const PropertyReportGenerator = () => {
                     setDataIssues([]);
                 }
 
+                // Set confidence score from API response
+                if (response.confidence_score !== undefined) {
+                    setConfidenceScore(response.confidence_score);
+                }
 
                 // Use the function for response data
                 checkDataAge(response.data);
@@ -298,7 +425,7 @@ const PropertyReportGenerator = () => {
                 setIsLoading(false);
                 addNotification('error', 'Connection failed. Please refresh the page and try again.');
             }
-        }, 600),
+        }, 750),
         []
     );
 
@@ -340,6 +467,90 @@ const PropertyReportGenerator = () => {
         });
     };
 
+    const checkReportStatus = async (taskId) => {
+        // Don't proceed if this specific task is already completed
+        if (completedTasksRef.current.has(taskId)) {
+            return;
+        }
+
+        try {
+            const result = await api.checkReportStatus(taskId);
+
+            if (result.success) {
+                // Update started_at state
+                setTaskStartedAt(result.started_at);
+
+                if (result.status === 'completed') {
+                    // Mark this specific task as completed
+                    completedTasksRef.current.add(taskId);
+
+                    // Clear the specific interval for this task
+                    if (pollingIntervals[taskId]) {
+                        clearInterval(pollingIntervals[taskId]);
+                        setPollingIntervals(prev => {
+                            const updated = {...prev};
+                            delete updated[taskId];
+                            return updated;
+                        });
+                    }
+
+                    setIsGenerating(false);
+                    setCurrentTask(null);
+                    setTaskStartedAt(null); // Reset started_at when task completes
+
+                    // Show success notification and handle files
+                    setNotifications([]);
+                    addNotification('success', 'Reports generated successfully!');
+                    setSelectedProperties([]);
+
+                    if (result.files?.length) {
+                        showDownloadManager(result.files, result.directory || 'output');
+                    }
+                } else if (result.status === 'failed') {
+                    // Mark this specific task as completed
+                    completedTasksRef.current.add(taskId);
+
+                    // Clear the specific interval for this task
+                    if (pollingIntervals[taskId]) {
+                        clearInterval(pollingIntervals[taskId]);
+                        setPollingIntervals(prev => {
+                            const updated = {...prev};
+                            delete updated[taskId];
+                            return updated;
+                        });
+                    }
+
+                    setIsGenerating(false);
+                    setCurrentTask(null);
+                    setTaskStartedAt(null); // Reset started_at when task fails
+                    throw new Error(result.error || 'Report generation failed');
+                }
+                // Continue polling only if status is 'processing'
+            } else {
+                throw new Error(result.message || 'Failed to check report status');
+            }
+        } catch (error) {
+            // Mark this specific task as completed
+            completedTasksRef.current.add(taskId);
+
+            // Clear the specific interval for this task
+            if (pollingIntervals[taskId]) {
+                clearInterval(pollingIntervals[taskId]);
+                setPollingIntervals(prev => {
+                    const updated = {...prev};
+                    delete updated[taskId];
+                    return updated;
+                });
+            }
+
+            setIsGenerating(false);
+            setCurrentTask(null);
+            setTaskStartedAt(null); // Reset started_at when error occurs
+            console.error('Error checking report status:', error);
+            addNotification('error', `Error checking report status: ${error.message}`);
+        }
+    };
+
     const handleGenerateReports = async () => {
         if (selectedProperties.length === 0) {
             addNotification('error', 'Please select at least one property.');
@@ -347,10 +558,12 @@ const PropertyReportGenerator = () => {
         }
 
         setIsGenerating(true);
+        setTaskStartedAt(null); // Reset started_at when starting new generation
         addNotification('info', `Generating reports for ${selectedProperties.length} properties...`);
 
         try {
             const result = await api.generateReports(selectedProperties);
+            console.log('Generate reports response:', result);
 
             if (result.success) {
                 if (result.session_id) {
@@ -358,21 +571,45 @@ const PropertyReportGenerator = () => {
                     console.log('Session ID set after report generation:', result.session_id);
                 }
 
-                setNotifications([]);
-                addNotification('success', `Successfully generated ${result.output.propertyCount} reports!`);
-                setSelectedProperties([]);
+                if (!result.task_id) {
+                    console.error('No task_id received from server');
+                    throw new Error('No task ID received from server');
+                }
 
-                if (result.output?.files?.length) {
-                    showDownloadManager(result.output.files, result.output.directory);
+                console.log('Setting current task:', result.task_id);
+                setCurrentTask(result.task_id);
+
+                // Start polling for this specific task
+                if (!pollingIntervals[result.task_id]) {
+                    console.log('Starting polling for task:', result.task_id);
+                    const interval = setInterval(() => checkReportStatus(result.task_id), 2000);
+                    setPollingIntervals(prev => ({
+                        ...prev,
+                        [result.task_id]: interval
+                    }));
+                }
+
+                // Update notification to show processing status
+                setNotifications([]);
+                addNotification('info', 'Processing report...', 0);
+
+                // Handle any warnings or data issues
+                if (result.warnings?.length) {
+                    result.warnings.forEach(warning => {
+                        addNotification('warning', warning);
+                    });
+                }
+
+                if (result.data_issues?.length) {
+                    setDataIssues(result.data_issues);
                 }
             } else {
                 throw new Error(result.message || 'Failed to generate reports');
             }
         } catch (error) {
+            setIsGenerating(false);
             console.error('Error generating reports:', error);
             addNotification('error', `Failed to generate reports: ${error.message}`);
-        } finally {
-            setIsGenerating(false);
         }
     };
 
@@ -403,16 +640,14 @@ const PropertyReportGenerator = () => {
     const showDownloadManager = (files, outputDirectory) => {
         // Process files to ensure correct paths without duplication
         const processedFiles = files.map(file => {
-            // Remove any potential duplicate directory prefixes
-            let normalizedPath = file;
+            // Ensure we're working with a string
+            let normalizedPath = typeof file === 'string' ? file : file.path || '';
 
-            // Remove output directory prefix if it exists
-            if (file.startsWith(outputDirectory + '/')) {
-                normalizedPath = file.substring(outputDirectory.length + 1);
-            }
+            // Remove any duplicate 'output/' prefixes
+            normalizedPath = normalizedPath.replace(/^(output\/)+/, '');
 
-            // Build the correct file path
-            const fullPath = `${outputDirectory}/${normalizedPath}`;
+            // Build the correct file path with single output prefix
+            const fullPath = normalizedPath;
 
             return {
                 name: normalizedPath.split('/').pop(), // Get just the filename
@@ -420,8 +655,8 @@ const PropertyReportGenerator = () => {
                 downloaded: false,
                 downloading: false,
                 failed: false,
-                timestamp: new Date().toISOString(), // Add timestamp for sorting
-                outputDirectory // Store the output directory
+                timestamp: new Date().toISOString(),
+                outputDirectory
             };
         });
 
@@ -489,12 +724,31 @@ const PropertyReportGenerator = () => {
 
     useEffect(() => {
         const handleScroll = () => {
-            setShowScrollTop(window.scrollY > 400);
+            if (window.scrollY > 400) {
+                setShowScrollTop(true);
+                setIsScrollTopVisible(true);
+            } else {
+                setShowScrollTop(false);
+                // Keep the component mounted but start exit animation
+                if (isScrollTopVisible) {
+                    if (scrollTopTimeout.current) {
+                        clearTimeout(scrollTopTimeout.current);
+                    }
+                    scrollTopTimeout.current = setTimeout(() => {
+                        setIsScrollTopVisible(false);
+                    }, 500); // Match this with animation duration
+                }
+            }
         };
 
         window.addEventListener('scroll', handleScroll);
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
+        return () => {
+            window.removeEventListener('scroll', handleScroll);
+            if (scrollTopTimeout.current) {
+                clearTimeout(scrollTopTimeout.current);
+            }
+        };
+    }, [isScrollTopVisible]);
 
     useEffect(() => {
         if (properties.length > 0) {
@@ -650,6 +904,17 @@ const PropertyReportGenerator = () => {
                 ))}
             </div>
 
+            {/* Remote Info Banner */}
+            <AnimatePresence mode="wait">
+                {remoteInfo && (
+                    <StatusBanner
+                        status={remoteInfo.status}
+                        message={remoteInfo.message}
+                        icon={remoteInfo.icon}
+                    />
+                )}
+            </AnimatePresence>
+
             <Card
                 className="bg-white dark:bg-[#1f2937] shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-200 overflow-hidden">
                 <CardContent className="space-y-10 p-0">
@@ -663,7 +928,7 @@ const PropertyReportGenerator = () => {
                             onRefresh={handleForceRefresh}
                             isRefreshing={isRefreshing}
                             isAdmin={user?.role === 'admin'}
-                            formatDate={formatDate}
+                            confidenceScore={confidenceScore}
                         />
                     ) : (
                         // Add a spacer div when the indicator is not visible
@@ -677,37 +942,72 @@ const PropertyReportGenerator = () => {
                     <div className="px-8 pb-8">
                         <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
                             <div className="relative flex-grow animate-slide-up">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    {isLoading ? (
-                                        <div
-                                            className="animate-spin h-5 w-5 border-2 border-gray-500 border-t-transparent rounded-full"/>
-                                    ) : (
-                                        <Search className="h-5 w-5 text-gray-400"/>
+                                <div className={`relative transition-all duration-300
+                                    ${isSearchFocused ? 'ring-1 ring-blue-500/10 shadow-md' : 'shadow-sm hover:shadow-sm'}
+                                    rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm`}>
+                                    <div
+                                        className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        {isLoading ? (
+                                            <div
+                                                className="animate-spin h-5 w-5 border-2 border-gray-500 border-t-transparent rounded-full"/>
+                                        ) : (
+                                            <Search className={`h-5 w-5 transition-colors duration-300
+                                                ${isSearchFocused ? 'text-blue-500' : 'text-gray-400'}`}/>
+                                        )}
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            ref={searchInputRef}
+                                            type="text"
+                                            className={`pl-10 pr-10 py-3 w-full rounded-lg
+                                                bg-transparent
+                                                border border-gray-200/50 dark:border-gray-700/50
+                                                text-gray-900 dark:text-gray-100 
+                                                placeholder-gray-500 dark:placeholder-gray-400
+                                                focus:border-blue-500/10 focus:ring-0
+                                                transition-all duration-300
+                                                hover:border-gray-300/50 dark:hover:border-gray-600/50`}
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                            onFocus={() => setIsSearchFocused(true)}
+                                            onBlur={() => setIsSearchFocused(false)}
+                                            placeholder={currentPlaceholder}
+                                            aria-label="Search properties by name or location"
+                                        />
+                                        {/* Overlay for transition effect - only show when searchTerm is empty */}
+                                        {isTransitioning && !isSearchFocused && !searchTerm && (
+                                            <div
+                                                className={`absolute inset-0 pointer-events-none
+                                                    flex items-center pl-10 pr-10 text-gray-500 dark:text-gray-400
+                                                    transition-opacity duration-300 ease-in-out
+                                                    animate-placeholder-show`}
+                                                aria-hidden="true"
+                                            >
+                                                {nextPlaceholder}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {searchTerm && (
+                                        <button
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 
+                                                hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-300"
+                                        >
+                                            <X className="h-5 w-5"/>
+                                        </button>
                                     )}
                                 </div>
-                                <input
-                                    ref={searchInputRef}
-                                    type="text"
-                                    placeholder="Search properties..."
-                                    className="pl-10 pr-10 py-3 w-full rounded-lg bg-gray-50 dark:bg-[#2d3748] border-gray-200 dark:border-gray-700 
-                                    text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 
-                                    focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200
-                                    hover:border-gray-300 dark:hover:border-gray-600"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
-                                {searchTerm && (
-                                    <button
-                                        onClick={() => setSearchTerm('')}
-                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                                    >
-                                        <X className="h-5 w-5"/>
-                                    </button>
+                                {/* Search Results Count */}
+                                {searchTerm && !isLoading && (
+                                    <div className="absolute -bottom-6 left-0 text-xs text-gray-400 dark:text-gray-500">
+                                        Found {properties.length} {properties.length === 1 ? 'match ' : 'matches '}
+                                        for "{searchTerm}"
+                                    </div>
                                 )}
                             </div>
                             <button
-                                className={`flex items-center justify-center gap-2 px-6 py-3 rounded-lg text-white 
-                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
+                                className={`flex flex-col items-center justify-center gap-1 px-6 py-3 rounded-lg text-white 
+                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] min-w-[200px]
                                 ${isGenerating ? 'animate-pulse-shadow' : ''} ${
                                     isGenerating || selectedProperties.length === 0
                                         ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-75'
@@ -718,15 +1018,22 @@ const PropertyReportGenerator = () => {
                             >
                                 {isGenerating ? (
                                     <>
-                                        <div
-                                            className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
-                                        <span>Generating...</span>
+                                        <div className="flex items-center gap-2">
+                                            <div
+                                                className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
+                                            <span>Generating Reports</span>
+                                        </div>
+                                        <span className="text-xs opacity-75 font-normal">
+                                            {currentTask ? (
+                                                taskStartedAt ? 'Processing...' : 'Requested...'
+                                            ) : 'Starting...'}
+                                        </span>
                                     </>
                                 ) : (
-                                    <>
+                                    <div className="flex items-center gap-2">
                                         <Download className="h-5 w-5"/>
                                         <span>Generate Reports {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
-                                    </>
+                                    </div>
                                 )}
                             </button>
                         </div>
@@ -734,10 +1041,14 @@ const PropertyReportGenerator = () => {
 
                     {/* Properties Table - Add better hover states and transitions */}
                     <div
-                        className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1f2937]">
-                        <table className="w-full">
+                        className="relative overflow-hidden rounded-xl border border-gray-200/50 dark:border-gray-700/50 
+                        bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm backdrop-saturate-150
+                        before:absolute before:inset-0 before:bg-gradient-to-b before:from-white/50 before:to-transparent dark:before:from-gray-900/50
+                        before:pointer-events-none">
+                        <table className="w-full relative">
                             <thead>
-                            <tr className="bg-gray-50 dark:bg-[#2d3748] border-b border-gray-200 dark:border-gray-800">
+                            <tr className="bg-gray-50/80 dark:bg-gray-800/80 border-b border-gray-200/80 dark:border-gray-700/80
+                                    backdrop-blur-sm transition-colors duration-200">
                                 <th className="px-8 py-5 text-left">
                                         <input
                                             type="checkbox"
@@ -749,22 +1060,26 @@ const PropertyReportGenerator = () => {
                                                     setSelectedProperties(properties.map(p => p.PropertyKey));
                                                 }
                                             }}
-                                            className="rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-500 focus:ring-blue-500"
+                                            className="rounded border-gray-300 dark:border-gray-600 bg-white/80 dark:bg-gray-700/80 
+                                            text-blue-600 dark:text-blue-400 focus:ring-blue-500/50 transition-colors duration-200
+                                            hover:border-blue-400 dark:hover:border-blue-300"
                                         />
                                     </th>
-                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Property
-                                    Name
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300">
+                                    Property Name
                                 </th>
-                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Units</th>
-                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400">Completion
-                                    Rate
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300">
+                                    Units
                                 </th>
-                                <th className="hidden md:table-cell px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-400 min-w-[320px]">Work
-                                    Orders
+                                <th className="px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300">
+                                    Completion Rate
+                                </th>
+                                <th className="hidden md:table-cell px-8 py-5 text-left text-sm font-medium text-gray-600 dark:text-gray-300 min-w-[320px]">
+                                    Work Orders
                                 </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                            <tbody className="divide-y divide-gray-200/80 dark:divide-gray-700/80">
                                 {isLoading ? (
                                     // Updated skeleton loading rows
                                     [...Array(5)].map((_, i) => (
@@ -861,12 +1176,14 @@ const PropertyReportGenerator = () => {
                         </table>
                     </div>
 
-                    {/* Selection Counter*/}
-                    <div className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2 px-2">
-                        <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded">
+                    {/* Selection Counter with enhanced styling */}
+                    <div
+                        className="text-sm font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2 px-4 py-2">
+                        <span className="px-3.5 py-1.5 bg-gray-100/80 dark:bg-gray-800/80 rounded-full
+                            border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
                             {selectedProperties.length}
                         </span>
-                        of {properties.length} properties selected
+                        <span>of {properties.length} properties selected</span>
                     </div>
                 </CardContent>
             </Card>
@@ -894,12 +1211,13 @@ const PropertyReportGenerator = () => {
                     </div>
                 )}
 
-            {showScrollTop && (
+            {isScrollTopVisible && (
                 <button
                     onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}
-                    className="fixed bottom-4 right-20 p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg 
+                    className={`fixed ${downloadManagerState.showFloatingButton && !downloadManagerState.isVisible ? 'bottom-20' : 'bottom-4'} right-4 
+                             p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg 
                              hover:bg-gray-200 dark:hover:bg-gray-700 transition-all duration-200
-                             transform hover:scale-110"
+                             transform hover:scale-110 ${showScrollTop ? 'animate-bounce-in' : 'animate-bounce-out'}`}
                     aria-label="Scroll to top"
                 >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -916,6 +1234,16 @@ const PropertyReportGenerator = () => {
                 </div>
             )}
 
+            {/* Enhanced Footer */}
+            <div className="flex justify-center pb-12">
+                <div className="px-6 py-3 rounded-xl bg-white/50 dark:bg-gray-900/50 border border-gray-200/50 dark:border-gray-700/50 
+                    backdrop-blur-sm shadow-sm hover:shadow-md transition-all duration-300 transform hover:scale-[1.02]
+                    text-sm text-gray-600 dark:text-gray-400">
+                    <span className="flex items-center gap-2">
+                        Made with <span className="text-blue-600 dark:text-blue-400 animate-pulse">💙</span> in Philadelphia by Brandon Hightower
+                    </span>
+                </div>
+            </div>
         </div>
     );
 };

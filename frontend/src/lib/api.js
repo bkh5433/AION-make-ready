@@ -2,28 +2,13 @@ import {getSessionId, setSessionId, clearSessionId} from './session';
 
 // Ensure the base URL always uses HTTPS and ends with /api
 export const API_BASE_URL = (() => {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL;
-    console.log('API Base URL from env:', baseUrl);
-
-    if (!baseUrl) {
-        console.error('VITE_API_BASE_URL environment variable is not set. Please set EC2_HOST in your Amplify environment variables.');
-        // In production, we want to make it obvious that the environment is not configured correctly
-        if (import.meta.env.PROD) {
-            alert('API URL is not configured. Please contact the administrator.');
-        }
+    // In development, use the Vite proxy configuration
+    if (import.meta.env.DEV) {
+        return '/api';
     }
 
-    // Convert HTTP to HTTPS if needed
-    let finalUrl = baseUrl || 'http://127.0.0.1:5000';
-    if (import.meta.env.PROD && finalUrl.startsWith('http://')) {
-        finalUrl = 'https://' + finalUrl.substring(7);
-        console.log('Converted to HTTPS URL:', finalUrl);
-    }
-
-    // Add /api if needed
-    finalUrl = finalUrl.endsWith('/api') ? finalUrl : `${finalUrl}/api`;
-    console.log('Final API URL:', finalUrl);
-    return finalUrl;
+    // In production, API is served from the same domain
+    return '/api';
 })();
 
 // Add this helper function at the top of the file
@@ -156,6 +141,47 @@ export const api = {
         const data = await response.json();
         console.log('Generate reports response:', data);
         return data;
+    },
+
+    async checkReportStatus(taskId) {
+        console.log('Checking status for task:', taskId);
+        const response = await fetchWithErrorHandling(
+            `${API_BASE_URL}/reports/status/${taskId}`
+        );
+        const data = await response.json();
+
+        // Enhanced logging for task status
+        const status = data.status;
+        const queuePosition = data.queue_position;
+        const activeTasks = data.active_tasks;
+        const startedAt = data.started_at;
+
+        // Determine actual status based on started_at field
+        // If started_at is null, the task is requested but not processing yet
+        const actualStatus = (status === 'processing' && !startedAt) ? 'requested' : status;
+
+        if (actualStatus === 'requested') {
+            console.log(`Task ${taskId} is requested (Queue Position: ${queuePosition}, Active Tasks: ${activeTasks})`);
+        } else if (actualStatus === 'processing') {
+            console.log(`Task ${taskId} is processing (Active Tasks: ${activeTasks}, Started At: ${startedAt})`);
+        } else if (actualStatus === 'completed') {
+            console.log(`Task ${taskId} completed successfully with ${data.files?.length || 0} files`);
+        } else if (actualStatus === 'failed') {
+            console.error(`Task ${taskId} failed with error: ${data.error}`);
+        }
+
+        return {
+            ...data,
+            status: actualStatus,  // Override the status with our corrected version
+            // Add helper flags for frontend state management
+            isRequested: actualStatus === 'requested',
+            isProcessing: actualStatus === 'processing',
+            isCompleted: actualStatus === 'completed',
+            isFailed: actualStatus === 'failed',
+            queuePosition: queuePosition,
+            activeTasks: activeTasks,
+            startedAt: startedAt
+        };
     },
 
     async downloadReport(filePath) {
@@ -480,5 +506,56 @@ export const api = {
             }
         );
         return response.json();
+    },
+
+    // Get remote info
+    async getRemoteInfo() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/remote-info`, {
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                }
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching remote info:', error);
+            return {success: false, error: error.message};
+        }
+    },
+
+    // Set remote info (admin only)
+    async setRemoteInfo(message, status = 'info') {
+        try {
+            const response = await fetch(`${API_BASE_URL}/remote-info`, {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({message, status})
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('Error setting remote info:', error);
+            return {success: false, error: error.message};
+        }
+    },
+
+    // Clear remote info (admin only)
+    async clearRemoteInfo() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/remote-info`, {
+                method: 'DELETE',
+                headers: {
+                    ...getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                }
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('Error clearing remote info:', error);
+            return {success: false, error: error.message};
+        }
     }
 };

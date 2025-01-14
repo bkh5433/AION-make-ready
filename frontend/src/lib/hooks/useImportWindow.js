@@ -1,48 +1,117 @@
 import {useState, useEffect} from 'react';
 import {api} from '../api';
 
-const POLL_INTERVAL = 10000; // Reduce to 10 seconds for more responsive detection
+const POLL_INTERVAL = 30000; // Increase to 30 seconds to match system status
+let globalState = {
+    isInImportWindow: false,
+    lastImportWindow: null,
+    consecutiveNulls: 0,
+    lastCheck: null,
+    subscribers: new Set(),
+    checkPromise: null
+};
+
+const notifySubscribers = () => {
+    globalState.subscribers.forEach(callback => callback());
+};
+
+const checkImportWindowStatus = async () => {
+    // If there's already a check in progress, return that promise
+    if (globalState.checkPromise) {
+        return globalState.checkPromise;
+    }
+
+    // If we checked recently (within 2 seconds), use cached data
+    if (globalState.lastCheck && Date.now() - globalState.lastCheck < 2000) {
+        return Promise.resolve({
+            in_import_window: globalState.isInImportWindow,
+            last_import_window: globalState.lastImportWindow,
+            consecutive_null_count: globalState.consecutiveNulls
+        });
+    }
+
+    // Create new check promise
+    globalState.checkPromise = api.getImportWindowStatus()
+        .then(response => {
+            globalState.isInImportWindow = response.in_import_window;
+            globalState.lastImportWindow = response.last_import_window;
+            globalState.consecutiveNulls = response.consecutive_null_count || 0;
+            globalState.lastCheck = Date.now();
+            notifySubscribers();
+            return response;
+        })
+        .finally(() => {
+            globalState.checkPromise = null;
+        });
+
+    return globalState.checkPromise;
+};
+
+// Start global polling
+let globalInterval = null;
+const ensurePolling = () => {
+    if (!globalInterval && globalState.subscribers.size > 0) {
+        checkImportWindowStatus(); // Initial check
+        globalInterval = setInterval(checkImportWindowStatus, POLL_INTERVAL);
+    }
+};
+
+const stopPolling = () => {
+    if (globalInterval && globalState.subscribers.size === 0) {
+        clearInterval(globalInterval);
+        globalInterval = null;
+    }
+};
 
 export const useImportWindow = () => {
-    const [isInImportWindow, setIsInImportWindow] = useState(false);
-    const [lastImportWindow, setLastImportWindow] = useState(null);
-    const [consecutiveNulls, setConsecutiveNulls] = useState(0);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [state, setState] = useState({
+        isInImportWindow: globalState.isInImportWindow,
+        lastImportWindow: globalState.lastImportWindow,
+        consecutiveNulls: globalState.consecutiveNulls,
+        isLoading: true,
+        error: null
+    });
 
-    const checkImportWindowStatus = async () => {
+    useEffect(() => {
+        const updateState = () => {
+            setState({
+                isInImportWindow: globalState.isInImportWindow,
+                lastImportWindow: globalState.lastImportWindow,
+                consecutiveNulls: globalState.consecutiveNulls,
+                isLoading: false,
+                error: null
+            });
+        };
+
+        // Subscribe to updates
+        globalState.subscribers.add(updateState);
+        ensurePolling();
+
+        // Initial state update
+        updateState();
+
+        // Cleanup
+        return () => {
+            globalState.subscribers.delete(updateState);
+            stopPolling();
+        };
+    }, []);
+
+    const checkStatus = async () => {
         try {
-            const response = await api.getImportWindowStatus();
-            console.log('Import window status:', response); // Add logging
-            setIsInImportWindow(response.in_import_window);
-            setLastImportWindow(response.last_import_window);
-            setConsecutiveNulls(response.consecutive_null_count || 0);
-            setError(null);
+            await checkImportWindowStatus();
         } catch (err) {
-            console.error('Error checking import window status:', err);
-            setError(err.message);
-        } finally {
-            setIsLoading(false);
+            setState(prev => ({...prev, error: err.message}));
         }
     };
 
-    useEffect(() => {
-        // Initial check
-        checkImportWindowStatus();
-
-        // Set up polling
-        const interval = setInterval(checkImportWindowStatus, POLL_INTERVAL);
-
-        return () => clearInterval(interval);
-    }, []);
-
     return {
-        isInImportWindow,
-        lastImportWindow,
-        consecutiveNulls,
-        isLoading,
-        error,
-        checkStatus: checkImportWindowStatus
+        isInImportWindow: state.isInImportWindow,
+        lastImportWindow: state.lastImportWindow,
+        consecutiveNulls: state.consecutiveNulls,
+        isLoading: state.isLoading,
+        error: state.error,
+        checkStatus
     };
 };
 

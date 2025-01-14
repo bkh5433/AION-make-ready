@@ -23,6 +23,7 @@ class RouteRequestQueue:
         self.semaphore = Semaphore(max_concurrent)
         self.stats_lock = Lock()
         self.active_requests = 0
+        self.waiting_requests = 0  # Track requests waiting for semaphore
         self.total_processed = 0
         self.total_processing_time = 0
         self.last_processed = None
@@ -30,18 +31,28 @@ class RouteRequestQueue:
     def process_request(self, handler: Callable[..., Any]) -> Any:
         """Process a request through the queue with controlled concurrency"""
         start_time = datetime.now()
-        with self.semaphore:
-            with self.stats_lock:
-                self.active_requests += 1
-            try:
-                return handler()
-            finally:
+
+        with self.stats_lock:
+            self.waiting_requests += 1
+
+        try:
+            with self.semaphore:
                 with self.stats_lock:
-                    self.active_requests -= 1
-                    self.total_processed += 1
-                    processing_time = (datetime.now() - start_time).total_seconds()
-                    self.total_processing_time += processing_time
-                    self.last_processed = datetime.now()
+                    self.waiting_requests -= 1
+                    self.active_requests += 1
+                try:
+                    return handler()
+                finally:
+                    with self.stats_lock:
+                        self.active_requests -= 1
+                        self.total_processed += 1
+                        processing_time = (datetime.now() - start_time).total_seconds()
+                        self.total_processing_time += processing_time
+                        self.last_processed = datetime.now()
+        except Exception:
+            with self.stats_lock:
+                self.waiting_requests -= 1
+            raise
 
     @property
     def avg_processing_time(self) -> float:
@@ -49,6 +60,12 @@ class RouteRequestQueue:
             if self.total_processed == 0:
                 return 0
             return self.total_processing_time / self.total_processed
+
+    @property
+    def queue_size(self) -> int:
+        """Get current number of requests waiting in queue"""
+        with self.stats_lock:
+            return self.waiting_requests
 
 
 class RequestQueueManager:
@@ -69,7 +86,7 @@ class RequestQueueManager:
         queue = self.queues[route]
         return QueueStats(
             route=route,
-            queue_size=queue.semaphore._value,
+            queue_size=queue.queue_size,  # Now returns actual waiting requests
             active_requests=queue.active_requests,
             total_processed=queue.total_processed,
             avg_processing_time=queue.avg_processing_time,
@@ -88,19 +105,19 @@ def queue_requests(max_concurrent: int = 20):
     Usage:
     @app.route('/api/properties/search')
     @queue_requests(max_concurrent=20)
-    async def search_properties():
+    def search_properties():
         ...
     """
 
     def decorator(f):
         @wraps(f)
-        async def wrapped(*args, **kwargs):
+        def wrapped(*args, **kwargs):
             # Get route-specific queue
             route = request.endpoint
             queue = queue_manager.get_queue(route, max_concurrent)
 
             # Process request through queue
-            return await queue.process_request(lambda: f(*args, **kwargs))
+            return queue.process_request(lambda: f(*args, **kwargs))
 
         return wrapped
 

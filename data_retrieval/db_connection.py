@@ -6,6 +6,7 @@ from typing import Dict
 from logger_config import LogConfig
 from decouple import config
 from datetime import datetime, timezone
+import time
 
 logger_config = LogConfig()
 logger = logger_config.get_logger('db_connection')
@@ -42,13 +43,25 @@ class DatabaseConnection:
     def fetch_data(self) -> pd.DataFrame:
         """Fetch data with simple connection"""
         engine = self._get_engine()
-        return pd.read_sql(sql_queries.MAKE_READY_QUERY, engine)
+        start_time = time.time()
+        logger.info("Starting make ready data refresh from database...")
+
+        try:
+            df = pd.read_sql(sql_queries.MAKE_READY_QUERY, engine)
+            execution_time = time.time() - start_time
+            logger.info(
+                f"Make ready data refresh completed in {execution_time:.2f} seconds. Retrieved {len(df)} records.")
+            return df
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(f"Make ready data refresh failed after {execution_time:.2f} seconds. Error: {str(e)}")
+            raise
 
     async def fetch_version_info(self, query: str) -> Dict:
         """Fetch version information from database"""
         try:
             engine = self._get_engine()
-            logger.debug(f"Executing version check query: {query}")
+            logger.debug(f"Executing version check query")
             df = pd.read_sql(query, engine)
             logger.debug(f"Query result: {df.to_dict()}")
 

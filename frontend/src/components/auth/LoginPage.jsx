@@ -446,49 +446,54 @@ const LoginPage = () => {
                     </form>
 
                     {/* API Health Indicator */}
-                    <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground/70">
+                    <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground/50">
                         <div className="relative group">
                             <div
-                                className="flex items-center gap-2 hover:bg-muted/30 px-3 py-1.5 rounded-full transition-all duration-300">
-                                <div className="relative">
+                                style={{
+                                    '--status-color': apiHealth === 'healthy'
+                                        ? '34, 197, 94' // green-500
+                                        : apiHealth === 'unhealthy'
+                                            ? '239, 68, 68' // red-500
+                                            : '234, 179, 8', // yellow-500
+                                }}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors duration-500
+                                    border border-border/5 backdrop-blur-sm
+                                    relative overflow-hidden
+                                    group-hover:border-border/10 group-hover:bg-muted/10`}>
+                                {/* Background gradient layer */}
+                                <div
+                                    style={{
+                                        background: apiHealth === 'healthy'
+                                            ? 'linear-gradient(90deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.03) 20%, rgba(34, 197, 94, 0.08) 50%, rgba(34, 197, 94, 0.03) 80%, rgba(34, 197, 94, 0.08) 100%)'
+                                            : apiHealth === 'unhealthy'
+                                                ? 'linear-gradient(90deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.03) 20%, rgba(239, 68, 68, 0.08) 50%, rgba(239, 68, 68, 0.03) 80%, rgba(239, 68, 68, 0.08) 100%)'
+                                                : 'linear-gradient(90deg, rgba(234, 179, 8, 0.08) 0%, rgba(234, 179, 8, 0.03) 20%, rgba(234, 179, 8, 0.08) 50%, rgba(234, 179, 8, 0.03) 80%, rgba(234, 179, 8, 0.08) 100%)',
+                                        backgroundSize: '200% 100%'
+                                    }}
+                                    className="absolute inset-0 animate-gradient-flow"
+                                />
+                                {/* Content layer */}
+                                <div className="relative flex items-center gap-2 z-10">
                                     <div
-                                        className={`h-3 w-3 rounded-full transition-all duration-500 ${
+                                        className={`h-2 w-2 rounded-full transition-all duration-500 ${
                                             apiHealth === 'healthy'
-                                                ? 'bg-green-500/90'
+                                                ? 'bg-green-500/70'
                                                 : apiHealth === 'unhealthy'
-                                                    ? 'bg-red-500/90'
-                                                    : 'bg-yellow-500/90'
+                                                    ? 'bg-red-500/70'
+                                                    : 'bg-yellow-500/70'
                                         }`}
                                     />
-                                    {(apiHealth === 'healthy' || apiHealth === 'checking') && (
-                                        <>
-                                            {/* Glow effect */}
-                                            <div
-                                                className={`absolute inset-0 rounded-full transition-all duration-500 ${
-                                                    apiHealth === 'healthy'
-                                                        ? 'bg-green-500/30'
-                                                        : 'bg-yellow-500/30'
-                                                } animate-glow-pulse`}
-                                            />
-                                            {/* Radar ping effect */}
-                                            <div
-                                                className={`absolute -inset-[2px] rounded-full border-2 ${
-                                                    apiHealth === 'healthy'
-                                                        ? 'border-green-500/50'
-                                                        : 'border-yellow-500/50'
-                                                } animate-sonar-ping`}
-                                            />
-                                        </>
-                                    )}
+                                    <span
+                                        className="transition-colors duration-300 group-hover:text-muted-foreground/80">
+                                        {getStatusMessage()}
+                                    </span>
                                 </div>
-                                <span className="transition-all duration-200 group-hover:text-foreground/90">
-                                    {getStatusMessage()}
-                                </span>
                             </div>
 
                             {/* Detailed Status Tooltip */}
                             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 
-                                          opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none">
+                                          opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none
+                                          select-none">
                                 <div
                                     className="bg-popover/95 backdrop-blur-sm border border-border/50 p-3 rounded-lg shadow-lg">
                                     {getDetailedStatus()}

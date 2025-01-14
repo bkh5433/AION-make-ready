@@ -4,77 +4,150 @@ on:
   push:
     branches: [ main, dev ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
 
 env:
   AWS_REGION: us-east-1
-  AMPLIFY_APP_ID: d2gprwz7nx272l
-  AMPLIFY_ENV: dev
 
 jobs:
-  setup-env:
+  validate-secrets:
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Set up environment variables
+      - name: Check Required Secrets
         run: |
-          echo "Setting up environment variables..."
+          missing_secrets=()
           
-          # Function to validate and create SSM parameter
-          create_ssm_param() {
-            local name=$1
-            local value=$2
-          
-            # Check if value is empty
-            if [ -z "$value" ]; then
-              echo "❌ Error: Value for $name is empty"
-              return 1
-            fi
-          
-            if aws ssm put-parameter \
-              --name "/amplify/${AMPLIFY_APP_ID}/${AMPLIFY_ENV}/${name}" \
-              --value "${value}" \
-              --type "SecureString" \
-              --overwrite; then
-              echo "✅ Successfully set parameter: ${name}"
-            else
-              echo "❌ Failed to set parameter: ${name}"
-              return 1
-            fi
-          }
-          
-          # Set environment based on branch
-          if [ "${GITHUB_REF##*/}" = "dev" ]; then
-            echo "🔧 Using development environment..."
-            API_URL="${{ secrets.DEV_API_URL }}"
-          else
-            echo "🔧 Using production environment..."
-            API_URL="${{ secrets.PROD_API_URL }}"
+          # Check AWS credentials (required for deployment)
+          if [[ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]]; then
+            missing_secrets+=("AWS_ACCESS_KEY_ID")
+          fi
+          if [[ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]]; then
+            missing_secrets+=("AWS_SECRET_ACCESS_KEY")
+          fi
+          if [[ -z "${{ secrets.EC2_HOST }}" ]]; then
+            missing_secrets+=("EC2_HOST")
+          fi
+          if [[ -z "${{ secrets.EC2_USERNAME }}" ]]; then
+            missing_secrets+=("EC2_USERNAME")
+          fi
+          if [[ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]]; then
+            missing_secrets+=("SSH_PRIVATE_KEY")
           fi
           
-          # Set up environment variables
-          create_ssm_param "API_URL" "$API_URL" || exit 1
+          # Check environment-specific secrets based on branch
+          if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            # Development environment secrets
+            if [[ -z "${{ secrets.DEV_DB_SERVER }}" ]]; then
+              missing_secrets+=("DEV_DB_SERVER")
+            fi
+            if [[ -z "${{ secrets.DEV_DB_NAME }}" ]]; then
+              missing_secrets+=("DEV_DB_NAME")
+            fi
+            if [[ -z "${{ secrets.DEV_DB_USER }}" ]]; then
+              missing_secrets+=("DEV_DB_USER")
+            fi
+            if [[ -z "${{ secrets.DEV_DB_PASSWORD }}" ]]; then
+              missing_secrets+=("DEV_DB_PASSWORD")
+            fi
+            if [[ -z "${{ secrets.DEV_CORS_ORIGINS }}" ]]; then
+              missing_secrets+=("DEV_CORS_ORIGINS")
+            fi
+          else
+            # Production environment secrets (optional)
+            if [[ -z "${{ secrets.PROD_DB_SERVER }}" ]]; then
+              echo "::warning::Missing optional production secret: PROD_DB_SERVER"
+            fi
+            if [[ -z "${{ secrets.PROD_DB_NAME }}" ]]; then
+              echo "::warning::Missing optional production secret: PROD_DB_NAME"
+            fi
+            if [[ -z "${{ secrets.PROD_DB_USER }}" ]]; then
+              echo "::warning::Missing optional production secret: PROD_DB_USER"
+            fi
+            if [[ -z "${{ secrets.PROD_DB_PASSWORD }}" ]]; then
+              echo "::warning::Missing optional production secret: PROD_DB_PASSWORD"
+            fi
+            if [[ -z "${{ secrets.PROD_CORS_ORIGINS }}" ]]; then
+              echo "::warning::Missing optional production secret: PROD_CORS_ORIGINS"
+            fi
+            if [[ -z "${{ secrets.PROD_FRONTEND_URL }}" ]]; then
+              echo "::warning::Missing optional production secret: PROD_FRONTEND_URL"
+            fi
+          fi
           
-          # Set up shared Firebase configuration
-          create_ssm_param "FIREBASE_PROJECT_ID" "${{ secrets.FIREBASE_PROJECT_ID }}" || exit 1
-          create_ssm_param "FIREBASE_PRIVATE_KEY_ID" "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" || exit 1
-          create_ssm_param "FIREBASE_PRIVATE_KEY" "${{ secrets.FIREBASE_PRIVATE_KEY }}" || exit 1
-          create_ssm_param "FIREBASE_CLIENT_EMAIL" "${{ secrets.FIREBASE_CLIENT_EMAIL }}" || exit 1
-          create_ssm_param "FIREBASE_CLIENT_ID" "${{ secrets.FIREBASE_CLIENT_ID }}" || exit 1
-          create_ssm_param "FIREBASE_AUTH_URI" "${{ secrets.FIREBASE_AUTH_URI }}" || exit 1
-          create_ssm_param "FIREBASE_TOKEN_URI" "${{ secrets.FIREBASE_TOKEN_URI }}" || exit 1
+          # Check optional Firebase secrets
+          if [[ -z "${{ secrets.FIREBASE_PROJECT_ID }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_PROJECT_ID"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_PRIVATE_KEY_ID"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_PRIVATE_KEY }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_PRIVATE_KEY"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_CLIENT_EMAIL }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_CLIENT_EMAIL"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_CLIENT_ID }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_CLIENT_ID"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_AUTH_URI }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_AUTH_URI"
+          fi
+          if [[ -z "${{ secrets.FIREBASE_TOKEN_URI }}" ]]; then
+            echo "::warning::Missing optional Firebase secret: FIREBASE_TOKEN_URI"
+          fi
           
-          echo "✅ Environment variables set up successfully!"
+          # Check optional Microsoft SSO secrets
+          if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            if [[ -z "${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_SSO_ENABLED"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_CLIENT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_CLIENT_ID"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_CLIENT_SECRET"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_TENANT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_TENANT_ID"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_DOMAIN_HINT"
+            fi
+            if [[ -z "${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: DEV_MICROSOFT_REDIRECT_URI"
+            fi
+          else
+            if [[ -z "${{ secrets.PROD_MICROSOFT_SSO_ENABLED }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_SSO_ENABLED"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_CLIENT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_CLIENT_ID"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_CLIENT_SECRET"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_TENANT_ID }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_TENANT_ID"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_DOMAIN_HINT"
+            fi
+            if [[ -z "${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}" ]]; then
+              echo "::warning::Missing optional Microsoft SSO secret: PROD_MICROSOFT_REDIRECT_URI"
+            fi
+          fi
+          
+          if (( ${#missing_secrets[@]} > 0 )); then
+            echo "::error::Missing required secrets: ${missing_secrets[*]}"
+            exit 1
+          fi
+          
+          echo "✅ All required secrets are present"
 
   deploy-backend:
     runs-on: ubuntu-latest
-    needs: setup-env
+    needs: validate-secrets
     steps:
       - uses: actions/checkout@v2
 
@@ -85,7 +158,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy Backend to EC2
+      - name: Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
@@ -108,8 +181,8 @@ jobs:
             docker system df
             echo "Memory usage:"
             free -h
-          
-            echo "�� Setting up deployment directory..."
+            
+            echo "📦 Setting up deployment directory..."
             DEPLOY_DIR=~/aion-api
             DEPLOY_BRANCH="${GITHUB_REF##*/}"
           
@@ -127,77 +200,54 @@ jobs:
             docker ps -a
             docker images
           
-            # Stop and remove all containers with name aion-api
+            # Stop and remove all containers
             echo "Stopping and removing old containers..."
-            docker ps -a --filter "name=aion-api" --format "{{.ID}}" | xargs -r docker stop
-            docker ps -a --filter "name=aion-api" --format "{{.ID}}" | xargs -r docker rm
+            docker ps -a --filter "name=aion-" --format "{{.ID}}" | xargs -r docker stop
+            docker ps -a --filter "name=aion-" --format "{{.ID}}" | xargs -r docker rm
           
             # Remove old images
-            echo "Removing old aion-api images..."
-            docker images "aion-api" --format "{{.ID}}" | xargs -r docker rmi
+            echo "Removing old images..."
+            docker images "aion-*" --format "{{.ID}}" | xargs -r docker rmi
           
             echo "Docker status after cleanup:"
             docker ps -a
             docker images
 
             echo "📥 Cloning repository..."
-            echo "Branch: \$DEPLOY_BRANCH"
             git clone -b \$DEPLOY_BRANCH https://github.com/${{ github.repository }}.git .
           
             echo "✅ Verifying repository..."
             git status
             echo "Current commit: $(git rev-parse HEAD)"
           
-            echo "🔍 Checking repository structure..."
-            ls -la
-            if [ ! -d "backend" ]; then
-              echo "❌ Error: backend directory not found!"
-              pwd
-              ls -la
-              exit 1
-            fi
+            # Set up nginx
+            echo "🔧 Setting up nginx..."
+            sudo mkdir -p /var/www/html
+            sudo chown -R www-data:www-data /var/www/html
           
-            echo "📦 Checking backend directory contents..."
-            ls -la backend/
+            # Backup existing nginx configuration
+            echo "📑 Backing up existing nginx configuration..."
+            sudo cp /etc/nginx/sites-available/api /etc/nginx/sites-available/api.backup
           
-            echo "📄 Copying requirements.txt and app.py to backend directory..."
-            cp requirements.txt backend/
-            cp app.py backend/
+            # Update nginx configuration
+            echo "🔄 Updating nginx configuration..."
+            sudo cp backend/nginx.conf /etc/nginx/sites-available/api
           
-            echo "🔍 Verifying app.py location..."
-            ls -la backend/app.py
+            # Test and reload nginx
+            echo "🔍 Testing nginx configuration..."
+            sudo nginx -t && sudo systemctl reload nginx
           
-            echo "🏗 Setting up nginx..."
-            sudo apt-get update
-            sudo apt-get install -y nginx
-            sudo rm -f /etc/nginx/sites-enabled/default
-            sudo cp backend/nginx.conf /etc/nginx/conf.d/default.conf
-            sudo systemctl restart nginx
-          
-            echo "🏗️ Building Docker image..."
-            echo "Using Dockerfile at: backend/Dockerfile"
-            cat backend/Dockerfile
-            docker build -t aion-api:$GITHUB_SHA -f backend/Dockerfile .
-          
-            echo "✅ Verifying built image..."
-            docker images | grep aion-api
-          
-            echo "🚀 Starting container..."
+            echo "🏗️ Building and starting services..."
             if [ "\$DEPLOY_BRANCH" = "dev" ]; then
               echo "🔧 Using development environment variables..."
-              docker run -d \
-                --name aion-api \
-                --restart always \
-                -p 5000:5000 \
-                -e ENV='production' \
+              docker-compose up -d --build \
+                -e ENVIRONMENT='development' \
                 -e DB_SERVER='${{ secrets.DEV_DB_SERVER }}' \
                 -e DB_NAME='${{ secrets.DEV_DB_NAME }}' \
                 -e DB_USER='${{ secrets.DEV_DB_USER }}' \
                 -e DB_PASSWORD='${{ secrets.DEV_DB_PASSWORD }}' \
-                -e AWS_S3_BUCKET='${{ secrets.DEV_AWS_BUCKET_NAME }}' \
-                -e AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
-                -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
+                -e FRONTEND_URL='${{ secrets.DEV_FRONTEND_URL }}' \
                 -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
                 -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
                 -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
@@ -205,22 +255,33 @@ jobs:
                 -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
                 -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
                 -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
-                aion-api:$GITHUB_SHA
+                -e MICROSOFT_SSO_ENABLED='${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}' \
+                -e MICROSOFT_CLIENT_ID='${{ secrets.DEV_MICROSOFT_CLIENT_ID }}' \
+                -e MICROSOFT_CLIENT_SECRET='${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}' \
+                -e MICROSOFT_TENANT_ID='${{ secrets.DEV_MICROSOFT_TENANT_ID }}' \
+                -e MICROSOFT_DOMAIN_HINT='${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}' \
+                -e MICROSOFT_REDIRECT_URI='${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}'
             else
               echo "🔧 Using production environment variables..."
-              docker run -d \
-                --name aion-api \
-                --restart always \
-                -p 5000:5000 \
-                -e ENV='production' \
+              # Check if production deployment is possible
+              if [[ -z "${{ secrets.PROD_DB_SERVER }}" ]] || \
+                 [[ -z "${{ secrets.PROD_DB_NAME }}" ]] || \
+                 [[ -z "${{ secrets.PROD_DB_USER }}" ]] || \
+                 [[ -z "${{ secrets.PROD_DB_PASSWORD }}" ]] || \
+                 [[ -z "${{ secrets.PROD_CORS_ORIGINS }}" ]] || \
+                 [[ -z "${{ secrets.PROD_FRONTEND_URL }}" ]]; then
+                echo "⚠️ Some production secrets are missing. Skipping deployment."
+                exit 0
+              fi
+          
+              docker-compose up -d --build \
+                -e ENVIRONMENT='production' \
                 -e DB_SERVER='${{ secrets.PROD_DB_SERVER }}' \
                 -e DB_NAME='${{ secrets.PROD_DB_NAME }}' \
                 -e DB_USER='${{ secrets.PROD_DB_USER }}' \
                 -e DB_PASSWORD='${{ secrets.PROD_DB_PASSWORD }}' \
-                -e AWS_S3_BUCKET='${{ secrets.PROD_AWS_BUCKET_NAME }}' \
-                -e AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
-                -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.PROD_CORS_ORIGINS }}' \
+                -e FRONTEND_URL='${{ secrets.PROD_FRONTEND_URL }}' \
                 -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
                 -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
                 -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
@@ -228,21 +289,27 @@ jobs:
                 -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
                 -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
                 -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
-                aion-api:$GITHUB_SHA
+                -e MICROSOFT_SSO_ENABLED='${{ secrets.PROD_MICROSOFT_SSO_ENABLED }}' \
+                -e MICROSOFT_CLIENT_ID='${{ secrets.PROD_MICROSOFT_CLIENT_ID }}' \
+                -e MICROSOFT_CLIENT_SECRET='${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}' \
+                -e MICROSOFT_TENANT_ID='${{ secrets.PROD_MICROSOFT_TENANT_ID }}' \
+                -e MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}' \
+                -e MICROSOFT_REDIRECT_URI='${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}'
             fi
-
-            # Wait for container to be healthy
-            echo "⏳ Waiting for container to start..."
-            sleep 5
           
-            # Check container logs
-            echo "📋 Container logs:"
-            docker logs aion-api
+            echo "⏳ Waiting for services to start..."
+            sleep 10
           
-            # Check if container is still running
-            if ! docker ps | grep -q aion-api; then
-              echo "❌ Container failed to start. Showing last logs:"
-              docker logs aion-api
+            # Check if services are running
+            if ! docker ps | grep -q "aion-api"; then
+              echo "❌ API service failed to start"
+              docker-compose logs api
+              exit 1
+            fi
+          
+            if ! docker ps | grep -q "aion-frontend"; then
+              echo "❌ Frontend service failed to start"
+              docker-compose logs frontend
               exit 1
             fi
           
@@ -252,28 +319,24 @@ jobs:
             RETRY_COUNT=0
             SLEEP_TIME=5
           
-            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-              if curl -s http://localhost:5000/api/health | grep -q "healthy"; then
+            while [ \$RETRY_COUNT -lt \$MAX_RETRIES ]; do
+              if curl -sk https://localhost/api/health | grep -q "healthy"; then
                 echo "✅ API is healthy"
                 break
               else
-                echo "⏳ API not ready, waiting... (Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
-                RETRY_COUNT=$((RETRY_COUNT + 1))
-                if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                echo "⏳ API not ready, waiting... (Attempt \$((RETRY_COUNT + 1))/\$MAX_RETRIES)"
+                RETRY_COUNT=\$((RETRY_COUNT + 1))
+                if [ \$RETRY_COUNT -eq \$MAX_RETRIES ]; then
                   echo "❌ API failed to become healthy. Showing logs:"
-                  docker logs aion-api
+                  docker-compose logs
                   exit 1
                 fi
-                sleep $SLEEP_TIME
+                sleep \$SLEEP_TIME
               fi
             done
 
             echo "🧹 Cleaning up old images..."
-            echo "Before cleanup:"
-            docker image ls
             docker image prune -a --force --filter "until=72h"
-            echo "After cleanup:"
-            docker image ls
           
             echo "📊 Final system status:"
             df -h
@@ -282,5 +345,5 @@ jobs:
             echo "✅ Deployment completed successfully!"
             echo "Branch: \$DEPLOY_BRANCH"
             echo "Commit: $GITHUB_SHA"
-            echo "Container ID: $(docker ps -q -f name=aion-api)"
+            echo "🌐 Application is now available at https://$(hostname -f)"
           EOF
