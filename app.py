@@ -200,7 +200,9 @@ def search_properties():
     - q: Search term for property name (optional)
     - include_metrics: Whether to include full metrics (default: true)
     """
+
     try:
+        logger.info("GET /api/properties/search endpoint accessed.")
         search_term = request.args.get('q', None)
         include_metrics = request.args.get('include_metrics', 'true').lower() == 'true'
 
@@ -372,8 +374,7 @@ def generate_report():
                 report_files = generate_multi_property_report(
                     template_name="break_even_template.xlsx",
                     properties=properties,
-                    output_dir=str(output_dir),
-                    api_url='http://127.0.0.1:5000/api/data',
+                    output_dir=str(output_dir)
                 )
 
                 # Process the files

@@ -2,17 +2,13 @@ from functools import wraps
 from flask import request, jsonify
 from datetime import datetime, timedelta
 import jwt
-import os
 from typing import Optional
 import firebase_admin
 from firebase_admin import credentials, firestore
 import hashlib
 import secrets
 import asyncio
-from asgiref.sync import async_to_sync
-
 from logger_config import LogConfig
-from utils.path_resolver import PathResolver
 from config import Config
 
 # Initialize Firebase
@@ -364,5 +360,6 @@ __all__ = [
     'get_remote_info', 'get_remote_info_sync',
     'set_remote_info', 'set_remote_info_sync',
     'clear_remote_info', 'clear_remote_info_sync',
-    'AuthMiddleware', 'require_auth', 'require_role'
+    'AuthMiddleware', 'require_auth', 'require_role',
+    'db'
 ]

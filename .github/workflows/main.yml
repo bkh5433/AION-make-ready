@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, dev ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
 
 env:
   AWS_REGION: us-east-1
@@ -12,8 +12,82 @@ env:
   AMPLIFY_ENV: dev
 
 jobs:
+  validate-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Required Secrets
+        id: check_secrets
+        run: |
+          missing_secrets=()
+          
+          # Function to check if a secret exists
+          check_secret() {
+            local name=$1
+            local value=$2
+            if [ -z "$value" ]; then
+              missing_secrets+=("$name")
+              echo "::warning::Missing required secret: $name"
+              return 1
+            fi
+            return 0
+          }
+          
+          # Check AWS credentials (required for deployment)
+          check_secret "AWS_ACCESS_KEY_ID" "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          check_secret "AWS_SECRET_ACCESS_KEY" "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          check_secret "EC2_HOST" "${{ secrets.EC2_HOST }}"
+          check_secret "EC2_USERNAME" "${{ secrets.EC2_USERNAME }}"
+          check_secret "SSH_PRIVATE_KEY" "${{ secrets.SSH_PRIVATE_KEY }}"
+          
+          # Check environment-specific secrets based on branch
+          if [ "${GITHUB_REF##*/}" = "dev" ]; then
+            check_secret "DEV_DB_SERVER" "${{ secrets.DEV_DB_SERVER }}"
+            check_secret "DEV_DB_NAME" "${{ secrets.DEV_DB_NAME }}"
+            check_secret "DEV_DB_USER" "${{ secrets.DEV_DB_USER }}"
+            check_secret "DEV_DB_PASSWORD" "${{ secrets.DEV_DB_PASSWORD }}"
+            check_secret "DEV_CORS_ORIGINS" "${{ secrets.DEV_CORS_ORIGINS }}"
+            # check_secret "DEV_FRONTEND_URL" "${{ secrets.DEV_FRONTEND_URL }}"
+          else
+            check_secret "PROD_DB_SERVER" "${{ secrets.PROD_DB_SERVER }}"
+            check_secret "PROD_DB_NAME" "${{ secrets.PROD_DB_NAME }}"
+            check_secret "PROD_DB_USER" "${{ secrets.PROD_DB_USER }}"
+            check_secret "PROD_DB_PASSWORD" "${{ secrets.PROD_DB_PASSWORD }}"
+            check_secret "PROD_CORS_ORIGINS" "${{ secrets.PROD_CORS_ORIGINS }}"
+            check_secret "PROD_FRONTEND_URL" "${{ secrets.PROD_FRONTEND_URL }}"
+          fi
+          
+          # Check Firebase secrets (warn but don't fail if missing)
+          for secret in FIREBASE_PROJECT_ID FIREBASE_PRIVATE_KEY_ID FIREBASE_PRIVATE_KEY FIREBASE_CLIENT_EMAIL FIREBASE_CLIENT_ID FIREBASE_AUTH_URI FIREBASE_TOKEN_URI; do
+            if [ -z "${{ secrets[secret] }}" ]; then
+              echo "::warning::Missing optional Firebase secret: $secret"
+            fi
+          done
+          
+          # Check Microsoft SSO secrets (warn but don't fail if missing)
+          if [ "${GITHUB_REF##*/}" = "dev" ]; then
+            for secret in DEV_MICROSOFT_SSO_ENABLED DEV_MICROSOFT_CLIENT_ID DEV_MICROSOFT_CLIENT_SECRET DEV_MICROSOFT_TENANT_ID DEV_MICROSOFT_DOMAIN_HINT DEV_MICROSOFT_REDIRECT_URI; do
+              if [ -z "${{ secrets[secret] }}" ]; then
+                echo "::warning::Missing optional Microsoft SSO secret: $secret"
+              fi
+            done
+          else
+            for secret in PROD_MICROSOFT_SSO_ENABLED PROD_MICROSOFT_CLIENT_ID PROD_MICROSOFT_CLIENT_SECRET PROD_MICROSOFT_TENANT_ID PROD_MICROSOFT_DOMAIN_HINT PROD_MICROSOFT_REDIRECT_URI; do
+              if [ -z "${{ secrets[secret] }}" ]; then
+                echo "::warning::Missing optional Microsoft SSO secret: $secret"
+              fi
+            done
+          fi
+          
+          if [ ${#missing_secrets[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing_secrets[*]}"
+            exit 1
+          fi
+          
+          echo "All required secrets are present"
+
   setup-env:
     runs-on: ubuntu-latest
+    needs: validate-secrets
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -30,11 +104,17 @@ jobs:
           create_ssm_param() {
             local name=$1
             local value=$2
+            local required=$3
           
             # Check if value is empty
             if [ -z "$value" ]; then
-              echo "❌ Error: Value for $name is empty"
-              return 1
+              if [ "$required" = "true" ]; then
+                echo "❌ Error: Required value for $name is empty"
+                return 1
+              else
+                echo "⚠️ Warning: Optional value for $name is empty, skipping..."
+                return 0
+              fi
             fi
           
             if aws ssm put-parameter \
@@ -44,8 +124,13 @@ jobs:
               --overwrite; then
               echo "✅ Successfully set parameter: ${name}"
             else
-              echo "❌ Failed to set parameter: ${name}"
-              return 1
+              if [ "$required" = "true" ]; then
+                echo "❌ Failed to set required parameter: ${name}"
+                return 1
+              else
+                echo "⚠️ Failed to set optional parameter: ${name}"
+                return 0
+              fi
             fi
           }
           
@@ -53,22 +138,55 @@ jobs:
           if [ "${GITHUB_REF##*/}" = "dev" ]; then
             echo "🔧 Using development environment..."
             API_URL="${{ secrets.DEV_API_URL }}"
+            FRONTEND_URL="${{ secrets.DEV_FRONTEND_URL }}"
+          
+            # Set required parameters
+            create_ssm_param "API_URL" "$API_URL" true || exit 1
+            create_ssm_param "FRONTEND_URL" "$FRONTEND_URL" true || exit 1
+            create_ssm_param "DB_SERVER" "${{ secrets.DEV_DB_SERVER }}" true || exit 1
+            create_ssm_param "DB_NAME" "${{ secrets.DEV_DB_NAME }}" true || exit 1
+            create_ssm_param "DB_USER" "${{ secrets.DEV_DB_USER }}" true || exit 1
+            create_ssm_param "DB_PASSWORD" "${{ secrets.DEV_DB_PASSWORD }}" true || exit 1
+            create_ssm_param "CORS_ORIGINS" "${{ secrets.DEV_CORS_ORIGINS }}" true || exit 1
+          
+            # Set optional Microsoft SSO parameters
+            create_ssm_param "MICROSOFT_SSO_ENABLED" "${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}" false
+            create_ssm_param "MICROSOFT_CLIENT_ID" "${{ secrets.DEV_MICROSOFT_CLIENT_ID }}" false
+            create_ssm_param "MICROSOFT_CLIENT_SECRET" "${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}" false
+            create_ssm_param "MICROSOFT_TENANT_ID" "${{ secrets.DEV_MICROSOFT_TENANT_ID }}" false
+            create_ssm_param "MICROSOFT_DOMAIN_HINT" "${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}" false
+            create_ssm_param "MICROSOFT_REDIRECT_URI" "${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}" false
           else
             echo "🔧 Using production environment..."
             API_URL="${{ secrets.PROD_API_URL }}"
+            FRONTEND_URL="${{ secrets.PROD_FRONTEND_URL }}"
+          
+            # Set required parameters
+            create_ssm_param "API_URL" "$API_URL" true || exit 1
+            create_ssm_param "FRONTEND_URL" "$FRONTEND_URL" true || exit 1
+            create_ssm_param "DB_SERVER" "${{ secrets.PROD_DB_SERVER }}" true || exit 1
+            create_ssm_param "DB_NAME" "${{ secrets.PROD_DB_NAME }}" true || exit 1
+            create_ssm_param "DB_USER" "${{ secrets.PROD_DB_USER }}" true || exit 1
+            create_ssm_param "DB_PASSWORD" "${{ secrets.PROD_DB_PASSWORD }}" true || exit 1
+            create_ssm_param "CORS_ORIGINS" "${{ secrets.PROD_CORS_ORIGINS }}" true || exit 1
+          
+            # Set optional Microsoft SSO parameters
+            create_ssm_param "MICROSOFT_SSO_ENABLED" "${{ secrets.PROD_MICROSOFT_SSO_ENABLED }}" false
+            create_ssm_param "MICROSOFT_CLIENT_ID" "${{ secrets.PROD_MICROSOFT_CLIENT_ID }}" false
+            create_ssm_param "MICROSOFT_CLIENT_SECRET" "${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}" false
+            create_ssm_param "MICROSOFT_TENANT_ID" "${{ secrets.PROD_MICROSOFT_TENANT_ID }}" false
+            create_ssm_param "MICROSOFT_DOMAIN_HINT" "${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}" false
+            create_ssm_param "MICROSOFT_REDIRECT_URI" "${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}" false
           fi
           
-          # Set up environment variables
-          create_ssm_param "API_URL" "$API_URL" || exit 1
-          
-          # Set up shared Firebase configuration
-          create_ssm_param "FIREBASE_PROJECT_ID" "${{ secrets.FIREBASE_PROJECT_ID }}" || exit 1
-          create_ssm_param "FIREBASE_PRIVATE_KEY_ID" "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" || exit 1
-          create_ssm_param "FIREBASE_PRIVATE_KEY" "${{ secrets.FIREBASE_PRIVATE_KEY }}" || exit 1
-          create_ssm_param "FIREBASE_CLIENT_EMAIL" "${{ secrets.FIREBASE_CLIENT_EMAIL }}" || exit 1
-          create_ssm_param "FIREBASE_CLIENT_ID" "${{ secrets.FIREBASE_CLIENT_ID }}" || exit 1
-          create_ssm_param "FIREBASE_AUTH_URI" "${{ secrets.FIREBASE_AUTH_URI }}" || exit 1
-          create_ssm_param "FIREBASE_TOKEN_URI" "${{ secrets.FIREBASE_TOKEN_URI }}" || exit 1
+          # Set optional Firebase configuration
+          create_ssm_param "FIREBASE_PROJECT_ID" "${{ secrets.FIREBASE_PROJECT_ID }}" false
+          create_ssm_param "FIREBASE_PRIVATE_KEY_ID" "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" false
+          create_ssm_param "FIREBASE_PRIVATE_KEY" "${{ secrets.FIREBASE_PRIVATE_KEY }}" false
+          create_ssm_param "FIREBASE_CLIENT_EMAIL" "${{ secrets.FIREBASE_CLIENT_EMAIL }}" false
+          create_ssm_param "FIREBASE_CLIENT_ID" "${{ secrets.FIREBASE_CLIENT_ID }}" false
+          create_ssm_param "FIREBASE_AUTH_URI" "${{ secrets.FIREBASE_AUTH_URI }}" false
+          create_ssm_param "FIREBASE_TOKEN_URI" "${{ secrets.FIREBASE_TOKEN_URI }}" false
           
           echo "✅ Environment variables set up successfully!"
 
@@ -92,7 +210,7 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           GITHUB_SHA: ${{ github.sha }}
           BRANCH_NAME: ${GITHUB_REF##*/}
-        run: |
+s        run: |
           echo "🚀 Starting deployment process..."
           echo "Branch: ${GITHUB_REF##*/}"
           echo "Commit: $GITHUB_SHA"
@@ -108,8 +226,8 @@ jobs:
             docker system df
             echo "Memory usage:"
             free -h
-          
-            echo "�� Setting up deployment directory..."
+  
+  echo "📦 Setting up deployment directory..."
             DEPLOY_DIR=~/aion-api
             DEPLOY_BRANCH="${GITHUB_REF##*/}"
           
@@ -194,10 +312,8 @@ jobs:
                 -e DB_NAME='${{ secrets.DEV_DB_NAME }}' \
                 -e DB_USER='${{ secrets.DEV_DB_USER }}' \
                 -e DB_PASSWORD='${{ secrets.DEV_DB_PASSWORD }}' \
-                -e AWS_S3_BUCKET='${{ secrets.DEV_AWS_BUCKET_NAME }}' \
-                -e AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
-                -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
+  -e FRONTEND_URL='${{ secrets.DEV_FRONTEND_URL }}' \
                 -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
                 -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
                 -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
@@ -205,6 +321,12 @@ jobs:
                 -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
                 -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
                 -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
+  # -e MICROSOFT_SSO_ENABLED='${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}' \
+  -e MICROSOFT_CLIENT_ID='${{ secrets.DEV_MICROSOFT_CLIENT_ID }}' \
+  -e MICROSOFT_CLIENT_SECRET='${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}' \
+  -e MICROSOFT_TENANT_ID='${{ secrets.DEV_MICROSOFT_TENANT_ID }}' \
+  -e MICROSOFT_DOMAIN_HINT='${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}' \
+  -e MICROSOFT_REDIRECT_URI='${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}' \
                 aion-api:$GITHUB_SHA
             else
               echo "🔧 Using production environment variables..."
@@ -217,10 +339,8 @@ jobs:
                 -e DB_NAME='${{ secrets.PROD_DB_NAME }}' \
                 -e DB_USER='${{ secrets.PROD_DB_USER }}' \
                 -e DB_PASSWORD='${{ secrets.PROD_DB_PASSWORD }}' \
-                -e AWS_S3_BUCKET='${{ secrets.PROD_AWS_BUCKET_NAME }}' \
-                -e AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
-                -e AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
                 -e CORS_ORIGINS='${{ secrets.PROD_CORS_ORIGINS }}' \
+  -e FRONTEND_URL='${{ secrets.PROD_FRONTEND_URL }}' \
                 -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
                 -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
                 -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
@@ -228,6 +348,12 @@ jobs:
                 -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
                 -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
                 -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
+  # -e MICROSOFT_SSO_ENABLED='${{ secrets.PROD_MICROSOFT_SSO_ENABLED }}' \
+  -e MICROSOFT_CLIENT_ID='${{ secrets.PROD_MICROSOFT_CLIENT_ID }}' \
+  -e MICROSOFT_CLIENT_SECRET='${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}' \
+  -e MICROSOFT_TENANT_ID='${{ secrets.PROD_MICROSOFT_TENANT_ID }}' \
+  -e MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}' \
+  -e MICROSOFT_REDIRECT_URI='${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}' \
                 aion-api:$GITHUB_SHA
             fi
 
