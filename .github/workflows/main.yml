@@ -170,9 +170,16 @@ jobs:
           
             # Create fresh deployment directory
             echo "Removing old deployment directory if it exists..."
+            # First remove log files with sudo
+            sudo rm -rf \$DEPLOY_DIR/logs/*
+            # Then remove the rest of the directory
             rm -rf \$DEPLOY_DIR
             mkdir -p \$DEPLOY_DIR
             cd \$DEPLOY_DIR
+            # Create logs directory with proper permissions
+            mkdir -p logs
+            sudo chown -R ubuntu:ubuntu logs
+            sudo chmod -R 755 logs
           
             echo "🐳 Checking Docker status..."
             docker ps
