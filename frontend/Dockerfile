@@ -19,8 +19,8 @@ RUN npm run build
 # Create a minimal container to hold the built files
 FROM alpine:latest
 
-# Create www-data user and group
-RUN addgroup -S www-data && adduser -S www-data -G www-data
+# Create www-data user (group may already exist)
+RUN adduser -S -G www-data www-data 2>/dev/null || adduser -S -g www-data www-data
 
 # Install rsync for file copying
 RUN apk add --no-cache rsync
