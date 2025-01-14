@@ -15,5 +15,12 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Keep the container running to maintain the volume mount
-CMD ["tail", "-f", "/dev/null"] 
+
+# Copy built files from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+# COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Keep nginx running in foreground
+# CMD ["nginx", "-g", "daemon off;"] 

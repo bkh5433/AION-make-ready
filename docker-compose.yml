@@ -67,6 +67,11 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
-      - /var/www/html:/app/dist
+      - /etc/nginx/snippets:/etc/nginx/snippets:ro
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /etc/ssl/private:/etc/ssl/private:ro
     restart: always
