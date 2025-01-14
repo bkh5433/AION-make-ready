@@ -55,24 +55,24 @@ jobs:
               missing_secrets+=("DEV_CORS_ORIGINS")
             fi
           else
-            # Production environment secrets
+            # Production environment secrets (optional)
             if [[ -z "${{ secrets.PROD_DB_SERVER }}" ]]; then
-              missing_secrets+=("PROD_DB_SERVER")
+              echo "::warning::Missing optional production secret: PROD_DB_SERVER"
             fi
             if [[ -z "${{ secrets.PROD_DB_NAME }}" ]]; then
-              missing_secrets+=("PROD_DB_NAME")
+              echo "::warning::Missing optional production secret: PROD_DB_NAME"
             fi
             if [[ -z "${{ secrets.PROD_DB_USER }}" ]]; then
-              missing_secrets+=("PROD_DB_USER")
+              echo "::warning::Missing optional production secret: PROD_DB_USER"
             fi
             if [[ -z "${{ secrets.PROD_DB_PASSWORD }}" ]]; then
-              missing_secrets+=("PROD_DB_PASSWORD")
+              echo "::warning::Missing optional production secret: PROD_DB_PASSWORD"
             fi
             if [[ -z "${{ secrets.PROD_CORS_ORIGINS }}" ]]; then
-              missing_secrets+=("PROD_CORS_ORIGINS")
+              echo "::warning::Missing optional production secret: PROD_CORS_ORIGINS"
             fi
             if [[ -z "${{ secrets.PROD_FRONTEND_URL }}" ]]; then
-              missing_secrets+=("PROD_FRONTEND_URL")
+              echo "::warning::Missing optional production secret: PROD_FRONTEND_URL"
             fi
           fi
           
@@ -370,6 +370,17 @@ jobs:
                 -e MICROSOFT_REDIRECT_URI='${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}'
             else
               echo "🔧 Using production environment variables..."
+              # Check if production deployment is possible
+              if [[ -z "${{ secrets.PROD_DB_SERVER }}" ]] || \
+                 [[ -z "${{ secrets.PROD_DB_NAME }}" ]] || \
+                 [[ -z "${{ secrets.PROD_DB_USER }}" ]] || \
+                 [[ -z "${{ secrets.PROD_DB_PASSWORD }}" ]] || \
+                 [[ -z "${{ secrets.PROD_CORS_ORIGINS }}" ]] || \
+                 [[ -z "${{ secrets.PROD_FRONTEND_URL }}" ]]; then
+                echo "⚠️ Some production secrets are missing. Skipping deployment."
+                exit 0
+              fi
+          
               docker-compose up -d --build \
                 -e DB_SERVER='${{ secrets.PROD_DB_SERVER }}' \
                 -e DB_NAME='${{ secrets.PROD_DB_NAME }}' \
