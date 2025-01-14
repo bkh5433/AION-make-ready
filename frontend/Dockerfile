@@ -19,6 +19,9 @@ RUN npm run build
 # Create a minimal container to hold the built files
 FROM alpine:latest
 
+# Create www-data user and group
+RUN addgroup -S www-data && adduser -S www-data -G www-data
+
 # Install rsync for file copying
 RUN apk add --no-cache rsync
 
@@ -28,9 +31,16 @@ WORKDIR /app
 # Copy built files from builder stage
 COPY --from=builder /app/dist /app
 
+# Set ownership of the app directory
+RUN chown -R www-data:www-data /app
+
 # Add script to sync files and keep container running
 RUN echo '#!/bin/sh\nwhile true; do\n  rsync -av --delete /app/ /var/www/html/\n  sleep 5\ndone' > /entrypoint.sh && \
-    chmod +x /entrypoint.sh
+    chmod +x /entrypoint.sh && \
+    chown www-data:www-data /entrypoint.sh
+
+# Switch to www-data user
+USER www-data
 
 # Keep container running and sync files
 CMD ["/entrypoint.sh"] 
