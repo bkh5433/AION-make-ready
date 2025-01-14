@@ -220,31 +220,34 @@ jobs:
             sudo nginx -t && sudo systemctl reload nginx
           
             echo "🏗️ Building and starting services..."
-            if [ "\$DEPLOY_BRANCH" = "dev" ]; then
+            if [ "$DEPLOY_BRANCH" = "dev" ]; then
               echo "🔧 Using development environment variables..."
-              ENVIRONMENT=development \
-              DB_SERVER='${{ secrets.DEV_DB_SERVER }}' \
-              DB_NAME='${{ secrets.DEV_DB_NAME }}' \
-              DB_USER='${{ secrets.DEV_DB_USER }}' \
-              DB_PASSWORD='${{ secrets.DEV_DB_PASSWORD }}' \
-              CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
-              FRONTEND_URL='${{ secrets.DEV_FRONTEND_URL }}' \
-              AWS_S3_BUCKET='${{ secrets.AWS_S3_BUCKET }}' \
-              AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
-              AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
-              FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
-              FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
-              FIREBASE_PRIVATE_KEY="${{ secrets.FIREBASE_PRIVATE_KEY }}" \
-              FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}' \
-              FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
-              FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
-              FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
-              MICROSOFT_SSO_ENABLED='${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}' \
-              MICROSOFT_CLIENT_ID='${{ secrets.DEV_MICROSOFT_CLIENT_ID }}' \
-              MICROSOFT_CLIENT_SECRET='${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}' \
-              MICROSOFT_TENANT_ID='${{ secrets.DEV_MICROSOFT_TENANT_ID }}' \
-              MICROSOFT_DOMAIN_HINT='${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}' \
-              MICROSOFT_REDIRECT_URI='${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}' \
+              # Create .env file for development
+              echo "ENVIRONMENT=development" > .env
+              echo "DB_SERVER=${{ secrets.DEV_DB_SERVER }}" >> .env
+              echo "DB_NAME=${{ secrets.DEV_DB_NAME }}" >> .env
+              echo "DB_USER=${{ secrets.DEV_DB_USER }}" >> .env
+              echo "DB_PASSWORD=${{ secrets.DEV_DB_PASSWORD }}" >> .env
+              echo "CORS_ORIGINS=${{ secrets.DEV_CORS_ORIGINS }}" >> .env
+              echo "FRONTEND_URL=${{ secrets.DEV_FRONTEND_URL }}" >> .env
+              echo "AWS_S3_BUCKET=${{ secrets.AWS_S3_BUCKET }}" >> .env
+              echo "AWS_ACCESS_KEY=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+              echo "AWS_SECRET_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+              echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> .env
+              echo "FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" >> .env
+              echo "FIREBASE_PRIVATE_KEY=\"${{ secrets.FIREBASE_PRIVATE_KEY }}\"" >> .env
+              echo "FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}" >> .env
+              echo "FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}" >> .env
+              echo "FIREBASE_AUTH_URI=${{ secrets.FIREBASE_AUTH_URI }}" >> .env
+              echo "FIREBASE_TOKEN_URI=${{ secrets.FIREBASE_TOKEN_URI }}" >> .env
+              echo "MICROSOFT_SSO_ENABLED=${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}" >> .env
+              echo "MICROSOFT_CLIENT_ID=${{ secrets.DEV_MICROSOFT_CLIENT_ID }}" >> .env
+              echo "MICROSOFT_CLIENT_SECRET=${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}" >> .env
+              echo "MICROSOFT_TENANT_ID=${{ secrets.DEV_MICROSOFT_TENANT_ID }}" >> .env
+              echo "MICROSOFT_DOMAIN_HINT=${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}" >> .env
+              echo "MICROSOFT_REDIRECT_URI=${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}" >> .env
+          
+              # Run docker compose with the .env file
               docker compose up -d --build
             else
               echo "🔧 Using production environment variables..."
