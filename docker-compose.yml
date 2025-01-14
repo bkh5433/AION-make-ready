@@ -70,7 +70,9 @@ services:
     user: root
     entrypoint: >
       /bin/sh -c "
+        echo 'Setting up permissions...' &&
         chown -R www-data:www-data /var/www/html &&
-        su-exec www-data /entrypoint.sh
+        echo 'Starting sync service as www-data...' &&
+        exec su-exec www-data /entrypoint.sh
       "
     restart: always                                                                                                                       

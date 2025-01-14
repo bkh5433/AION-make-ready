@@ -35,7 +35,21 @@ COPY --from=builder /app/dist /app
 RUN chown -R www-data:www-data /app
 
 # Create the entrypoint script properly
-RUN printf '#!/bin/sh\n\nwhile true; do\n    rsync -av --delete /app/ /var/www/html/\n    sleep 5\ndone\n' > /entrypoint.sh && \
+RUN printf '#!/bin/sh\n\
+\n\
+echo "Starting frontend file sync service..."\n\
+\n\
+# Initial sync\n\
+echo "Performing initial sync..."\n\
+rsync -av --delete /app/ /var/www/html/\n\
+\n\
+# Continuous sync\n\
+echo "Starting continuous sync..."\n\
+while true; do\n\
+    echo "Checking for changes..."\n\
+    rsync -av --delete /app/ /var/www/html/\n\
+    sleep 5\n\
+done\n' > /entrypoint.sh && \
     chmod +x /entrypoint.sh && \
     chown www-data:www-data /entrypoint.sh
 
