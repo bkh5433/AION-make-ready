@@ -4,7 +4,7 @@ FROM node:20-alpine as builder
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package*.json ./
 
 # Install dependencies
 RUN npm install
@@ -15,12 +15,11 @@ COPY . .
 # Build the application
 RUN npm run build
 
+# Use nginx for serving
+FROM nginx:alpine
 
 # Copy built files from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy nginx configuration
-# COPY nginx.conf /etc/nginx/conf.d/default.conf
-
 # Keep nginx running in foreground
-# CMD ["nginx", "-g", "daemon off;"] 
+CMD ["nginx", "-g", "daemon off;"] 

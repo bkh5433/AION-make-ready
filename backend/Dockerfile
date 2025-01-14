@@ -17,14 +17,14 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements and install dependencies
-COPY ../requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all application files from parent directory
-COPY .. .
+# Copy all application files
+COPY . .
 
 # Create log directory
-RUN mkdir -p /app/logs
+RUN mkdir -p /app/logs && chown -R www-data:www-data /app/logs
 
 # Set Python path
 ENV PYTHONPATH=/app

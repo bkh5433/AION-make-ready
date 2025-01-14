@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     environment:
       # Database Configuration
       - DB_SERVER=${DB_SERVER}
@@ -67,11 +67,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    ports:
-      - "80:80"
-      - "443:443"
     volumes:
-      - /etc/nginx/snippets:/etc/nginx/snippets:ro
-      - /etc/ssl/certs:/etc/ssl/certs:ro
-      - /etc/ssl/private:/etc/ssl/private:ro
+      - /var/www/html:/usr/share/nginx/html
     restart: always
