@@ -166,7 +166,8 @@ jobs:
           
             echo "📦 Setting up deployment directory..."
             DEPLOY_DIR=~/aion-api
-            DEPLOY_BRANCH="${GITHUB_REF##*/}"
+            DEPLOY_BRANCH="$(echo ${GITHUB_REF##*/})"
+            echo "Debug: Current branch is '\$DEPLOY_BRANCH'"
           
             # Create fresh deployment directory
             echo "Removing old deployment directory if it exists..."
@@ -229,7 +230,7 @@ jobs:
             sudo nginx -t && sudo systemctl reload nginx
           
             echo "🏗️ Building and starting services..."
-            if [ "$DEPLOY_BRANCH" = "dev" ]; then
+            if [ "\$DEPLOY_BRANCH" = "dev" ]; then
               echo "🔧 Using development environment variables..."
               # Create .env file for development
               echo "ENVIRONMENT=development" > .env
