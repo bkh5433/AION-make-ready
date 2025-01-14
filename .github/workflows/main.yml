@@ -176,10 +176,6 @@ jobs:
             rm -rf \$DEPLOY_DIR
             mkdir -p \$DEPLOY_DIR
             cd \$DEPLOY_DIR
-            # Create logs directory with proper permissions
-            mkdir -p logs
-            sudo chown -R ubuntu:ubuntu logs
-            sudo chmod -R 755 logs
           
             echo "🐳 Checking Docker status..."
             docker ps
@@ -208,6 +204,12 @@ jobs:
             echo "✅ Verifying repository..."
             git status
             echo "Current commit: $(git rev-parse HEAD)"
+          
+            # Create logs directory with proper permissions
+            echo "📁 Setting up logs directory..."
+            mkdir -p logs
+            sudo chown -R ubuntu:ubuntu logs
+            sudo chmod -R 755 logs
           
             # Set up nginx
             echo "🔧 Setting up nginx..."
