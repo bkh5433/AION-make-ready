@@ -34,8 +34,8 @@ COPY --from=builder /app/dist /app
 # Set ownership of the app directory
 RUN chown -R www-data:www-data /app
 
-# Add script to sync files and keep container running
-RUN echo '#!/bin/sh\nwhile true; do\n  rsync -av --delete /app/ /var/www/html/\n  sleep 5\ndone' > /entrypoint.sh && \
+# Create the entrypoint script properly
+RUN printf '#!/bin/sh\n\nwhile true; do\n    rsync -av --delete /app/ /var/www/html/\n    sleep 5\ndone\n' > /entrypoint.sh && \
     chmod +x /entrypoint.sh && \
     chown www-data:www-data /entrypoint.sh
 
