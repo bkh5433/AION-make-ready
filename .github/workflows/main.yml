@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [ main, dev ]
 
-env:
-  AWS_REGION: us-east-1
-
 jobs:
   validate-secrets:
     runs-on: ubuntu-latest
@@ -17,13 +14,7 @@ jobs:
         run: |
           missing_secrets=()
           
-          # Check AWS credentials (required for deployment)
-          if [[ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]]; then
-            missing_secrets+=("AWS_ACCESS_KEY_ID")
-          fi
-          if [[ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]]; then
-            missing_secrets+=("AWS_SECRET_ACCESS_KEY")
-          fi
+          # Check SSH credentials (required for deployment)
           if [[ -z "${{ secrets.EC2_HOST }}" ]]; then
             missing_secrets+=("EC2_HOST")
           fi
@@ -145,19 +136,10 @@ jobs:
           
           echo "✅ All required secrets are present"
 
-  deploy-backend:
+  deploy:
     runs-on: ubuntu-latest
     needs: validate-secrets
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
       - name: Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -247,6 +229,9 @@ jobs:
               DB_PASSWORD='${{ secrets.DEV_DB_PASSWORD }}' \
               CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
               FRONTEND_URL='${{ secrets.DEV_FRONTEND_URL }}' \
+              AWS_S3_BUCKET='${{ secrets.AWS_S3_BUCKET }}' \
+              AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
+              AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
               FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
               FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
               FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
@@ -281,6 +266,9 @@ jobs:
               DB_PASSWORD='${{ secrets.PROD_DB_PASSWORD }}' \
               CORS_ORIGINS='${{ secrets.PROD_CORS_ORIGINS }}' \
               FRONTEND_URL='${{ secrets.PROD_FRONTEND_URL }}' \
+              AWS_S3_BUCKET='${{ secrets.AWS_S3_BUCKET }}' \
+              AWS_ACCESS_KEY='${{ secrets.AWS_ACCESS_KEY_ID }}' \
+              AWS_SECRET_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
               FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
               FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
               FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
