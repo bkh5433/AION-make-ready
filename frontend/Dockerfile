@@ -4,10 +4,10 @@ FROM node:20-alpine as builder
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
-# Update package-lock.json and install dependencies
-RUN npm install && npm ci
+# Install dependencies
+RUN npm install
 
 # Copy source code
 COPY . .
