@@ -43,11 +43,11 @@ class Config:
     FIREBASE_CONFIG = {
         'project_id': config('FIREBASE_PROJECT_ID'),
         'private_key_id': config('FIREBASE_PRIVATE_KEY_ID'),
-        'private_key': config('FIREBASE_PRIVATE_KEY').replace('\\\\n', '\n'),
+        'private_key': config('FIREBASE_PRIVATE_KEY', default='').replace('\\\\n', '\n').replace('\\n', '\n'),
         'client_email': config('FIREBASE_CLIENT_EMAIL'),
         'client_id': config('FIREBASE_CLIENT_ID'),
-        'auth_uri': config('FIREBASE_AUTH_URI'),
-        'token_uri': config('FIREBASE_TOKEN_URI')
+        'auth_uri': config('FIREBASE_AUTH_URI', default='https://accounts.google.com/o/oauth2/auth'),
+        'token_uri': config('FIREBASE_TOKEN_URI', default='https://oauth2.googleapis.com/token')
     }
 
     # Microsoft SSO

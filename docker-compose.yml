@@ -25,7 +25,7 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
       - CORS_MAX_AGE=3600
       # Cache Configuration
-      - CACHE_REFRESH_INTERVAL=25
+      - CACHE_REFRESH_INTERVAL=300
       - CACHE_FORCE_REFRESH=3600
       - CACHE_REFRESH_TIMEOUT=30
       - CACHE_MAX_RETRY_ATTEMPTS=3
@@ -38,7 +38,7 @@ services:
       # Firebase Configuration
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
       - FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
-      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
+      - "FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}"
       - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
       - FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
       - FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
@@ -68,5 +68,5 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     volumes:
-      - /var/www/html:/usr/share/nginx/html
-    restart: always
+      - /var/www/html:/app
+    restart: always                                                                                                                       

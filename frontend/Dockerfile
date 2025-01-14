@@ -15,11 +15,14 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Use nginx for serving
-FROM nginx:alpine
+# Create a minimal container to hold the built files
+FROM alpine:latest
+
+# Set working directory
+WORKDIR /app
 
 # Copy built files from builder stage
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/dist /app
 
-# Keep nginx running in foreground
-CMD ["nginx", "-g", "daemon off;"] 
+# Keep container running
+CMD ["tail", "-f", "/dev/null"] 
