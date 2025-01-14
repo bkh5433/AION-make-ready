@@ -1,16 +1,13 @@
-FROM node:18-alpine as builder
+FROM node:20-alpine as builder
 
 # Set working directory
 WORKDIR /app
 
-# Update npm to latest version
-RUN npm install -g npm@latest
-
 # Copy package files
-COPY package.json ./
+COPY package*.json ./
 
-# Install dependencies and generate new package-lock.json
-RUN npm install
+# Install dependencies
+RUN npm ci
 
 # Copy source code
 COPY . .
