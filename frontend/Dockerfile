@@ -7,10 +7,10 @@ WORKDIR /app
 RUN npm install -g npm@latest
 
 # Copy package files
-COPY package*.json ./
+COPY package.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies and generate new package-lock.json
+RUN npm install
 
 # Copy source code
 COPY . .
