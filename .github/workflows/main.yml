@@ -240,27 +240,27 @@ jobs:
             echo "🏗️ Building and starting services..."
             if [ "\$DEPLOY_BRANCH" = "dev" ]; then
               echo "🔧 Using development environment variables..."
-              docker compose up -d --build \
-                -e ENVIRONMENT='development' \
-                -e DB_SERVER='${{ secrets.DEV_DB_SERVER }}' \
-                -e DB_NAME='${{ secrets.DEV_DB_NAME }}' \
-                -e DB_USER='${{ secrets.DEV_DB_USER }}' \
-                -e DB_PASSWORD='${{ secrets.DEV_DB_PASSWORD }}' \
-                -e CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
-                -e FRONTEND_URL='${{ secrets.DEV_FRONTEND_URL }}' \
-                -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
-                -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
-                -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
-                -e FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}' \
-                -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
-                -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
-                -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
-                -e MICROSOFT_SSO_ENABLED='${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}' \
-                -e MICROSOFT_CLIENT_ID='${{ secrets.DEV_MICROSOFT_CLIENT_ID }}' \
-                -e MICROSOFT_CLIENT_SECRET='${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}' \
-                -e MICROSOFT_TENANT_ID='${{ secrets.DEV_MICROSOFT_TENANT_ID }}' \
-                -e MICROSOFT_DOMAIN_HINT='${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}' \
-                -e MICROSOFT_REDIRECT_URI='${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}'
+              ENVIRONMENT=development \
+              DB_SERVER='${{ secrets.DEV_DB_SERVER }}' \
+              DB_NAME='${{ secrets.DEV_DB_NAME }}' \
+              DB_USER='${{ secrets.DEV_DB_USER }}' \
+              DB_PASSWORD='${{ secrets.DEV_DB_PASSWORD }}' \
+              CORS_ORIGINS='${{ secrets.DEV_CORS_ORIGINS }}' \
+              FRONTEND_URL='${{ secrets.DEV_FRONTEND_URL }}' \
+              FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
+              FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
+              FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
+              FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}' \
+              FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
+              FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
+              FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
+              MICROSOFT_SSO_ENABLED='${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}' \
+              MICROSOFT_CLIENT_ID='${{ secrets.DEV_MICROSOFT_CLIENT_ID }}' \
+              MICROSOFT_CLIENT_SECRET='${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}' \
+              MICROSOFT_TENANT_ID='${{ secrets.DEV_MICROSOFT_TENANT_ID }}' \
+              MICROSOFT_DOMAIN_HINT='${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}' \
+              MICROSOFT_REDIRECT_URI='${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}' \
+              docker compose up -d --build
             else
               echo "🔧 Using production environment variables..."
               # Check if production deployment is possible
@@ -274,27 +274,27 @@ jobs:
                 exit 0
               fi
           
-              docker compose up -d --build \
-                -e ENVIRONMENT='production' \
-                -e DB_SERVER='${{ secrets.PROD_DB_SERVER }}' \
-                -e DB_NAME='${{ secrets.PROD_DB_NAME }}' \
-                -e DB_USER='${{ secrets.PROD_DB_USER }}' \
-                -e DB_PASSWORD='${{ secrets.PROD_DB_PASSWORD }}' \
-                -e CORS_ORIGINS='${{ secrets.PROD_CORS_ORIGINS }}' \
-                -e FRONTEND_URL='${{ secrets.PROD_FRONTEND_URL }}' \
-                -e FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
-                -e FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
-                -e FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
-                -e FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}' \
-                -e FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
-                -e FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
-                -e FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
-                -e MICROSOFT_SSO_ENABLED='${{ secrets.PROD_MICROSOFT_SSO_ENABLED }}' \
-                -e MICROSOFT_CLIENT_ID='${{ secrets.PROD_MICROSOFT_CLIENT_ID }}' \
-                -e MICROSOFT_CLIENT_SECRET='${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}' \
-                -e MICROSOFT_TENANT_ID='${{ secrets.PROD_MICROSOFT_TENANT_ID }}' \
-                -e MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}' \
-                -e MICROSOFT_REDIRECT_URI='${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}'
+              ENVIRONMENT=production \
+              DB_SERVER='${{ secrets.PROD_DB_SERVER }}' \
+              DB_NAME='${{ secrets.PROD_DB_NAME }}' \
+              DB_USER='${{ secrets.PROD_DB_USER }}' \
+              DB_PASSWORD='${{ secrets.PROD_DB_PASSWORD }}' \
+              CORS_ORIGINS='${{ secrets.PROD_CORS_ORIGINS }}' \
+              FRONTEND_URL='${{ secrets.PROD_FRONTEND_URL }}' \
+              FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}' \
+              FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}' \
+              FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}' \
+              FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}' \
+              FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}' \
+              FIREBASE_AUTH_URI='${{ secrets.FIREBASE_AUTH_URI }}' \
+              FIREBASE_TOKEN_URI='${{ secrets.FIREBASE_TOKEN_URI }}' \
+              MICROSOFT_SSO_ENABLED='${{ secrets.PROD_MICROSOFT_SSO_ENABLED }}' \
+              MICROSOFT_CLIENT_ID='${{ secrets.PROD_MICROSOFT_CLIENT_ID }}' \
+              MICROSOFT_CLIENT_SECRET='${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}' \
+              MICROSOFT_TENANT_ID='${{ secrets.PROD_MICROSOFT_TENANT_ID }}' \
+              MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}' \
+              MICROSOFT_REDIRECT_URI='${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}' \
+              docker compose up -d --build
             fi
           
             echo "⏳ Waiting for services to start..."
