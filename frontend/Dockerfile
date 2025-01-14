@@ -22,8 +22,8 @@ FROM alpine:latest
 # Create www-data user (group may already exist)
 RUN adduser -S -G www-data www-data 2>/dev/null || adduser -S -g www-data www-data
 
-# Install rsync for file copying
-RUN apk add --no-cache rsync
+# Install rsync and su-exec for file copying and privilege dropping
+RUN apk add --no-cache rsync su-exec
 
 # Set working directory
 WORKDIR /app
@@ -39,8 +39,5 @@ RUN printf '#!/bin/sh\n\nwhile true; do\n    rsync -av --delete /app/ /var/www/h
     chmod +x /entrypoint.sh && \
     chown www-data:www-data /entrypoint.sh
 
-# Switch to www-data user
-USER www-data
-
-# Keep container running and sync files
+# Container will start as root but drop to www-data via docker-compose entrypoint
 CMD ["/entrypoint.sh"] 

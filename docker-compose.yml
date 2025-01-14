@@ -67,5 +67,10 @@ services:
       dockerfile: Dockerfile
     volumes:
       - /var/www/html:/var/www/html
-    user: www-data:www-data
+    user: root
+    entrypoint: >
+      /bin/sh -c "
+        chown -R www-data:www-data /var/www/html &&
+        su-exec www-data /entrypoint.sh
+      "
     restart: always                                                                                                                       
