@@ -104,4 +104,6 @@ XlsxWriter>=3.2.0
 yarl>=1.18.0
 zope.event>=5.0
 zope.interface>=7.2
-uvicorn
+h11>=0.14.0
+asgiref>=3.8.1
+uvicorn>=0.34.0
