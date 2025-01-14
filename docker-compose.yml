@@ -8,14 +8,57 @@ services:
     ports:
       - "5000:5000"
     environment:
+      # Database Configuration
       - DB_SERVER=${DB_SERVER}
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=5000
+      - API_DEBUG=False
+      # AWS Configuration
       - AWS_S3_BUCKET=${AWS_S3_BUCKET}
       - AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
       - AWS_SECRET_KEY=${AWS_SECRET_KEY}
-      - CORS_ORIGINS=${CORS_ORIGINS}
+      # CORS Configuration
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173}
+      - CORS_MAX_AGE=3600
+      # Cache Configuration
+      - CACHE_REFRESH_INTERVAL=25
+      - CACHE_FORCE_REFRESH=3600
+      - CACHE_REFRESH_TIMEOUT=30
+      - CACHE_MAX_RETRY_ATTEMPTS=3
+      - CACHE_RETRY_DELAY=5
+      - CACHE_ENABLE_MONITORING=true
+      - CACHE_LOG_REFRESHES=true
+      - CACHE_STALE_IF_ERROR=true
+      - CACHE_EXPECTED_UPDATE_TIME=15:00
+      - CACHE_UPDATE_WINDOW=7200
+      # Firebase Configuration
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
+      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
+      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+      - FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
+      - FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
+      - FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
+      # Session Configuration
+      - SESSION_CLEANUP_INTERVAL=300
+      - SESSION_MAX_AGE=1800
+      # Logging Configuration
+      - LOG_LEVEL=INFO
+      - LOG_FILE_PATH=logs/api.log
+      - LOG_FORMAT="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+      # Microsoft SSO Configuration
+      - MICROSOFT_SSO_ENABLED=${MICROSOFT_SSO_ENABLED:-FALSE}
+      - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID}
+      - MICROSOFT_CLIENT_SECRET=${MICROSOFT_CLIENT_SECRET}
+      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID}
+      - MICROSOFT_DOMAIN_HINT=${MICROSOFT_DOMAIN_HINT}
+      - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-http://localhost:5173/api/auth/microsoft/callback}
+      # Frontend URL
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
     volumes:
       - ./logs:/app/logs
     restart: always
