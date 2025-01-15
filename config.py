@@ -31,7 +31,7 @@ class Config:
         'enable_monitoring': config('CACHE_ENABLE_MONITORING', default=True, cast=bool),
         'stale_if_error': config('CACHE_STALE_IF_ERROR', default=True, cast=bool)
     }
-    MAX_CONCURRENT_TASKS = config('MAX_CONCURRENT_TASKS', default=5, cast=int)
+    MAX_CONCURRENT_TASKS = config('MAX_CONCURRENT_TASKS', default=3, cast=int)
 
     # Security
     JWT_SECRET_KEY = config('JWT_SECRET_KEY', default=os.urandom(32).hex(), cast=str)
