@@ -27,12 +27,12 @@ const DataFreshnessIndicator = ({
     // Get appropriate messaging based on status
     const getMessage = () => {
         if (!isDataUpToDate) return {
-            title: 'Data Update Required',
+            title: 'Current Data is Out of Date',
             description: 'Property data needs to be refreshed to ensure accuracy. Some information may not reflect recent changes.'
         };
 
         return {
-            title: 'Data Status: Excellent',
+            title: 'Current Data is Up to Date',
             description: 'All property data is current and validated through yesterday. Reports will reflect the most recent information.'
         };
     };
@@ -137,7 +137,7 @@ const DataFreshnessIndicator = ({
                                     <>
                                         <RefreshCw
                                             className="h-4 w-4 transition-transform group-hover:rotate-180 duration-500"/>
-                                        <span>Force Refresh</span>
+                                        <span>Request Refresh</span>
                                     </>
                                 )}
                             </span>

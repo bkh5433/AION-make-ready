@@ -4,7 +4,7 @@
 MAKE_READY_QUERY = """
 
 DECLARE @CalendarDate DATE = DATEADD(DAY, -1, GETDATE());
-DECLARE @StartDate DATE = DATEADD(DAY, -30, @CalendarDate);
+DECLARE @StartDate DATE = DATEADD(DAY, -29, @CalendarDate);
 
 WITH ActiveProperties AS (
     SELECT DISTINCT

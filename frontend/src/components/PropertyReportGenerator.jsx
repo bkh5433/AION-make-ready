@@ -218,9 +218,11 @@ const PropertyReportGenerator = () => {
         showFloatingButton: false,
         files: []
     });
-    const [isFirstLoad, setIsFirstLoad] = useState(true); // New state variable
+    const [isFirstLoad, setIsFirstLoad] = useState(true); // Keep this state declaration where it is
 
     const searchInputRef = useRef(null);
+    // Add a ref to track first load
+    const isFirstLoadRef = useRef(true);
 
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [isScrollTopVisible, setIsScrollTopVisible] = useState(false);
@@ -325,7 +327,7 @@ const PropertyReportGenerator = () => {
         }
     };
 
-    // Memoized debounced search function with caching
+    // Memoized debounced search function
     const debouncedSearch = useCallback(
         debounce(async (term, page = 1, perPage = 20) => {
             // Only check for duplicate searches if there is a search term
@@ -339,28 +341,6 @@ const PropertyReportGenerator = () => {
 
                 // TODO: Enable client side cache
 
-                // Check cache first
-                // const cachedResult = searchCache.get(term, page, perPage);
-                // if (cachedResult) {
-                //     console.log('Using cached results for:', term);
-                //
-                //     setProperties(cachedResult.data);
-                //     setDataIssues(cachedResult.data_issues || []);
-                //     const isUpToDate = checkDataAge(cachedResult.data);
-                //     setIsDataUpToDate(isUpToDate);
-                //     setIsLoading(false);
-                //     setPrevSearchTerm(term);
-                //
-                //     // Update period dates if available
-                //     if (cachedResult.period_info) {
-                //         setPeriodStartDate(parseAPIDate(cachedResult.period_info.start_date));
-                //         setPeriodEndDate(parseAPIDate(cachedResult.period_info.end_date));
-                //     }
-                //
-                //     return;
-                // }
-
-                // If not in cache, fetch from API
                 const response = await api.searchProperties(term, page, perPage);
                 console.log('API Response:', response);
 
@@ -395,23 +375,14 @@ const PropertyReportGenerator = () => {
                     latest_post_date: property.latest_post_date
                 }));
 
-                // TODO: Enable client side cache
-                // Cache the formatted results
-                // const cacheData = {
-                //     data: formattedProperties,
-                //     data_issues: response.data_issues,
-                //     is_data_up_to_date: isDataUpToDate,
-                //     period_info: response.period_info,
-                //     timestamp: Date.now()
-                // };
-                // searchCache.set(term, page, perPage, cacheData);
-
                 setTimeout(() => {
                     setProperties(formattedProperties);
                     setIsLoading(false);
 
-                    if (isFirstLoad) {
+                    // Only show success notification on first load using the ref
+                    if (isFirstLoadRef.current) {
                         addNotification('success', 'Successfully fetched properties');
+                        isFirstLoadRef.current = false;
                         setIsFirstLoad(false);
                     }
                 }, 1000);
@@ -426,7 +397,7 @@ const PropertyReportGenerator = () => {
                 addNotification('error', 'Connection failed. Please refresh the page and try again.');
             }
         }, 750),
-        []
+        [prevSearchTerm] // Only depend on prevSearchTerm
     );
 
     // Update the search effect

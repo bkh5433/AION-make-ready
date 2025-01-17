@@ -6,9 +6,7 @@ from logger_config import LogConfig
 from config import Config
 from monitoring import SystemMonitor
 from queue import Queue, Empty
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import time
 from collections import Counter
 
 log_config = LogConfig()

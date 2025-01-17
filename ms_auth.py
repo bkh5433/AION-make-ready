@@ -30,7 +30,7 @@ class MicrosoftAuth:
         return self.msal_app.get_authorization_request_url(
             scopes=self.scopes,
             redirect_uri=self.redirect_uri,
-            prompt="select_account",  # Force account selection
+            # prompt="select_account",  # Force account selection
             domain_hint=Config.MICROSOFT_CONFIG['domain_hint']
         )
 
