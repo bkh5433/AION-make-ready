@@ -11,7 +11,8 @@ import {
     Moon,
     Sun,
     Info,
-    AlertCircle
+    AlertCircle,
+    HelpCircle
 } from 'lucide-react';
 import {motion, AnimatePresence} from 'framer-motion';
 import {useTheme} from "../lib/theme.jsx";
@@ -26,6 +27,7 @@ import {useAuth} from '../lib/auth';
 import DataFreshnessIndicator from './DataFreshnessIndicator';
 import {debounce} from '../lib/utils';
 import {searchCache} from '../lib/cache';
+import HelpOverlay from './ui/help-overlay';
 
 // Add StatusBanner component
 const StatusBanner = ({status, message, icon: Icon}) => (
@@ -897,8 +899,34 @@ const PropertyReportGenerator = () => {
         }
     };
 
+    // Add state for help overlay near other state declarations
+    const [showHelp, setShowHelp] = useState(false);
+
+    // Add useEffect to show help on first visit
+    useEffect(() => {
+        const hasSeenHelp = localStorage.getItem('hasSeenHelp');
+        if (!hasSeenHelp) {
+            setShowHelp(true);
+            localStorage.setItem('hasSeenHelp', 'true');
+        }
+    }, []);
+
     return (
         <div className="container mx-auto space-y-8 px-4 py-6 max-w-[90rem]">
+            {/* Add Help Overlay */}
+            <HelpOverlay isVisible={showHelp} onClose={() => setShowHelp(false)}/>
+
+            {/* Add Help Button in the top-right corner */}
+            <button
+                onClick={() => setShowHelp(true)}
+                className="fixed top-4 right-4 z-40 p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg 
+                    hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200
+                    transform hover:scale-110"
+                aria-label="Show help"
+            >
+                <HelpCircle className="h-5 w-5 text-gray-600 dark:text-gray-400"/>
+            </button>
+
             {/* Notifications Container */}
             <div className="fixed top-4 right-4 z-50 space-y-3">
                 {notifications.map(notification => (
