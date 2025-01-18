@@ -125,11 +125,11 @@ const MicrosoftCallback = () => {
                     <div className="relative flex items-center justify-center">
                         {/* Outer pulsing ring */}
                         <div
-                            className="absolute w-20 h-20 border-4 border-blue-100 dark:border-blue-900/30 rounded-full animate-[pulse_1.5s_ease-in-out_infinite]"></div>
+                            className="absolute w-20 h-20 border-4 border-blue-200 dark:border-blue-700/50 rounded-full animate-[pulse_1.5s_ease-in-out_infinite]"></div>
 
                         {/* Inner spinning ring */}
                         <div
-                            className="w-16 h-16 border-4 border-blue-500 dark:border-blue-400 rounded-full animate-[spin_1s_linear_infinite] border-t-transparent"></div>
+                            className="w-16 h-16 border-4 border-blue-500 dark:border-blue-400/90 rounded-full animate-[spin_1s_linear_infinite] border-t-transparent dark:border-t-transparent"></div>
                     </div>
 
                     {/* Status Message */}
