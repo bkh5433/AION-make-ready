@@ -6,6 +6,18 @@ const HelpOverlay = ({isVisible, onClose}) => {
     const [scrollProgress, setScrollProgress] = useState(0);
     const contentRef = useRef(null);
 
+    useEffect(() => {
+        if (isVisible) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = 'unset';
+        }
+
+        return () => {
+            document.body.style.overflow = 'unset';
+        };
+    }, [isVisible]);
+
     const handleScroll = () => {
         if (contentRef.current) {
             const element = contentRef.current;
