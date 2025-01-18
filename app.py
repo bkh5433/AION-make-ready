@@ -1176,16 +1176,13 @@ def change_password():
         # Update password
         new_hash, new_salt = auth._hash_password(new_password)
         user_ref = auth.users_ref.document(user['user_id'])
-        # Use run_async for the Firestore update
-        run_async(asyncio.get_event_loop().run_in_executor(
-            None,
-            user_ref.update,
-            {
-                'password_hash': new_hash,
-                'salt': new_salt,
-                'requirePasswordChange': False
-            }
-        ))
+
+        # Update Firestore synchronously since this is a critical operation
+        user_ref.update({
+            'password_hash': new_hash,
+            'salt': new_salt,
+            'requirePasswordChange': False
+        })
 
         return jsonify({
             'success': True,

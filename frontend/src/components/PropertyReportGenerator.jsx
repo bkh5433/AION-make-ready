@@ -163,17 +163,60 @@ const getTooltipContent = (property) => {
     };
 };
 
-const searchExamples = [
-    "Search properties",
-    "Main Street Apartments",
-    "New Jersey",
-    "MD",
-    "Philadelphia",
-    "Gotham City"
-];
+// Function to generate dynamic search examples from properties data
+const generateSearchExamples = (propertiesData) => {
+    if (!propertiesData || propertiesData.length === 0) {
+        return [
+            "Search properties",
+            "Philadelphia",
+
+        ];
+    }
+
+    const examples = ["Search properties"];
+    const states = new Set();
+    const propertyNames = new Set();
+
+    // Collect unique states and property names
+    propertiesData.forEach(property => {
+        if (property.property_state_province_code) {
+            states.add(property.property_state_province_code);
+        }
+        if (property.property_name) {
+            propertyNames.add(property.property_name);
+        }
+    });
+
+    // Add 2 random property names if available
+    const propertyNamesArray = Array.from(propertyNames);
+    for (let i = 0; i < 2 && propertyNamesArray.length > 0; i++) {
+        const randomIndex = Math.floor(Math.random() * propertyNamesArray.length);
+        examples.push(propertyNamesArray[randomIndex]);
+        propertyNamesArray.splice(randomIndex, 1);
+    }
+
+    // Add 2 random states if available
+    const statesArray = Array.from(states);
+    for (let i = 0; i < 2 && statesArray.length > 0; i++) {
+        const randomIndex = Math.floor(Math.random() * statesArray.length);
+        examples.push(statesArray[randomIndex]);
+        statesArray.splice(randomIndex, 1);
+    }
+
+    // Add debug logging
+    console.log('Generated search examples:', examples);
+    console.log('From properties:', propertiesData.slice(0, 2));
+
+    return examples;
+};
 
 const PropertyReportGenerator = () => {
+    const [rawProperties, setRawProperties] = useState([]); // New state for raw API data
     const [properties, setProperties] = useState([]);
+    const [searchExamples, setSearchExamples] = useState([
+        "Search properties",
+        "Philadelphia",
+    ]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProperties, setSelectedProperties] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -294,7 +337,7 @@ const PropertyReportGenerator = () => {
         }, 5000);
 
         return () => clearInterval(cycleInterval);
-    }, [isSearchFocused, searchTerm]);
+    }, [isSearchFocused, searchTerm, searchExamples]);
 
     const checkDataAge = (data) => {
         if (data.length > 0) {
@@ -330,7 +373,6 @@ const PropertyReportGenerator = () => {
     // Memoized debounced search function
     const debouncedSearch = useCallback(
         debounce(async (term, page = 1, perPage = 20) => {
-            // Only check for duplicate searches if there is a search term
             if (term.length > 0 && term === prevSearchTerm) {
                 return;
             }
@@ -338,8 +380,6 @@ const PropertyReportGenerator = () => {
             try {
                 setIsLoading(true);
                 setError(null);
-
-                // TODO: Enable client side cache
 
                 const response = await api.searchProperties(term, page, perPage);
                 console.log('API Response:', response);
@@ -363,7 +403,10 @@ const PropertyReportGenerator = () => {
                 // Use the function for response data
                 checkDataAge(response.data);
 
-                // Map properties with all necessary fields including dates
+                // Set the raw API response data for search examples
+                setRawProperties(response.data);
+
+                // Map properties for display
                 const formattedProperties = response.data.map(property => ({
                     PropertyKey: property.property_key,
                     PropertyName: property.property_name,
@@ -392,12 +435,13 @@ const PropertyReportGenerator = () => {
             } catch (error) {
                 console.error(`Error fetching properties:`, error);
                 setError('Unable to connect to the server. Please refresh the page and try again.');
-                setProperties([]);
+                setRawProperties([]); // Clear raw properties
+                setProperties([]); // Clear formatted properties
                 setIsLoading(false);
                 addNotification('error', 'Connection failed. Please refresh the page and try again.');
             }
         }, 750),
-        [prevSearchTerm] // Only depend on prevSearchTerm
+        [prevSearchTerm]
     );
 
     // Update the search effect
@@ -408,6 +452,13 @@ const PropertyReportGenerator = () => {
         // Cleanup function to cancel pending searches
         return () => debouncedSearch.cancel();
     }, [searchTerm, debouncedSearch]);
+
+    // Update searchExamples when raw properties are loaded
+    useEffect(() => {
+        if (rawProperties.length > 0) {
+            setSearchExamples(generateSearchExamples(rawProperties));
+        }
+    }, [rawProperties]);
 
     // Debug properties before filtering
     // console.log('Properties before filtering:', properties);
