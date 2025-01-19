@@ -30,7 +30,7 @@ class MicrosoftAuth:
         return self.msal_app.get_authorization_request_url(
             scopes=self.scopes,
             redirect_uri=self.redirect_uri,
-            prompt="select_account",  # Force account selection
+            # prompt="select_account",  # Force account selection
             domain_hint=Config.MICROSOFT_CONFIG['domain_hint']
         )
 
@@ -136,6 +136,9 @@ class MicrosoftAuth:
             users = auth_middleware.users_ref.where('email', '==', user_info['email']).limit(1).stream()
             user_doc = next((doc for doc in users), None)
 
+            # Get current UTC time in ISO format with Z suffix
+            current_utc = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
             if user_doc:
                 # Existing user
                 user = user_doc.to_dict()
@@ -149,8 +152,8 @@ class MicrosoftAuth:
                     'name': user_info['name'],
                     'role': 'user',
                     'isActive': True,
-                    'createdAt': datetime.utcnow().isoformat(),
-                    'lastLogin': datetime.utcnow().isoformat(),
+                    'createdAt': current_utc,
+                    'lastLogin': current_utc,
                     'auth_provider': 'microsoft',
                     'microsoft_id': user_info['microsoft_id']
                 }
@@ -159,7 +162,7 @@ class MicrosoftAuth:
 
             # Update last login
             auth_middleware.users_ref.document(user_id).update({
-                'lastLogin': datetime.utcnow().isoformat()
+                'lastLogin': current_utc
             })
 
             # Generate JWT token

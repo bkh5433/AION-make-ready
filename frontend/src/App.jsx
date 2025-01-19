@@ -93,9 +93,18 @@ const AuthenticatedLayout = () => {
                                       alt="AION Logo"
                                       className="w-8 h-8 object-contain"
                                   />
-                                  <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                                      AION Vista
-                                  </h1>
+                                  <div className="flex items-center gap-2">
+                                      <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+                                          AION Vista
+                                      </h1>
+                                      <span className="px-2 py-0.5 text-xs font-medium rounded-full 
+                                          bg-blue-100 dark:bg-blue-900/50 
+                                          text-blue-600 dark:text-blue-400
+                                          border border-blue-200 dark:border-blue-800/50
+                                          animate-pulse-subtle">
+                                          Beta
+                                      </span>
+                                  </div>
                               </div>
 
                               {/* Right side controls */}

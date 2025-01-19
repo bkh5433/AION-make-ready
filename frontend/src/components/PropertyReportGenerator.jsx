@@ -11,7 +11,8 @@ import {
     Moon,
     Sun,
     Info,
-    AlertCircle
+    AlertCircle,
+    HelpCircle
 } from 'lucide-react';
 import {motion, AnimatePresence} from 'framer-motion';
 import {useTheme} from "../lib/theme.jsx";
@@ -26,6 +27,7 @@ import {useAuth} from '../lib/auth';
 import DataFreshnessIndicator from './DataFreshnessIndicator';
 import {debounce} from '../lib/utils';
 import {searchCache} from '../lib/cache';
+import HelpOverlay from './ui/help-overlay';
 
 // Add StatusBanner component
 const StatusBanner = ({status, message, icon: Icon}) => (
@@ -163,17 +165,60 @@ const getTooltipContent = (property) => {
     };
 };
 
-const searchExamples = [
-    "Search properties",
-    "Main Street Apartments",
-    "New Jersey",
-    "MD",
-    "Philadelphia",
-    "Gotham City"
-];
+// Function to generate dynamic search examples from properties data
+const generateSearchExamples = (propertiesData) => {
+    if (!propertiesData || propertiesData.length === 0) {
+        return [
+            "Search properties",
+            "Philadelphia",
+
+        ];
+    }
+
+    const examples = ["Search properties"];
+    const states = new Set();
+    const propertyNames = new Set();
+
+    // Collect unique states and property names
+    propertiesData.forEach(property => {
+        if (property.property_state_province_code) {
+            states.add(property.property_state_province_code);
+        }
+        if (property.property_name) {
+            propertyNames.add(property.property_name);
+        }
+    });
+
+    // Add 2 random property names if available
+    const propertyNamesArray = Array.from(propertyNames);
+    for (let i = 0; i < 2 && propertyNamesArray.length > 0; i++) {
+        const randomIndex = Math.floor(Math.random() * propertyNamesArray.length);
+        examples.push(propertyNamesArray[randomIndex]);
+        propertyNamesArray.splice(randomIndex, 1);
+    }
+
+    // Add 2 random states if available
+    const statesArray = Array.from(states);
+    for (let i = 0; i < 2 && statesArray.length > 0; i++) {
+        const randomIndex = Math.floor(Math.random() * statesArray.length);
+        examples.push(statesArray[randomIndex]);
+        statesArray.splice(randomIndex, 1);
+    }
+
+    // Add debug logging
+    console.log('Generated search examples:', examples);
+    console.log('From properties:', propertiesData.slice(0, 2));
+
+    return examples;
+};
 
 const PropertyReportGenerator = () => {
+    const [rawProperties, setRawProperties] = useState([]); // New state for raw API data
     const [properties, setProperties] = useState([]);
+    const [searchExamples, setSearchExamples] = useState([
+        "Search properties",
+        "Philadelphia",
+    ]);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedProperties, setSelectedProperties] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -218,9 +263,11 @@ const PropertyReportGenerator = () => {
         showFloatingButton: false,
         files: []
     });
-    const [isFirstLoad, setIsFirstLoad] = useState(true); // New state variable
+    const [isFirstLoad, setIsFirstLoad] = useState(true); // Keep this state declaration where it is
 
     const searchInputRef = useRef(null);
+    // Add a ref to track first load
+    const isFirstLoadRef = useRef(true);
 
     const [showScrollTop, setShowScrollTop] = useState(false);
     const [isScrollTopVisible, setIsScrollTopVisible] = useState(false);
@@ -292,7 +339,7 @@ const PropertyReportGenerator = () => {
         }, 5000);
 
         return () => clearInterval(cycleInterval);
-    }, [isSearchFocused, searchTerm]);
+    }, [isSearchFocused, searchTerm, searchExamples]);
 
     const checkDataAge = (data) => {
         if (data.length > 0) {
@@ -325,10 +372,9 @@ const PropertyReportGenerator = () => {
         }
     };
 
-    // Memoized debounced search function with caching
+    // Memoized debounced search function
     const debouncedSearch = useCallback(
         debounce(async (term, page = 1, perPage = 20) => {
-            // Only check for duplicate searches if there is a search term
             if (term.length > 0 && term === prevSearchTerm) {
                 return;
             }
@@ -337,30 +383,6 @@ const PropertyReportGenerator = () => {
                 setIsLoading(true);
                 setError(null);
 
-                // TODO: Enable client side cache
-
-                // Check cache first
-                // const cachedResult = searchCache.get(term, page, perPage);
-                // if (cachedResult) {
-                //     console.log('Using cached results for:', term);
-                //
-                //     setProperties(cachedResult.data);
-                //     setDataIssues(cachedResult.data_issues || []);
-                //     const isUpToDate = checkDataAge(cachedResult.data);
-                //     setIsDataUpToDate(isUpToDate);
-                //     setIsLoading(false);
-                //     setPrevSearchTerm(term);
-                //
-                //     // Update period dates if available
-                //     if (cachedResult.period_info) {
-                //         setPeriodStartDate(parseAPIDate(cachedResult.period_info.start_date));
-                //         setPeriodEndDate(parseAPIDate(cachedResult.period_info.end_date));
-                //     }
-                //
-                //     return;
-                // }
-
-                // If not in cache, fetch from API
                 const response = await api.searchProperties(term, page, perPage);
                 console.log('API Response:', response);
 
@@ -383,7 +405,10 @@ const PropertyReportGenerator = () => {
                 // Use the function for response data
                 checkDataAge(response.data);
 
-                // Map properties with all necessary fields including dates
+                // Set the raw API response data for search examples
+                setRawProperties(response.data);
+
+                // Map properties for display
                 const formattedProperties = response.data.map(property => ({
                     PropertyKey: property.property_key,
                     PropertyName: property.property_name,
@@ -395,23 +420,14 @@ const PropertyReportGenerator = () => {
                     latest_post_date: property.latest_post_date
                 }));
 
-                // TODO: Enable client side cache
-                // Cache the formatted results
-                // const cacheData = {
-                //     data: formattedProperties,
-                //     data_issues: response.data_issues,
-                //     is_data_up_to_date: isDataUpToDate,
-                //     period_info: response.period_info,
-                //     timestamp: Date.now()
-                // };
-                // searchCache.set(term, page, perPage, cacheData);
-
                 setTimeout(() => {
                     setProperties(formattedProperties);
                     setIsLoading(false);
 
-                    if (isFirstLoad) {
+                    // Only show success notification on first load using the ref
+                    if (isFirstLoadRef.current) {
                         addNotification('success', 'Successfully fetched properties');
+                        isFirstLoadRef.current = false;
                         setIsFirstLoad(false);
                     }
                 }, 1000);
@@ -421,12 +437,13 @@ const PropertyReportGenerator = () => {
             } catch (error) {
                 console.error(`Error fetching properties:`, error);
                 setError('Unable to connect to the server. Please refresh the page and try again.');
-                setProperties([]);
+                setRawProperties([]); // Clear raw properties
+                setProperties([]); // Clear formatted properties
                 setIsLoading(false);
                 addNotification('error', 'Connection failed. Please refresh the page and try again.');
             }
         }, 750),
-        []
+        [prevSearchTerm]
     );
 
     // Update the search effect
@@ -437,6 +454,13 @@ const PropertyReportGenerator = () => {
         // Cleanup function to cancel pending searches
         return () => debouncedSearch.cancel();
     }, [searchTerm, debouncedSearch]);
+
+    // Update searchExamples when raw properties are loaded
+    useEffect(() => {
+        if (rawProperties.length > 0) {
+            setSearchExamples(generateSearchExamples(rawProperties));
+        }
+    }, [rawProperties]);
 
     // Debug properties before filtering
     // console.log('Properties before filtering:', properties);
@@ -875,8 +899,34 @@ const PropertyReportGenerator = () => {
         }
     };
 
+    // Add state for help overlay near other state declarations
+    const [showHelp, setShowHelp] = useState(false);
+
+    // Add useEffect to show help on first visit
+    useEffect(() => {
+        const hasSeenHelp = localStorage.getItem('hasSeenHelp');
+        if (!hasSeenHelp) {
+            setShowHelp(true);
+            localStorage.setItem('hasSeenHelp', 'true');
+        }
+    }, []);
+
     return (
         <div className="container mx-auto space-y-8 px-4 py-6 max-w-[90rem]">
+            {/* Add Help Overlay */}
+            <HelpOverlay isVisible={showHelp} onClose={() => setShowHelp(false)}/>
+
+            {/* Add Help Button in the top-right corner */}
+            <button
+                onClick={() => setShowHelp(true)}
+                className="fixed top-4 right-4 z-40 p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg 
+                    hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200
+                    transform hover:scale-110"
+                aria-label="Show help"
+            >
+                <HelpCircle className="h-5 w-5 text-gray-600 dark:text-gray-400"/>
+            </button>
+
             {/* Notifications Container */}
             <div className="fixed top-4 right-4 z-50 space-y-3">
                 {notifications.map(notification => (

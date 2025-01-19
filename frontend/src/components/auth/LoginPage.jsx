@@ -112,9 +112,8 @@ const LoginPage = () => {
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     useEffect(() => {
-        // Check API health on component mount and every 30 seconds
+        // Single health check on component mount
         checkApiHealth();
-        const healthInterval = setInterval(checkApiHealth, 30000);
 
         // Handle Microsoft callback
         const params = new URLSearchParams(location.search);
@@ -126,8 +125,6 @@ const LoginPage = () => {
         } else if (error) {
             addNotification('error', 'Microsoft login failed: ' + error);
         }
-
-        return () => clearInterval(healthInterval);
     }, [location]);
 
     const checkApiHealth = async (isRetry = false) => {
@@ -260,34 +257,9 @@ const LoginPage = () => {
                 addNotification('error', response.message || 'Login failed');
             }
         } catch (error) {
-            // Check if it's a certificate error
-            if (error.message?.includes('SSL') || error.message?.includes('certificate') || error.message?.includes('self-signed') || error.name === 'TypeError') {
-                const healthEndpoint = api.getHealthEndpoint();
-                console.log('Health endpoint URL:', healthEndpoint);
-
-                if (!hasShownError.current) {
-                    hasShownError.current = true;
-                    addNotification('error',
-                        <div className="space-y-2">
-                            <div>SSL Certificate Error detected. To resolve this:</div>
-                            <ol className="list-decimal ml-4">
-                                <li>Click <a href={healthEndpoint} target="_blank"
-                                             className="text-blue-400 hover:text-blue-300 underline">here</a> to open
-                                    the API health endpoint
-                                </li>
-                                <li>Click "Advanced" in your browser</li>
-                                <li>Click "Proceed" or "Accept Risk and Continue"</li>
-                                <li>Return to this page and refresh</li>
-                            </ol>
-                        </div>,
-                        25000 // Show for 25 seconds
-                    );
-                }
-            } else {
-                const errorMessage = error.message || 'An error occurred during login';
-                setError(errorMessage);
-                addNotification('error', errorMessage);
-            }
+            const errorMessage = error.message || 'An error occurred during login';
+            setError(errorMessage);
+            addNotification('error', errorMessage);
         } finally {
             setIsLoading(false);
         }

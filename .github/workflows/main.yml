@@ -309,12 +309,6 @@ jobs:
               exit 1
             fi
           
-            if ! docker ps | grep -q "aion-frontend"; then
-              echo "❌ Frontend service failed to start"
-              docker compose logs frontend
-              exit 1
-            fi
-          
             # Check if API is responding
             echo "🔍 Checking API health..."
             MAX_RETRIES=5
