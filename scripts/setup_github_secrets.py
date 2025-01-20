@@ -114,7 +114,15 @@ def setup_secrets():
         "DEV_DB_PASSWORD": os.getenv("DB_PASSWORD"),
         "DEV_AWS_BUCKET_NAME": os.getenv("AWS_BUCKET_NAME"),
         "DEV_CORS_ORIGINS": os.getenv("CORS_ORIGINS"),
-        "DEV_API_URL": os.getenv("EC2_HOST", "http://localhost:5000"),
+        "DEV_FRONTEND_URL": os.getenv("DEV_FRONTEND_URL"),
+
+        # Development Microsoft SSO Configuration
+        "DEV_MICROSOFT_SSO_ENABLED": os.getenv("DEV_MICROSOFT_SSO_ENABLED", "true"),
+        "DEV_MICROSOFT_CLIENT_ID": os.getenv("DEV_MICROSOFT_CLIENT_ID"),
+        "DEV_MICROSOFT_CLIENT_SECRET": os.getenv("DEV_MICROSOFT_CLIENT_SECRET"),
+        "DEV_MICROSOFT_TENANT_ID": os.getenv("DEV_MICROSOFT_TENANT_ID"),
+        "DEV_MICROSOFT_REDIRECT_URI": os.getenv("DEV_MICROSOFT_REDIRECT_URI"),
+        "DEV_MICROSOFT_DOMAIN_HINT": os.getenv("DEV_MICROSOFT_DOMAIN_HINT"),
     }
 
     # Define production secrets
@@ -126,7 +134,15 @@ def setup_secrets():
         "PROD_DB_PASSWORD": os.getenv("PROD_DB_PASSWORD"),
         "PROD_AWS_BUCKET_NAME": os.getenv("PROD_AWS_BUCKET_NAME"),
         "PROD_CORS_ORIGINS": os.getenv("PROD_CORS_ORIGINS"),
-        "PROD_API_URL": os.getenv("PROD_API_URL"),
+        "PROD_FRONTEND_URL": os.getenv("PROD_FRONTEND_URL"),
+
+        # Production Microsoft SSO Configuration
+        "PROD_MICROSOFT_SSO_ENABLED": os.getenv("PROD_MICROSOFT_SSO_ENABLED", "true"),
+        "PROD_MICROSOFT_CLIENT_ID": os.getenv("PROD_MICROSOFT_CLIENT_ID"),
+        "PROD_MICROSOFT_CLIENT_SECRET": os.getenv("PROD_MICROSOFT_CLIENT_SECRET"),
+        "PROD_MICROSOFT_TENANT_ID": os.getenv("PROD_MICROSOFT_TENANT_ID"),
+        "PROD_MICROSOFT_REDIRECT_URI": os.getenv("PROD_MICROSOFT_REDIRECT_URI"),
+        "PROD_MICROSOFT_DOMAIN_HINT": os.getenv("PROD_MICROSOFT_DOMAIN_HINT"),
     }
 
     # Define shared secrets
@@ -147,13 +163,6 @@ def setup_secrets():
         "FIREBASE_CLIENT_ID": os.getenv("FIREBASE_CLIENT_ID"),
         "FIREBASE_AUTH_URI": os.getenv("FIREBASE_AUTH_URI"),
         "FIREBASE_TOKEN_URI": os.getenv("FIREBASE_TOKEN_URI"),
-
-        # Microsoft SSO Configuration
-        "MICROSOFT_CLIENT_ID": os.getenv("MICROSOFT_CLIENT_ID"),
-        "MICROSOFT_CLIENT_SECRET": os.getenv("MICROSOFT_CLIENT_SECRET"),
-        "MICROSOFT_TENANT_ID": os.getenv("MICROSOFT_TENANT_ID"),
-        "MICROSOFT_REDIRECT_URI": os.getenv("MICROSOFT_REDIRECT_URI"),
-        "MICROSOFT_DOMAIN_HINT": os.getenv("MICROSOFT_DOMAIN_HINT"),
     }
 
     # Add SSH private key if available
@@ -181,7 +190,7 @@ def setup_secrets():
             "DEV_DB_PASSWORD"
         ],
         "Development Frontend": [
-            "DEV_API_URL",
+            "DEV_FRONTEND_URL",
             "DEV_CORS_ORIGINS"
         ],
         "Firebase Configuration": [
@@ -194,11 +203,12 @@ def setup_secrets():
             "FIREBASE_TOKEN_URI"
         ],
         "Microsoft SSO": [
-            "MICROSOFT_CLIENT_ID",
-            "MICROSOFT_CLIENT_SECRET",
-            "MICROSOFT_TENANT_ID",
-            "MICROSOFT_REDIRECT_URI",
-            "MICROSOFT_DOMAIN_HINT"
+            "DEV_MICROSOFT_SSO_ENABLED",
+            "DEV_MICROSOFT_CLIENT_ID",
+            "DEV_MICROSOFT_CLIENT_SECRET",
+            "DEV_MICROSOFT_TENANT_ID",
+            "DEV_MICROSOFT_REDIRECT_URI",
+            "DEV_MICROSOFT_DOMAIN_HINT"
         ]
     }
 
@@ -211,8 +221,16 @@ def setup_secrets():
             "PROD_DB_PASSWORD"
         ],
         "Production Frontend": [
-            "PROD_API_URL",
+            "PROD_FRONTEND_URL",
             "PROD_CORS_ORIGINS"
+        ],
+        "Production Microsoft SSO": [
+            "PROD_MICROSOFT_SSO_ENABLED",
+            "PROD_MICROSOFT_CLIENT_ID",
+            "PROD_MICROSOFT_CLIENT_SECRET",
+            "PROD_MICROSOFT_TENANT_ID",
+            "PROD_MICROSOFT_REDIRECT_URI",
+            "PROD_MICROSOFT_DOMAIN_HINT"
         ]
     }
 
