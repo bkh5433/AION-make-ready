@@ -235,24 +235,22 @@ jobs:
               cd "$DEPLOY_DIR"
 
               echo "🐳 Checking Docker status..."
-              docker --version
-              docker compose version || docker-compose --version
-              docker ps
+              sudo -A docker ps
 
               echo "🛑 Cleaning up old Docker resources..."
-              docker ps -a
-              docker images
+              sudo -A docker ps -a
+              sudo -A docker images
 
               echo "Stopping/removing old containers..."
-              docker ps -a --filter "name=aion-" --format "{{.ID}}" | xargs -r docker stop
-              docker ps -a --filter "name=aion-" --format "{{.ID}}" | xargs -r docker rm
+              sudo -A docker ps -a --filter "name=aion-" --format "{{.ID}}" | xargs -r sudo -A docker stop
+              sudo -A docker ps -a --filter "name=aion-" --format "{{.ID}}" | xargs -r sudo -A docker rm
 
               echo "Removing old images..."
-              docker images "aion-*" --format "{{.ID}}" | xargs -r docker rmi
+              sudo -A docker images "aion-*" --format "{{.ID}}" | xargs -r sudo -A docker rmi
 
               echo "Docker status after cleanup:"
-              docker ps -a
-              docker images
+              sudo -A docker ps -a
+              sudo -A docker images
 
               echo "📥 Cloning repository..."
               git clone -b "$DEPLOY_BRANCH" https://github.com/${{ github.repository }}.git .
@@ -262,20 +260,20 @@ jobs:
               echo "Current commit: $(git rev-parse HEAD)"
 
               echo "📁 Creating logs directory..."
-              sudo mkdir -p logs
-              sudo chown -R root:root logs
-              sudo chmod -R 755 logs
-              sudo chmod g+s logs
+              sudo -A mkdir -p logs
+              sudo -A chown -R root:root logs
+              sudo -A chmod -R 755 logs
+              sudo -A chmod g+s logs
 
               echo "🔧 Setting up nginx..."
-              sudo mkdir -p /var/www/html
-              sudo chown -R www-data:www-data /var/www/html
+              sudo -A mkdir -p /var/www/html
+              sudo -A chown -R www-data:www-data /var/www/html
 
               echo "🔄 Updating nginx configuration..."
-              sudo cp backend/nginx.conf /etc/nginx/sites-available/api
+              sudo -A cp backend/nginx.conf /etc/nginx/sites-available/api
 
               echo "🔍 Testing/reloading nginx..."
-              sudo nginx -t && sudo systemctl reload nginx
+              sudo -A nginx -t && sudo -A systemctl reload nginx
 
               echo "🏗️ Building and starting services..."
               echo "ENVIRONMENT=production" > .env
@@ -300,21 +298,21 @@ jobs:
               echo "MICROSOFT_CLIENT_SECRET='${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}'" >> .env
               echo "MICROSOFT_TENANT_ID='${{ secrets.PROD_MICROSOFT_TENANT_ID }}'" >> .env
               echo "MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}'" >> .env
-              echo "MICROSOFT_REDIRECT_URI='${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}'" >> .env
+              echo "MICROSOFT_REDIRECT_URI='${{ secrets.PROD_FRONTEND_URL }}/auth/microsoft/callback'" >> .env
 
               sudo -A docker compose up -d --build
 
               echo "⏳ Waiting for services to start..."
               sleep 10
 
-              if ! docker ps | grep -q "aion-api"; then
+              if ! sudo -A docker ps | grep -q "aion-api"; then
                 echo "❌ API service failed to start"
-                docker compose logs api
+                sudo -A docker compose logs api
                 exit 1
               fi
 
               echo "🧹 Cleaning up old images..."
-              docker image prune -a --force --filter "until=72h"
+              sudo -A docker image prune -a --force --filter "until=72h"
 
               echo "✅ Deployment completed successfully!"
               echo "Branch: $DEPLOY_BRANCH"
@@ -356,8 +354,6 @@ jobs:
               cd "\${DEPLOY_DIR}"
 
               echo "🐳 Checking Docker status..."
-              docker --version
-              docker compose version || docker-compose --version
               docker ps
 
               echo "🛑 Cleaning up old Docker resources..."
@@ -421,18 +417,13 @@ jobs:
                 echo "FIREBASE_AUTH_URI=${{ secrets.FIREBASE_AUTH_URI }}" >> .env
                 echo "FIREBASE_TOKEN_URI=${{ secrets.FIREBASE_TOKEN_URI }}" >> .env
                 echo "MICROSOFT_SSO_ENABLED=${{ secrets.DEV_MICROSOFT_SSO_ENABLED }}" >> .env
-                echo "MICROSOFT_CLIENT_ID=${{ secrets.PROD_MICROSOFT_CLIENT_ID }}" >> .env
-                echo "MICROSOFT_CLIENT_SECRET=${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}" >> .env
-                echo "MICROSOFT_TENANT_ID=${{ secrets.PROD_MICROSOFT_TENANT_ID }}" >> .env
-                echo "MICROSOFT_DOMAIN_HINT=${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}" >> .env
+                echo "MICROSOFT_CLIENT_ID=${{ secrets.DEV_MICROSOFT_CLIENT_ID }}" >> .env
+                echo "MICROSOFT_CLIENT_SECRET=${{ secrets.DEV_MICROSOFT_CLIENT_SECRET }}" >> .env
+                echo "MICROSOFT_TENANT_ID=${{ secrets.DEV_MICROSOFT_TENANT_ID }}" >> .env
+                echo "MICROSOFT_DOMAIN_HINT=${{ secrets.DEV_MICROSOFT_DOMAIN_HINT }}" >> .env
                 echo "MICROSOFT_REDIRECT_URI=${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}" >> .env
 
-                # Try docker compose V2 syntax first, fall back to V1 if needed
-                if docker compose version &>/dev/null; then
-                  sudo -E docker compose up --build --detach
-                else
-                  sudo -E docker-compose up --build -d
-                fi
+                docker compose up -d --build
               else
                 echo "🔧 Using production environment variables..."
                 # Check if production deployment is possible
@@ -468,34 +459,17 @@ jobs:
                 echo "MICROSOFT_CLIENT_SECRET='${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}'" >> .env
                 echo "MICROSOFT_TENANT_ID='${{ secrets.PROD_MICROSOFT_TENANT_ID }}'" >> .env
                 echo "MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}'" >> .env
-                echo "MICROSOFT_REDIRECT_URI='${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}'" >> .env
+                echo "MICROSOFT_REDIRECT_URI='${{ secrets.PROD_FRONTEND_URL }}/auth/microsoft/callback'" >> .env
 
-                # Try docker compose V2 syntax first, fall back to V1 if needed
-                if docker compose version &>/dev/null; then
-                  sudo -E docker compose up --build --detach
-                else
-                  sudo -E docker-compose up --build -d
-                fi
+                docker compose up -d --build
               fi
 
               echo "⏳ Waiting for services to start..."
               sleep 10
 
-              # Adjust the container check command based on compose version
-              if docker compose version &>/dev/null; then
-                CHECK_CMD="sudo docker compose ps"
-              else
-                CHECK_CMD="sudo docker-compose ps"
-              fi
-
-              if ! $CHECK_CMD | grep -q "aion-api"; then
+              if ! docker ps | grep -q "aion-api"; then
                 echo "❌ API service failed to start"
-                $CHECK_CMD
-                if docker compose version &>/dev/null; then
-                  sudo docker compose logs api
-                else
-                  sudo docker-compose logs api
-                fi
+                docker compose logs api
                 exit 1
               fi
 
@@ -513,7 +487,7 @@ jobs:
                   RETRY_COUNT=$((RETRY_COUNT + 1))
                   if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
                     echo "❌ API failed to become healthy. Showing logs:"
-                    $CHECK_CMD
+                    docker compose logs
                     exit 1
                   fi
                   sleep $SLEEP_TIME
