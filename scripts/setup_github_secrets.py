@@ -1,8 +1,7 @@
 import os
 import base64
-import json
 import requests
-from nacl import encoding, public
+from nacl import public
 from dotenv import load_dotenv
 
 
@@ -128,10 +127,10 @@ def setup_secrets():
     # Define production secrets
     prod_secrets = {
         # Backend Production Secrets
-        "PROD_DB_SERVER": os.getenv("PROD_DB_SERVER"),
-        "PROD_DB_NAME": os.getenv("PROD_DB_NAME"),
-        "PROD_DB_USER": os.getenv("PROD_DB_USER"),
-        "PROD_DB_PASSWORD": os.getenv("PROD_DB_PASSWORD"),
+        "PROD_DB_SERVER": os.getenv("DB_SERVER"),
+        "PROD_DB_NAME": os.getenv("DB_NAME"),
+        "PROD_DB_USER": os.getenv("DB_USER"),
+        "PROD_DB_PASSWORD": os.getenv("DB_PASSWORD"),
         "PROD_AWS_BUCKET_NAME": os.getenv("PROD_AWS_BUCKET_NAME"),
         "PROD_CORS_ORIGINS": os.getenv("PROD_CORS_ORIGINS"),
         "PROD_FRONTEND_URL": os.getenv("PROD_FRONTEND_URL"),
@@ -151,9 +150,14 @@ def setup_secrets():
         "AWS_ACCESS_KEY_ID": os.getenv("AWS_ACCESS_KEY_ID"),
         "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY"),
 
-        # EC2 Configuration
+        # EC2 Configuration (Dev Server)
         "EC2_HOST": os.getenv("EC2_HOST"),
         "EC2_USERNAME": os.getenv("EC2_USERNAME"),
+
+        # Production Server Configuration
+        "PROD_SERVER_HOST": os.getenv("PROD_SERVER_HOST"),
+        "PROD_SERVER_USERNAME": os.getenv("PROD_SERVER_USERNAME"),
+        "PROD_SERVER_PASSWORD": os.getenv("PROD_SERVER_PASSWORD"),
 
         # Firebase Configuration
         "FIREBASE_PROJECT_ID": os.getenv("FIREBASE_PROJECT_ID"),
@@ -182,6 +186,11 @@ def setup_secrets():
             "EC2_HOST",
             "EC2_USERNAME",
             "SSH_PRIVATE_KEY"
+        ],
+        "Production Server Configuration": [
+            "PROD_SERVER_HOST",
+            "PROD_SERVER_USERNAME",
+            "PROD_SERVER_PASSWORD"
         ],
         "Development Database": [
             "DEV_DB_SERVER",
