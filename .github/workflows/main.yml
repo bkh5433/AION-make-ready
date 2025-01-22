@@ -459,7 +459,7 @@ jobs:
                 echo "MICROSOFT_CLIENT_SECRET='${{ secrets.PROD_MICROSOFT_CLIENT_SECRET }}'" >> .env
                 echo "MICROSOFT_TENANT_ID='${{ secrets.PROD_MICROSOFT_TENANT_ID }}'" >> .env
                 echo "MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}'" >> .env
-                echo "MICROSOFT_REDIRECT_URI='${{ secrets.PROD_FRONTEND_URL }}/auth/microsoft/callback'" >> .env
+                echo "MICROSOFT_REDIRECT_URI='${{ secrets.PROD_FRONTEND_URL }}/api/auth/microsoft/callback'" >> .env
 
                 docker compose up -d --build
               fi
