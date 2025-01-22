@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pydantic import ValidationError
 from property_search import PropertySearch
 from logger_config import LogConfig, log_exceptions
-from session import get_session_path, cleanup_session, generate_session_id, \
+from session import get_session_path, generate_session_id, \
     setup_session_directory
 from data_processing import generate_multi_property_report
 from cache_module import ConcurrentSQLCache, CacheConfig
@@ -23,8 +23,11 @@ from utils.catch_exceptions import catch_exceptions
 from monitoring import SystemMonitor
 from task_manager import task_manager
 from ms_auth import MicrosoftAuth
+from services.report_metrics_service import ReportMetricsService
+from services.user_activity_service import UserActivityService
 import os
 from asgiref.sync import async_to_sync
+from typing import Dict
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -84,6 +87,10 @@ auth = AuthMiddleware()
 
 # Initialize SystemMonitor with other initializations
 system_monitor = SystemMonitor()
+
+# Initialize services
+report_metrics_service = ReportMetricsService()
+user_activity_service = UserActivityService()
 
 
 def fetch_make_ready_data_sync():
@@ -222,9 +229,15 @@ def search_properties():
             if not data:
                 logger.error("Failed to populate cache data after refresh attempt")
                 return jsonify({
+                    "success": False,
                     "error": "Failed to retrieve property data",
-                    "status": "error"
-                }), 500
+                    "status": "error",
+                    "data_quality": {
+                        "is_stale": True,
+                        "confidence_score": 0.0,
+                        "import_window_active": cache._import_window_detected
+                    }
+                }), 503  # Service Unavailable
 
         elif is_stale and not cache._import_window_detected:
             logger.info("Data is stale (>12 hours old) and not in import window, triggering background refresh")
@@ -256,6 +269,7 @@ def search_properties():
         staleness_info = cache._get_staleness_info()
 
         response_data = {
+            'success': True,
             'count': result.count,
             'data': [property.model_dump() for property in result.data],
             'data_quality': {
@@ -297,6 +311,7 @@ def search_properties():
     except Exception as e:
         logger.error(f"Exception in search_properties", exc_info=True)
         return jsonify({
+            'success': False,
             'error': str(e),
             'status': 'error'
         }), 500
@@ -310,6 +325,10 @@ def generate_report():
     """Generate Excel report for selected properties in a single workbook."""
     try:
         logger.info("POST /api/reports/generate endpoint accessed.")
+
+        # Record user activity
+        user_activity_service.record_activity(request.user, "report_generation")
+
         # Validate request data
         request_data = request.get_json()
         if not request_data:
@@ -367,8 +386,18 @@ def generate_report():
                 "data_issues": searcher.data_issues  # Include data issues in error response
             }, 404
 
+        # Generate report ID
+        report_id = report_metrics_service.create_report_id()
+        start_time = datetime.now(timezone.utc)
+
+        # Store user data before passing to background thread
+        user_data = {
+            'user_id': request.user['user_id'],
+            'email': request.user['email']
+        }
+
         # Create a task for report generation
-        def generate_report_background():
+        def generate_report_background(user_data: Dict[str, str]):
             try:
                 # Generate single report with multiple sheets
                 report_files = generate_multi_property_report(
@@ -392,12 +421,33 @@ def generate_report():
 
                 # Mark task as completed with the file list
                 task_manager.complete_task(task_id, files)
+
+                # Record successful metrics
+                report_metrics_service.record_metrics(
+                    user_data=user_data,
+                    property_keys=[str(key) for key in report_request.properties],
+                    report_id=report_id,
+                    success=True,
+                    start_time=start_time
+                )
+
                 return files
 
             except Exception as e:
                 logger.error(f"Error in report generation task: {str(e)}", exc_info=True)
                 if output_dir.exists():
                     shutil.rmtree(output_dir)
+
+                # Record failed metrics
+                report_metrics_service.record_metrics(
+                    user_data=user_data,
+                    property_keys=[str(key) for key in report_request.properties],
+                    report_id=report_id,
+                    success=False,
+                    error=str(e),
+                    start_time=start_time
+                )
+
                 # Mark task as failed
                 task_manager.fail_task(task_id, str(e))
                 raise
@@ -412,9 +462,9 @@ def generate_report():
         output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Generated directory for session {session_id}: {output_dir}")
-        # Start the background task in a new thread
 
-        thread = threading.Thread(target=generate_report_background)
+        # Start the background task in a new thread with user data
+        thread = threading.Thread(target=generate_report_background, args=(user_data,))
         thread.daemon = True
 
         # Add task to task manager
@@ -431,6 +481,7 @@ def generate_report():
             "success": True,
             "message": "Report generation started",
             "task_id": task_id,
+            "report_id": report_id,
             "session_id": session_id,
             "status": initial_status,
             "queue_position": queue_position,
@@ -446,15 +497,6 @@ def generate_report():
         }
 
         response = jsonify(response_data)
-        response.set_cookie(
-            'session_id',
-            session_id,
-            max_age=3600,
-            httponly=False,
-            samesite='Lax',
-            secure=False,
-            path='/'
-        )
 
         return response
 
@@ -566,18 +608,6 @@ def refresh_data():
         raise
 
 
-# def cleanup_empty_directory(directory: Path):
-#     """Clean up directory if empty after file removal."""
-#     try:
-#         # Only remove directory if it's empty and not the root output directory
-#         if directory.exists() and directory.is_dir():
-#             remaining_files = list(directory.glob('*'))
-#             if not remaining_files and 'output' in directory.parts:
-#                 shutil.rmtree(directory)
-#                 logger.info(f"Cleaned up empty directory: {directory}")
-#     except Exception as e:
-#         logger.error(f"Error cleaning up directory {directory}: {str(e)}", exc_info=True)
-
 @app.route('/api/reports/download', methods=['GET'])
 @require_auth
 @catch_exceptions
@@ -585,16 +615,6 @@ def refresh_data():
 def download_report():
     """Download a report file with enhanced session validation."""
     try:
-        # Get session from cookie
-        # session_id = request.cookies.get('session_id')
-        # logger.debug(f"Received session ID: {session_id}")  # Debug log
-        #
-        # if not session_id:
-        #     logger.error("No session ID provided in cookies")
-        #     return jsonify({
-        #         "success": False,
-        #         "message": "No session ID provided"
-        #     }), 401
 
         file_path = request.args.get('file')
         if not file_path:
@@ -611,22 +631,6 @@ def download_report():
                 "success": False,
                 "message": "File not found"
             }), 404
-
-        # Security check: ensure file is within session directory
-        # try:
-        #     session_path = Path('output') / session_id
-        #     if not str(full_path).startswith(str(session_path)):
-        #         logger.error(f"File access attempt outside session directory: {full_path}")
-        #         return jsonify({
-        #             "success": False,
-        #             "message": "Invalid file access"
-        #         }), 403
-        # except Exception as e:
-        #     logger.error(f"Error validating file path: {str(e)}")
-        #     return jsonify({
-        #         "success": False,
-        #         "message": "Invalid file access"
-        #     }), 403
 
         # Stream the file
         response = send_from_directory(
@@ -647,30 +651,6 @@ def download_report():
         return jsonify({
             "success": False,
             "message": "Error processing download request"
-        }), 500
-
-
-@app.route('/api/session/end', methods=['POST'])
-@catch_exceptions
-@log_exceptions(logger)
-def end_session():
-    """End current session"""
-    try:
-        session_id = request.cookies.get('session_id')
-        if not session_id:
-            return jsonify({"success": True, "message": "No session to end"})
-
-        cleanup_session(session_id)
-
-        response = jsonify({"success": True, "message": "Session ended"})
-        response.delete_cookie('session_id')
-        return response
-
-    except Exception as e:
-        logger.error(f"Error ending session: {e}")
-        return jsonify({
-            "success": False,
-            "message": "Error ending session"
         }), 500
 
 
@@ -790,7 +770,7 @@ def login():
     """Login endpoint"""
     try:
         data = request.get_json()
-        logger.debug(f"Login attempt with data: {data}")  # Add debug logging
+        logger.debug(f"Login attempt with data: {data}")
 
         if not data:
             logger.warning("Login attempt with no data")
@@ -802,26 +782,24 @@ def login():
         username = data.get('username')
         password = data.get('password')
 
-        logger.debug(f"Login attempt for username: {username}")  # Add debug logging
-
-        if not username or not password:
-            logger.warning(
-                f"Login attempt missing credentials - username: {bool(username)}, password: {bool(password)}")
-            return jsonify({
-                'success': False,
-                'message': 'Username and password required'
-            }), 400
-
         result = auth.authenticate_sync(username, password)
         if result:
-            logger.info(f"Successful login for user: {username}")  # Add success logging
+            # Record user activity on successful login
+            user_data = {
+                'user_id': result['user'].get('uid') or result['user'].get('username'),
+                # Fallback to username if no uid
+                'email': result['user']['email']
+            }
+            user_activity_service.record_activity(user_data, "login")
+
+            logger.info(f"Successful login for user: {username}")
             return jsonify({
                 'success': True,
                 'message': 'Login successful',
                 **result
             }), 200
 
-        logger.warning(f"Failed login attempt for user: {username}")  # Add failure logging
+        logger.warning(f"Failed login attempt for user: {username}")
         return jsonify({
             'success': False,
             'message': 'Invalid credentials'
@@ -1668,6 +1646,69 @@ def clear_remote_info_endpoint():
     return jsonify({
         'success': success
     })
+
+
+# Add new endpoint to get report metrics
+@app.route('/api/reports/metrics', methods=['GET'])
+@require_auth
+def get_user_report_metrics():
+    """Get report generation metrics for the current user"""
+    try:
+        metrics = report_metrics_service.get_user_metrics(request.user['user_id'])
+        return jsonify({
+            "success": True,
+            "metrics": metrics
+        })
+    except Exception as e:
+        logger.error(f"Error getting user report metrics: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Error retrieving report metrics"
+        }), 500
+
+
+# Add admin endpoint to get all report metrics
+@app.route('/api/admin/reports/metrics', methods=['GET'])
+@require_auth
+@require_role('admin')
+def get_all_report_metrics():
+    """Get all report generation metrics (admin only)"""
+    try:
+        metrics = report_metrics_service.get_all_metrics()
+        return jsonify({
+            "success": True,
+            "metrics": metrics
+        })
+    except Exception as e:
+        logger.error(f"Error getting all report metrics: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Error retrieving report metrics"
+        }), 500
+
+
+# Add new endpoint to get user activity metrics
+@app.route('/api/admin/metrics/user-activity', methods=['GET'])
+@require_auth
+@require_role('admin')
+def get_user_activity_metrics():
+    """Get user activity metrics (admin only)"""
+    try:
+        days = request.args.get('days', default=30, type=int)
+        metrics = user_activity_service.get_metrics(days)
+        current = user_activity_service.get_current_metrics()
+
+        return jsonify({
+            "success": True,
+            "current": current,
+            "history": metrics
+        })
+    except Exception as e:
+        logger.error(f"Error getting user activity metrics: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": "Error retrieving user activity metrics"
+        }), 500
 
 
 if __name__ == '__main__':

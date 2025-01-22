@@ -3,10 +3,37 @@
 
 MAKE_READY_QUERY = """
 
-DECLARE @CalendarDate DATE = DATEADD(DAY, -1, GETDATE());
-DECLARE @StartDate DATE = DATEADD(DAY, -29, @CalendarDate);
+WITH LatestPost AS (
+    SELECT MAX(PostDate) as LatestPostDate
+    FROM dbo.FactOperationalKPI
+),
 
-WITH ActiveProperties AS (
+WorkOrderDates AS (
+    SELECT MAX(COALESCE(ActualCompletedDate, CreateDate)) as MaxWorkOrderDate
+    FROM dbo.DimWorkOrder
+    WHERE IsDeleted = 'N'
+        AND RowIsCurrent = 'Y'
+),
+
+DateRanges AS (
+    SELECT 
+        CASE 
+            WHEN CAST(w.MaxWorkOrderDate AS DATE) > lp.LatestPostDate
+            THEN lp.LatestPostDate
+            ELSE CAST(w.MaxWorkOrderDate AS DATE)
+        END AS CalendarDate,
+        DATEADD(DAY, -29, 
+            CASE 
+                WHEN CAST(w.MaxWorkOrderDate AS DATE) > lp.LatestPostDate
+                THEN lp.LatestPostDate
+                ELSE CAST(w.MaxWorkOrderDate AS DATE)
+            END
+        ) AS StartDate
+    FROM WorkOrderDates w
+    CROSS JOIN LatestPost lp
+),
+
+ActiveProperties AS (
     SELECT DISTINCT
         PropertyKey,
         PropertyName
@@ -25,9 +52,9 @@ WorkOrderMetrics AS (
         -- Open Work Orders (carried over from before start date)
         SUM(CASE
             WHEN wo.CancelDate IS NULL
-            AND CAST(wo.CreateDate AS DATE) < @StartDate
+            AND CAST(wo.CreateDate AS DATE) < d.StartDate
             AND (wo.ActualCompletedDate IS NULL
-                 OR CAST(wo.ActualCompletedDate AS DATE) >= @StartDate)
+                 OR CAST(wo.ActualCompletedDate AS DATE) >= d.StartDate)
             AND wo.IsDeleted = 'N'
             AND wo.RowIsCurrent = 'Y'
             AND wo.StatusCode NOT IN (3)
@@ -37,7 +64,7 @@ WorkOrderMetrics AS (
 
         -- Actual Open Work Orders (created in last 30 days)
         SUM(CASE
-            WHEN CAST(wo.CreateDate AS DATE) >= @StartDate
+            WHEN CAST(wo.CreateDate AS DATE) >= d.StartDate
             AND wo.StatusCode NOT IN (3)
             AND wo.IsDeleted = 'N'
             AND wo.RowIsCurrent = 'Y'
@@ -47,16 +74,16 @@ WorkOrderMetrics AS (
 
         -- Completed Work Orders (only count completions of work orders that were either open at start or created during period)
         SUM(CASE
-            WHEN CAST(wo.ActualCompletedDate AS DATE) BETWEEN @StartDate AND @CalendarDate
+            WHEN CAST(wo.ActualCompletedDate AS DATE) BETWEEN d.StartDate AND d.CalendarDate
             AND wo.IsDeleted = 'N'
             AND wo.RowIsCurrent = 'Y'
             AND wo.StatusCode = 4
             AND (
                 -- Was open at start date
-                (CAST(wo.CreateDate AS DATE) < @StartDate)
+                (CAST(wo.CreateDate AS DATE) < d.StartDate)
                 OR
                 -- Was created during period
-                (CAST(wo.CreateDate AS DATE) >= @StartDate)
+                (CAST(wo.CreateDate AS DATE) >= d.StartDate)
             )
             THEN 1
             ELSE 0
@@ -65,16 +92,16 @@ WorkOrderMetrics AS (
         -- Cancelled Work Orders (only count cancellations of work orders that were either open at start or created during period)
         SUM(CASE
             WHEN wo.CancelDate IS NOT NULL
-            AND CAST(wo.CancelDate AS DATE) BETWEEN @StartDate AND @CalendarDate
+            AND CAST(wo.CancelDate AS DATE) BETWEEN d.StartDate AND d.CalendarDate
             AND wo.IsDeleted = 'N'
             AND wo.RowIsCurrent = 'Y'
             AND wo.StatusCode = 3
             AND (
                 -- Was open at start date
-                (CAST(wo.CreateDate AS DATE) < @StartDate)
+                (CAST(wo.CreateDate AS DATE) < d.StartDate)
                 OR
                 -- Was created during period
-                (CAST(wo.CreateDate AS DATE) >= @StartDate)
+                (CAST(wo.CreateDate AS DATE) >= d.StartDate)
             )
             THEN 1
             ELSE 0
@@ -84,7 +111,7 @@ WorkOrderMetrics AS (
         SUM(CASE
             WHEN (wo.CancelDate IS NULL OR wo.CancelDate < wo.ActualCompletedDate)
             AND CAST(wo.ActualCompletedDate AS DATE)
-                BETWEEN @StartDate AND @CalendarDate
+                BETWEEN d.StartDate AND d.CalendarDate
             AND wo.IsDeleted = 'N'
             AND wo.RowIsCurrent = 'Y'
             AND wo.StatusCode = 4
@@ -100,7 +127,7 @@ WorkOrderMetrics AS (
         -- Count completed orders for average calculation
         SUM(CASE
             WHEN CAST(wo.ActualCompletedDate AS DATE)
-                BETWEEN @StartDate AND @CalendarDate
+                BETWEEN d.StartDate AND d.CalendarDate
             AND wo.IsDeleted = 'N'
             AND wo.RowIsCurrent = 'Y'
             AND wo.StatusCode = 4
@@ -117,8 +144,13 @@ WorkOrderMetrics AS (
             AND wo.StatusCode NOT IN (3, 4)
             THEN 1
             ELSE 0
-        END) AS CurrentlyOpenWorkOrders
+        END) AS CurrentlyOpenWorkOrders,
+
+        -- Store the dates for final output
+        MAX(d.StartDate) as PeriodStartDate,
+        MAX(d.CalendarDate) as PeriodEndDate
     FROM ActiveProperties p
+    CROSS JOIN DateRanges d
     LEFT JOIN dbo.DimWorkOrder wo ON p.PropertyKey = wo.PropertyKey
     WHERE wo.MakeReadyFlag = 0
         AND wo.IsDeleted = 'N'
@@ -139,8 +171,6 @@ SELECT
     wm.ActualOpenWorkOrders_Current,
     wm.CancelledWorkOrder_Current,
     wm.CompletedWorkOrder_Current,
-
-    -- Pending Work Orders (using currently open work orders)
     wm.CurrentlyOpenWorkOrders AS PendingWorkOrders,
 
     -- Average Days to Complete
@@ -159,8 +189,8 @@ SELECT
         ELSE 0
     END AS PercentageCompletedThisPeriod,
 
-    @StartDate AS PeriodStartDate,
-    @CalendarDate AS PeriodEndDate,
+    wm.PeriodStartDate,
+    wm.PeriodEndDate,
     fo.PostDate AS LatestPostDate
 
 FROM WorkOrderMetrics wm

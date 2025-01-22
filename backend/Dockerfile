@@ -23,8 +23,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all application files
 COPY . .
 
-# Create log directory
-RUN mkdir -p /app/logs && chown -R www-data:www-data /app/logs
+# Create log directory with proper permissions for root user
+RUN mkdir -p /app/logs && \
+    chown -R root:root /app/logs && \
+    chmod -R 755 /app/logs && \
+    chmod g+s /app/logs  # Set SGID bit to maintain group ownership
 
 # Set Python path
 ENV PYTHONPATH=/app

@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Union
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 from pydantic import ValidationError
 from logger_config import LogConfig
 from models.Property import Property, PropertyStatus
@@ -17,6 +17,9 @@ logger = log_config.get_logger('property_search')
 
 # Initialize system monitor
 system_monitor = SystemMonitor()
+
+# Cache configuration
+CONVERSION_CACHE_TTL = timedelta(minutes=5)  # Cache entries expire after 5 minutes
 
 # State name to code mapping
 STATE_MAPPING = {
@@ -109,6 +112,11 @@ def get_fuzzy_name_matches(search_term: str, names: Dict[int, str], cutoff: floa
 
 
 class PropertySearch:
+    # Class-level cache that persists across instances
+    _global_conversion_cache = {}
+    _global_cache_timestamps = {}
+    _global_last_cleanup = datetime.now(timezone.utc)
+
     def __init__(self, cache_data: List[Dict]):
         start_time = time.perf_counter()
 
@@ -132,6 +140,11 @@ class PropertySearch:
                 for item in cache_data
             }
 
+            # Use class-level caches
+            self._conversion_cache = self._global_conversion_cache
+            self._cache_timestamps = self._global_cache_timestamps
+            self._last_cleanup = self._global_last_cleanup
+
             # Log unique states in the index for debugging
             unique_states = set(state for state in self._state_index.values() if state)
             logger.debug(f"Initialized with unique states: {unique_states}")
@@ -148,8 +161,48 @@ class PropertySearch:
                 logger.error(f"First item type: {type(cache_data[0]) if len(cache_data) > 0 else 'no items'}")
             raise ValueError(f"Invalid cache data format: {str(e)}")
 
+    def _cleanup_expired_cache_entries(self) -> None:
+        """Remove expired entries from the conversion cache"""
+        now = datetime.now(timezone.utc)
+        expired_keys = [
+            key for key, timestamp in self._cache_timestamps.items()
+            if now - timestamp > CONVERSION_CACHE_TTL
+        ]
+
+        for key in expired_keys:
+            self._conversion_cache.pop(key, None)
+            self._cache_timestamps.pop(key, None)
+
+        if expired_keys:
+            logger.debug(f"Cleaned up {len(expired_keys)} expired cache entries")
+
+        # Update the class-level last cleanup time
+        self.__class__._global_last_cleanup = now
+
     def _convert_property(self, property_data: Dict) -> Optional[Property]:
         """Convert a single property's raw data to a Property model"""
+        property_key = property_data['PropertyKey']
+        now = datetime.now(timezone.utc)
+
+        # Cleanup expired entries periodically (every minute)
+        if now - self._last_cleanup > timedelta(minutes=1):
+            self._cleanup_expired_cache_entries()
+
+        # Check if property is already in conversion cache and not expired
+        if property_key in self._conversion_cache and property_key in self._cache_timestamps:
+            cache_timestamp = self._cache_timestamps[property_key]
+            if now - cache_timestamp <= CONVERSION_CACHE_TTL:
+                logger.debug(
+                    f"Cache hit for property {property_key} (age: {(now - cache_timestamp).total_seconds():.1f}s)")
+                return self._conversion_cache[property_key]
+            else:
+                # Remove expired entry
+                logger.debug(
+                    f"Cache entry expired for property {property_key} (age: {(now - cache_timestamp).total_seconds():.1f}s)")
+                self._conversion_cache.pop(property_key, None)
+                self._cache_timestamps.pop(property_key, None)
+
+        logger.debug(f"Cache miss for property {property_key}")
         try:
             # Map data to metrics model
             metrics_data = {
@@ -171,7 +224,7 @@ class PropertySearch:
             period_start = self._parse_date(property_data.get('PeriodStartDate'))
             period_end = self._parse_date(property_data.get('PeriodEndDate'))
 
-            return Property(
+            property_model = Property(
                 property_key=property_data['PropertyKey'],
                 property_name=property_data['PropertyName'],
                 property_state_province_code=property_data.get('PropertyStateProvinceCode'),
@@ -182,6 +235,11 @@ class PropertySearch:
                 period_start_date=period_start,
                 period_end_date=period_end
             )
+
+            # Cache the converted property with timestamp
+            self._conversion_cache[property_key] = property_model
+            self._cache_timestamps[property_key] = now
+            return property_model
 
         except ValidationError as e:
             self._handle_error(property_data, 'validation_error', str(e))
@@ -345,9 +403,28 @@ class PropertySearch:
         conversion_start = time.perf_counter()
         conversion_errors = 0
 
+        # Track cache hits and misses for monitoring
+        cache_hits = 0
+        cache_misses = 0
+        expired_entries = 0
+        now = datetime.now(timezone.utc)
+
         for key in matching_keys:
-            property_data = self._raw_cache[key]
-            property = self._convert_property(property_data)
+            if key in self._conversion_cache and key in self._cache_timestamps:
+                cache_timestamp = self._cache_timestamps[key]
+                if now - cache_timestamp <= CONVERSION_CACHE_TTL:
+                    property = self._conversion_cache[key]
+                    cache_hits += 1
+                else:
+                    expired_entries += 1
+                    property_data = self._raw_cache[key]
+                    property = self._convert_property(property_data)
+                    cache_misses += 1
+            else:
+                property_data = self._raw_cache[key]
+                property = self._convert_property(property_data)
+                cache_misses += 1
+
             if property:
                 if include_analytics and property.metrics:
                     try:
@@ -386,14 +463,18 @@ class PropertySearch:
             path='/api/properties/search'
         )
 
-        # Log final performance metrics
+        # Log final performance metrics with cache stats
         conversion_time = end_time - conversion_start
         total_time = end_time - start_time
         success_rate = (len(results) / len(matching_keys)) * 100 if matching_keys else 0
+        cache_hit_rate = (cache_hits / (cache_hits + cache_misses) * 100) if (cache_hits + cache_misses) > 0 else 0
 
         logger.info(
             f"Search completed in {total_time * 1000:.2f}ms (conversion: {conversion_time * 1000:.3f}ms) - "
             f"Converted: {len(results)}/{len(matching_keys)} ({success_rate:.1f}%) - "
+            f"Cache hits: {cache_hits}, misses: {cache_misses}, expired: {expired_entries} "
+            f"(hit rate: {cache_hit_rate:.1f}%) - "
+            f"Cache size: {len(self._conversion_cache)} entries - "
             f"Errors: {conversion_errors}"
         )
         

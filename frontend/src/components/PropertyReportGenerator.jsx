@@ -313,6 +313,21 @@ const PropertyReportGenerator = () => {
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [nextPlaceholder, setNextPlaceholder] = useState('');
 
+    // Add ref for previous examples
+    const prevExamplesRef = useRef([]);
+
+    // Update searchExamples when raw properties are loaded
+    useEffect(() => {
+        if (rawProperties.length > 0) {
+            const examples = generateSearchExamples(rawProperties);
+            // Compare with previous examples using ref
+            if (JSON.stringify(examples) !== JSON.stringify(prevExamplesRef.current)) {
+                setSearchExamples(examples);
+                prevExamplesRef.current = examples;
+            }
+        }
+    }, [rawProperties]); // Remove searchExamples from dependencies
+
     // Enhanced animation effect
     useEffect(() => {
         if (isSearchFocused || searchTerm) return;
@@ -375,7 +390,8 @@ const PropertyReportGenerator = () => {
     // Memoized debounced search function
     const debouncedSearch = useCallback(
         debounce(async (term, page = 1, perPage = 20) => {
-            if (term.length > 0 && term === prevSearchTerm) {
+            // Skip if this is the same search term and not the first load
+            if (!isFirstLoadRef.current && term === prevSearchTerm) {
                 return;
             }
 
@@ -420,17 +436,15 @@ const PropertyReportGenerator = () => {
                     latest_post_date: property.latest_post_date
                 }));
 
-                setTimeout(() => {
-                    setProperties(formattedProperties);
-                    setIsLoading(false);
+                setProperties(formattedProperties);
+                setIsLoading(false);
 
-                    // Only show success notification on first load using the ref
-                    if (isFirstLoadRef.current) {
-                        addNotification('success', 'Successfully fetched properties');
-                        isFirstLoadRef.current = false;
-                        setIsFirstLoad(false);
-                    }
-                }, 1000);
+                // Only show success notification on first load
+                if (isFirstLoadRef.current) {
+                    addNotification('success', 'Successfully fetched properties');
+                    isFirstLoadRef.current = false;
+                    setIsFirstLoad(false);
+                }
 
                 setPrevSearchTerm(term);
 
@@ -443,24 +457,16 @@ const PropertyReportGenerator = () => {
                 addNotification('error', 'Connection failed. Please refresh the page and try again.');
             }
         }, 750),
-        [prevSearchTerm]
+        [prevSearchTerm, isFirstLoadRef]
     );
 
-    // Update the search effect
+    // Update the search effect to always trigger the search
     useEffect(() => {
-        // Always perform the search, even with empty search term
         debouncedSearch(searchTerm);
 
         // Cleanup function to cancel pending searches
         return () => debouncedSearch.cancel();
     }, [searchTerm, debouncedSearch]);
-
-    // Update searchExamples when raw properties are loaded
-    useEffect(() => {
-        if (rawProperties.length > 0) {
-            setSearchExamples(generateSearchExamples(rawProperties));
-        }
-    }, [rawProperties]);
 
     // Debug properties before filtering
     // console.log('Properties before filtering:', properties);
