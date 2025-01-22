@@ -423,7 +423,7 @@ jobs:
                 echo "MICROSOFT_DOMAIN_HINT=${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}" >> .env
                 echo "MICROSOFT_REDIRECT_URI=${{ secrets.DEV_MICROSOFT_REDIRECT_URI }}" >> .env
 
-                docker compose up -d --build
+                sudo -E docker compose up --detach --build
               else
                 echo "🔧 Using production environment variables..."
                 # Check if production deployment is possible
@@ -461,15 +461,15 @@ jobs:
                 echo "MICROSOFT_DOMAIN_HINT='${{ secrets.PROD_MICROSOFT_DOMAIN_HINT }}'" >> .env
                 echo "MICROSOFT_REDIRECT_URI='${{ secrets.PROD_MICROSOFT_REDIRECT_URI }}'" >> .env
 
-                docker compose up -d --build
+                sudo -E docker compose up --detach --build
               fi
 
               echo "⏳ Waiting for services to start..."
               sleep 10
 
-              if ! docker ps | grep -q "aion-api"; then
+              if ! sudo docker compose ps | grep -q "aion-api"; then
                 echo "❌ API service failed to start"
-                docker compose logs api
+                sudo docker compose logs api
                 exit 1
               fi
 
@@ -487,7 +487,7 @@ jobs:
                   RETRY_COUNT=$((RETRY_COUNT + 1))
                   if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
                     echo "❌ API failed to become healthy. Showing logs:"
-                    docker compose logs
+                    sudo docker compose logs
                     exit 1
                   fi
                   sleep $SLEEP_TIME
@@ -495,7 +495,7 @@ jobs:
               done
 
               echo "🧹 Cleaning up old images..."
-              docker image prune -a --force --filter "until=72h"
+              sudo docker image prune -a --force --filter "until=72h"
 
               echo "✅ Deployment completed successfully!"
               echo "Branch: $DEPLOY_BRANCH"
