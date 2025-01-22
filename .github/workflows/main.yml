@@ -331,7 +331,7 @@ jobs:
             echo "$SSH_PRIVATE_KEY" > private_key
             chmod 600 private_key
 
-            ssh -o StrictHostKeyChecking=no -i private_key "$EC2_USERNAME@$EC2_HOST" << 'EOF'
+            ssh -o StrictHostKeyChecking=no -i private_key "$EC2_USERNAME@$EC2_HOST" "DEPLOY_BRANCH='$BRANCH_NAME'" << 'EOF'
               set -e
 
               echo "🔍 Checking system status..."
@@ -342,7 +342,6 @@ jobs:
 
               echo "📦 Setting up deployment directory..."
               DEPLOY_DIR=~/aion-api
-              DEPLOY_BRANCH="${GITHUB_REF##*/}"
               echo "Debug: Current branch is '$DEPLOY_BRANCH'"
 
               echo "Removing old deployment directory if it exists..."
