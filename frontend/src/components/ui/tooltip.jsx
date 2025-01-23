@@ -1,13 +1,36 @@
 import React, {useState, useEffect, useRef} from 'react';
+import {createPortal} from 'react-dom';
 
 export const Tooltip = ({content, children, wide = false}) => {
     const [isVisible, setIsVisible] = useState(false);
     const [position, setPosition] = useState({top: 0, left: 0});
     const tooltipRef = useRef(null);
     const containerRef = useRef(null);
+    const [portalContainer] = useState(() => {
+        const div = document.createElement('div');
+        div.style.position = 'absolute';
+        div.style.top = '0';
+        div.style.left = '0';
+        div.style.width = '100%';
+        div.style.height = '100%';
+        div.style.zIndex = '9999';
+        div.style.pointerEvents = 'none';
+        return div;
+    });
+
+    useEffect(() => {
+        document.body.appendChild(portalContainer);
+        return () => {
+            document.body.removeChild(portalContainer);
+        };
+    }, [portalContainer]);
 
     const handleMouseEnter = () => {
         setIsVisible(true);
+    };
+
+    const handleMouseLeave = () => {
+        setIsVisible(false);
     };
 
     useEffect(() => {
@@ -17,35 +40,29 @@ export const Tooltip = ({content, children, wide = false}) => {
             const viewportHeight = window.innerHeight;
             const viewportWidth = window.innerWidth;
 
-            // Check if tooltip would go off the bottom of the viewport
-            const bottomOverflow = container.bottom + tooltip.height > viewportHeight;
-            // Check if tooltip would go off the right of the viewport
-            const rightOverflow = container.left + (tooltip.width / 2) > viewportWidth;
-            // Check if tooltip would go off the left of the viewport
-            const leftOverflow = container.left - (tooltip.width / 2) < 0;
+            let top = container.bottom;
+            let left = container.left + (container.width / 2);
 
-            let top = '100%';
-            let left = '50%';
-            let transform = 'translateX(-50%)';
-            let arrowClass = '-top-2 left-1/2 -translate-x-1/2 border-b-gray-900';
-
-            if (bottomOverflow) {
-                top = 'auto';
-                transform = 'translateX(-50%) translateY(-100%)';
-                arrowClass = '-bottom-2 left-1/2 -translate-x-1/2 border-t-gray-900 !border-b-transparent';
+            // Check for bottom overflow
+            if (container.bottom + tooltip.height > viewportHeight) {
+                top = container.top - tooltip.height;
             }
 
-            if (rightOverflow) {
-                left = '0';
-                transform = 'translateX(-10%)';
-                arrowClass = `-${bottomOverflow ? 'bottom' : 'top'}-2 left-[10%] -translate-x-1/2 border-${bottomOverflow ? 't' : 'b'}-gray-900`;
-            } else if (leftOverflow) {
-                left = '100%';
-                transform = 'translateX(-90%)';
-                arrowClass = `-${bottomOverflow ? 'bottom' : 'top'}-2 right-[10%] translate-x-1/2 border-${bottomOverflow ? 't' : 'b'}-gray-900`;
+            // Check for right overflow
+            if (left + (tooltip.width / 2) > viewportWidth) {
+                left = container.right - tooltip.width;
             }
 
-            setPosition({top, left, transform, arrowClass});
+            // Check for left overflow
+            if (left - (tooltip.width / 2) < 0) {
+                left = container.left;
+            }
+
+            setPosition({
+                top: `${top}px`,
+                left: `${left}px`,
+                transform: 'translateX(-50%)'
+            });
         }
     }, [isVisible]);
 
@@ -53,29 +70,31 @@ export const Tooltip = ({content, children, wide = false}) => {
         <div className="relative inline-block" ref={containerRef}>
             <div
                 onMouseEnter={handleMouseEnter}
-                onMouseLeave={() => setIsVisible(false)}
+                onMouseLeave={handleMouseLeave}
                 className="cursor-help inline-flex items-center"
             >
                 {children}
             </div>
-            {isVisible && (
+            {isVisible && createPortal(
                 <div
                     ref={tooltipRef}
                     style={{
+                        position: 'fixed',
                         top: position.top,
                         left: position.left,
-                        transform: position.transform
+                        transform: position.transform,
                     }}
-                    className={`absolute z-[100] ${wide ? 'w-64' : 'max-w-xs'} p-2 text-sm 
-                              text-gray-100 bg-gray-900/95 
-                              backdrop-blur-md rounded-lg shadow-xl 
-                              border border-gray-700
-                              ${wide ? 'whitespace-pre-line' : 'whitespace-nowrap'}
+                    onMouseEnter={handleMouseEnter}
+                    onMouseLeave={handleMouseLeave}
+                    className={`${wide ? 'w-64' : 'max-w-xs'} p-2 text-sm
                               animate-in fade-in duration-200`}
                 >
-                    {content}
-                    <div className={`absolute border-8 border-transparent ${position.arrowClass}`}/>
-                </div>
+                    <div
+                        className="relative bg-gray-900 rounded-lg p-2 text-gray-100 shadow-[0_0_0_1px_rgba(0,0,0,0.1),0_4px_6px_-1px_rgba(0,0,0,0.1),0_2px_4px_-1px_rgba(0,0,0,0.06)]">
+                        {content}
+                    </div>
+                </div>,
+                portalContainer
             )}
         </div>
     );
