@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from models.UserActivityMetrics import UserActivity, UserActivityMetrics
 from auth_middleware import db
 from logger_config import LogConfig
+from config import Config
 
 # Initialize logging
 log_config = LogConfig()
@@ -19,6 +20,11 @@ class UserActivityService:
     def record_activity(self, user_data: Dict[str, Any], activity_type: str) -> None:
         """Record a user activity"""
         try:
+            # Skip recording activity in development environment
+            if Config.ENV.lower() == 'development':
+                logger.debug("Skipping activity recording in development environment")
+                return
+
             now = datetime.now(timezone.utc)
             today = now.strftime('%Y-%m-%d')
 
@@ -45,6 +51,11 @@ class UserActivityService:
     def _update_metrics(self, date: str) -> None:
         """Update DAU/MAU metrics for a given date"""
         try:
+            # Skip metrics update in development environment
+            if Config.ENV.lower() == 'development':
+                logger.debug("Skipping metrics update in development environment")
+                return
+
             # Convert date string to datetime
             current_date = datetime.strptime(date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
             month_start = current_date.replace(day=1)
@@ -84,6 +95,11 @@ class UserActivityService:
     def get_metrics(self, days: int = 30) -> List[Dict[str, Any]]:
         """Get activity metrics for the last N days"""
         try:
+            # Return empty list in development environment
+            if Config.ENV.lower() == 'development':
+                logger.debug("Returning empty metrics in development environment")
+                return []
+
             end_date = datetime.now(timezone.utc)
             start_date = end_date - timedelta(days=days)
 
@@ -104,6 +120,15 @@ class UserActivityService:
     def get_current_metrics(self) -> Dict[str, Any]:
         """Get metrics for current day and month"""
         try:
+            # Return empty metrics in development environment
+            if Config.ENV.lower() == 'development':
+                logger.debug("Returning empty current metrics in development environment")
+                return {
+                    'date': datetime.now(timezone.utc).strftime('%Y-%m-%d'),
+                    'daily_active_users': 0,
+                    'monthly_active_users': 0
+                }
+
             now = datetime.now(timezone.utc)
             today = now.strftime('%Y-%m-%d')
 

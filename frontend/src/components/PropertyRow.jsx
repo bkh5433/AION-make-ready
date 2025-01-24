@@ -116,9 +116,6 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                         {PropertyName}
                     </span>
                     <div className="flex items-center gap-2 mt-1">
-                        <span className="text-sm text-gray-500 dark:text-gray-400">
-                            ID: {PropertyKey}
-                        </span>
                         {average_days_to_complete > 5 && (
                             <Tooltip
                                 content={`Average completion time per work order: ${average_days_to_complete.toFixed(1)} days`}>
@@ -139,11 +136,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
             <td className="px-8 py-6">
                 <div className="flex flex-col group-hover:translate-x-1 transition-transform duration-200">
                     <span className="font-medium text-gray-900 dark:text-gray-100">{unitCount}</span>
-                    <Tooltip content={`${workOrdersPerUnit.toFixed(2)} work orders per unit`}>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {workOrdersPerUnit.toFixed(2)} WO/unit
-                        </span>
-                    </Tooltip>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Total Units</span>
                 </div>
             </td>
 
@@ -184,7 +177,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                     <span>{completed_work_orders} completed</span>
                     {cancelled_work_orders > 0 && (
                         <Tooltip
-                            content={`${cancelled_work_orders} work orders cancelled (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)`}>
+                            content={`${cancelled_work_orders} work orders cancelled in the last 30 days (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of created work orders)`}>
                             <span className="text-red-500 dark:text-red-400">
                                 • {cancelled_work_orders} cancelled
                             </span>
@@ -199,13 +192,13 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                     {/* Open Work Orders Section */}
                     <div className="flex flex-col">
                         <Tooltip
-                            content={`Open Work Orders show active maintenance tasks for ${PropertyName}. This includes both new requests and ongoing work from the past 30 days that haven't been completed or cancelled.`}
+                            content={`Open Work Orders show all maintenance tasks created during the last 30 days for ${PropertyName} that are not canceled. These tasks are new to the reporting period and may include completed tasks.`}
                             side="left"
                             sideOffset={5}
                             wide>
                             <span
                                 className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1 cursor-help">
-                                Open WO
+                                Work Orders Created (Last 30 Days)
                                 <span className="ml-1 text-gray-400">ⓘ</span>
                             </span>
                         </Tooltip>
@@ -213,13 +206,13 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                             <Tooltip
                                 content={`
                                     Status Overview for ${PropertyName}:
-                                    • ${actual_open_work_orders} active work orders
-                                    • ${workOrdersPerUnit.toFixed(2)} work orders per unit
-                                    • ${completed_work_orders} completed this period
-                                    ${cancelled_work_orders > 0 ? `\n• ${cancelled_work_orders} cancelled (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)` : ''}
+                                    • ${actual_open_work_orders} work orders created in last 30 days
+                                    • ${workOrdersPerUnit.toFixed(2)} new work orders per unit
+                                    • ${completed_work_orders} completed in current period
+                                    ${cancelled_work_orders > 0 ? `\n• ${cancelled_work_orders} cancelled in last 30 days (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of created work orders)` : ''}
                                     ${workOrdersPerUnit >= 0.5
-                                    ? '\nAlert: High volume of open work orders may indicate maintenance backlog.'
-                                    : '\nStatus: Work order volume is within normal operational ranges.'
+                                    ? '\nAlert: High number of work orders created in the last 30 days relative to unit count. This may indicate increased maintenance activity.'
+                                    : '\nStatus: Number of work orders created in the last 30 days is within expected range for the property size.'
                                 }
                                     ${average_days_to_complete > 5
                                     ? `\nNote: Average completion time is ${average_days_to_complete.toFixed(1)} days`
@@ -251,22 +244,24 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                     {/* Pending Work Orders Section */}
                     <div className="flex flex-col">
                         <Tooltip
-                            content={`Outstanding work orders at period end (Open + New - Cancelled - Completed = ${pending_work_orders})`}
+                            content={`Pending Work Orders represent all unresolved maintenance tasks for ${PropertyName} at the end of the reporting period. This includes both tasks carried over from prior periods and those created during the last 30 days that have not been completed or canceled.`}
                             side="left"
                             sideOffset={5}
                             wide>
                             <span
                                 className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1 cursor-help">
-                                Pending WO
+                                Unresolved Work Orders
                                 <span className="ml-1 text-gray-400">ⓘ</span>
                             </span>
                         </Tooltip>
                         <div className="flex items-center gap-2">
                             <Tooltip
                                 content={`
-                                    • ${pending_work_orders} outstanding tasks (${((pending_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)
-                                    • ${completed_work_orders} completed, ${cancelled_work_orders} cancelled
-                                    • ${percentage_completed.toFixed(1)}% completion rate
+                                    Unresolved Work Order Details:
+                                    • ${pending_work_orders} unresolved tasks (includes tasks from prior periods)
+                                    • ${completed_work_orders} completed in current period
+                                    • ${cancelled_work_orders} cancelled in last 30 days
+                                    • ${percentage_completed.toFixed(1)}% completion rate for current period
                                 `}
                                 side="left"
                                 sideOffset={5}
