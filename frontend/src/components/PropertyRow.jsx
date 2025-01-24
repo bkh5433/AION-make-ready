@@ -75,17 +75,17 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
         <tr
             onClick={handleClick}
             className={`
-                group cursor-pointer transition-all duration-300
-                hover:bg-gray-50/90 dark:hover:bg-gray-800/50
+                group cursor-pointer
+                transition-colors duration-200
                 ${isSelected
-                ? 'bg-blue-50/90 dark:bg-blue-900/30 hover:bg-blue-100/90 dark:hover:bg-blue-900/40'
-                : 'hover:backdrop-blur-sm hover:backdrop-saturate-150'
+                ? 'bg-blue-50/90 dark:bg-blue-900/30 hover:!bg-blue-100/90 dark:hover:!bg-blue-900/40'
+                : 'hover:bg-gray-50/90 dark:hover:bg-gray-800/50'
             }
                 animate-table-stagger
             `}
             style={{
                 animationDelay: `${animationDelay * 2.5}ms`,
-                willChange: 'transform, opacity'
+                willChange: 'transform, opacity, background-color'
             }}
             role="row"
         >
@@ -111,7 +111,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
 
             {/* Property Info Column */}
             <td className="px-8 py-6">
-                <div className="flex flex-col group-hover:translate-x-1 transition-transform duration-200">
+                <div className="flex flex-col transition-transform duration-150 ease-out group-hover:translate-x-1">
                     <span className="font-medium text-gray-900 dark:text-gray-100">
                         {PropertyName}
                     </span>
@@ -134,7 +134,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
 
             {/* Units Column */}
             <td className="px-8 py-6">
-                <div className="flex flex-col group-hover:translate-x-1 transition-transform duration-200">
+                <div className="flex flex-col transition-transform duration-150 ease-out group-hover:translate-x-1">
                     <span className="font-medium text-gray-900 dark:text-gray-100">{unitCount}</span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">Total Units</span>
                 </div>
@@ -145,7 +145,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                 <Tooltip
                     content={`${percentage_completed >= 90 ? 'Excellent' : percentage_completed >= 75 ? 'Good' : 'Needs attention'}: ${percentage_completed}% completion rate`}>
                     <div
-                        className="flex items-center gap-2 group-hover:translate-x-1 transition-transform duration-200">
+                        className="flex items-center gap-2 transition-transform duration-150 ease-out group-hover:translate-x-1">
                         <div
                             className="w-24 bg-gray-200/80 dark:bg-gray-700/80 rounded-full h-2 overflow-hidden backdrop-blur-sm">
                             <div
@@ -173,7 +173,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                     </div>
                 </Tooltip>
                 <div
-                    className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mt-1 group-hover:translate-x-1 transition-transform duration-200">
+                    className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mt-1 transition-transform duration-150 ease-out group-hover:translate-x-1">
                     <span>{completed_work_orders} completed</span>
                     {cancelled_work_orders > 0 && (
                         <Tooltip
@@ -188,7 +188,8 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
 
             {/* Work Orders Column */}
             <td className="hidden md:table-cell px-8 py-6">
-                <div className="flex flex-col gap-4 group-hover:translate-x-1 transition-transform duration-200">
+                <div
+                    className="flex flex-col gap-4 transition-transform duration-150 ease-out group-hover:translate-x-1">
                     {/* Open Work Orders Section */}
                     <div className="flex flex-col">
                         <Tooltip
