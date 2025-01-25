@@ -438,6 +438,8 @@ def generate_report():
                 if output_dir.exists():
                     shutil.rmtree(output_dir)
 
+                # Mark task as failed
+                task_manager.fail_task(task_id, str(e))
                 # Record failed metrics
                 report_metrics_service.record_metrics(
                     user_data=user_data,
@@ -447,9 +449,6 @@ def generate_report():
                     error=str(e),
                     start_time=start_time
                 )
-
-                # Mark task as failed
-                task_manager.fail_task(task_id, str(e))
                 raise
 
         # Generate new session ID
@@ -1495,6 +1494,14 @@ def auth_callback():
             if not result:
                 logger.error("Failed to complete authentication")
                 return redirect(f"{frontend_base_url}/auth/callback?error=Authentication failed")
+
+            # Record user activity for Microsoft login
+            user_data = {
+                'user_id': result['user'].get('microsoft_id') or result['user'].get('uid'),
+                # Fallback to email for Microsoft users
+                'email': result['user']['email']
+            }
+            user_activity_service.record_activity(user_data, "microsoft_login")
 
             # Redirect to frontend callback component with token
             return redirect(f"{frontend_base_url}/auth/callback?token={result['token']}")

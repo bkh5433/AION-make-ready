@@ -1062,12 +1062,13 @@ const PropertyReportGenerator = () => {
                                 )}
                             </div>
                             <button
-                                className={`flex flex-col items-center justify-center gap-1 px-6 py-3 rounded-lg text-white 
-                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] min-w-[200px]
-                                ${isGenerating ? 'animate-pulse-shadow' : ''} ${
-                                    isGenerating || selectedProperties.length === 0
-                                        ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed opacity-75'
-                                        : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl'
+                                className={`flex flex-col items-center justify-center gap-1 px-6 py-3 rounded-lg
+                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]
+                                shadow-lg hover:shadow-xl min-w-[200px]
+                                ${isGenerating ? 'animate-pulse-shadow' : ''}
+                                ${isGenerating || selectedProperties.length === 0
+                                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                                    : 'bg-gradient-to-r from-blue-500 to-blue-600 dark:from-blue-600 dark:to-blue-700 hover:from-blue-600 hover:to-blue-700 dark:hover:from-blue-500 dark:hover:to-blue-600 text-white border border-blue-600/20 dark:border-blue-500/20 hover:border-blue-500/30 dark:hover:border-blue-400/30 backdrop-blur-sm'
                                 }`}
                                 onClick={handleGenerateReports}
                                 disabled={selectedProperties.length === 0 || isGenerating}
@@ -1079,7 +1080,7 @@ const PropertyReportGenerator = () => {
                                                 className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/>
                                             <span>Generating Reports</span>
                                         </div>
-                                        <span className="text-xs opacity-75 font-normal">
+                                        <span className="text-xs text-blue-100 dark:text-blue-200 font-normal">
                                             {currentTask ? (
                                                 taskStartedAt ? 'Processing...' : 'Requested...'
                                             ) : 'Starting...'}
@@ -1087,8 +1088,10 @@ const PropertyReportGenerator = () => {
                                     </>
                                 ) : (
                                     <div className="flex items-center gap-2">
-                                        <Download className="h-5 w-5"/>
-                                        <span>Generate Reports {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
+                                        <Download
+                                            className={`h-5 w-5 ${selectedProperties.length === 0 ? 'opacity-50' : ''}`}/>
+                                        <span
+                                            className="font-medium">Generate Reports {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
                                     </div>
                                 )}
                             </button>
