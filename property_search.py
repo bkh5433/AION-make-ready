@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict, Union, Tuple
 from datetime import datetime, date, timezone, timedelta
 from pydantic import ValidationError
 from logger_config import LogConfig
@@ -52,6 +52,12 @@ def get_fuzzy_state_match(search_term: str, cutoff: float = 0.6) -> Optional[str
     # Try exact match first
     if search_term_lower in STATE_SEARCH_MAPPING:
         return STATE_SEARCH_MAPPING[search_term_lower]
+
+    # Try partial matches first
+    partial_matches = [(key, STATE_SEARCH_MAPPING[key]) for key in STATE_SEARCH_MAPPING.keys()
+                       if search_term_lower in key]
+    if partial_matches:
+        return partial_matches[0][1]  # Return the state code of the first partial match
 
     # Try fuzzy matching against state names and codes
     matches = get_close_matches(
@@ -254,8 +260,6 @@ class PropertySearch:
 
         # Clean up the input string
         state_term_lower = state_term.lower().strip()
-
-        # Log the normalization attempt
         logger.debug(f"Attempting to normalize state term: '{state_term}' -> '{state_term_lower}'")
 
         # Try exact match first
@@ -264,13 +268,22 @@ class PropertySearch:
             logger.debug(f"Found exact mapping for '{state_term_lower}' -> '{normalized_code}'")
             return normalized_code
 
-        # Try fuzzy matching
+        # Try partial matches
+        partial_matches = [(key, value) for key, value in STATE_SEARCH_MAPPING.items()
+                           if state_term_lower in key]
+        if partial_matches:
+            # Use the first partial match
+            key, value = partial_matches[0]
+            logger.debug(f"Found partial match for '{state_term_lower}' -> '{value}' (from {key})")
+            return value
+
+        # Try fuzzy matching if no partial match
         fuzzy_match = get_fuzzy_state_match(state_term_lower)
         if fuzzy_match:
             logger.debug(f"Found fuzzy match for '{state_term_lower}' -> '{fuzzy_match}'")
             return fuzzy_match
 
-        # If not found, log available mappings that are close
+        # Log available mappings that are close
         close_matches = [
             (key, value) for key, value in STATE_SEARCH_MAPPING.items()
             if state_term_lower in key or key in state_term_lower
@@ -324,6 +337,53 @@ class PropertySearch:
 
         return set()
 
+    def _calculate_relevance_score(self,
+                                   property_key: int,
+                                   search_term: Optional[str],
+                                   name_matches: set,
+                                   state_matches: set,
+                                   city_matches: set,
+                                   property_data: Dict) -> float:
+        """Calculate a relevance score for a property based on match types"""
+        score = 0.0
+        score_reasons = []
+        property_name = property_data['PropertyName']
+
+        # Only calculate scores if there's a search term
+        if search_term:
+            search_term_lower = search_term.lower().strip()
+
+            # Name matching score (highest weight)
+            if property_key in name_matches:
+                property_name_lower = property_name.lower()
+                if property_name_lower == search_term_lower:
+                    score += 1.0  # Exact name match
+                    score_reasons.append("Exact name match (+100)")
+                elif search_term_lower in property_name_lower:
+                    score += 0.8  # Substring name match
+                    score_reasons.append("Substring name match (+80)")
+                else:
+                    score += 0.6  # Fuzzy name match
+                    score_reasons.append("Fuzzy name match (+60)")
+
+            # State matching score
+            if property_key in state_matches:
+                score += 0.4
+                score_reasons.append("State match (+40)")
+
+            # City matching score
+            if property_key in city_matches:
+                score += 0.3
+                score_reasons.append("City match (+30)")
+
+        # Log the scoring details
+        if score > 0:
+            reasons = ", ".join(score_reasons)
+            logger.debug(
+                f"Property '{property_name}' (ID: {property_key}) scored {score:.1f} points - Reasons: {reasons}")
+
+        return score
+
     def search_properties(self,
                           search_term: Optional[str] = None,
                           property_keys: Optional[List[int]] = None,
@@ -332,9 +392,12 @@ class PropertySearch:
                           include_analytics: bool = False) -> List[Property]:
         """Search properties by name, property keys, state/province code, or city with optional analytics"""
         start_time = time.perf_counter()
-        request_start = system_monitor.record_request_start()  # Record request start for route timing
+        request_start = system_monitor.record_request_start()
 
         matching_keys = []
+        name_matches = set()
+        state_matches = set()
+        city_matches = set()
 
         # If searching by specific keys, use those directly
         if property_keys:
@@ -350,7 +413,6 @@ class PropertySearch:
                 # Try to normalize state search term
                 normalized_state = self._normalize_state_code(search_term)
                 if normalized_state:
-                    # Search in state codes (case-insensitive)
                     normalized_state_lower = normalized_state.lower()
                     state_matches = {
                         key for key, state in self._state_index.items()
@@ -359,8 +421,6 @@ class PropertySearch:
                                 STATE_MAPPING.get(state) == normalized_state
                         )
                     }
-                else:
-                    state_matches = set()
 
                 # Search in cities
                 city_matches = self.get_fuzzy_city_matches(search_term)
@@ -370,12 +430,7 @@ class PropertySearch:
                 logger.info(f"Text search '{search_term}' found {len(matching_keys)} matches "
                             f"(Names: {len(name_matches)}, States: {len(state_matches)}, Cities: {len(city_matches)})")
 
-                # Log matched property names for debugging
-                if name_matches:
-                    matched_names = [self._raw_cache[key]['PropertyName'] for key in name_matches]
-                    logger.debug(f"Matched property names: {matched_names}")
             else:
-                # For empty searches, return all keys
                 matching_keys = list(self._raw_cache.keys())
                 logger.info(f"Empty search returning all {len(matching_keys)} properties")
 
@@ -388,15 +443,29 @@ class PropertySearch:
                     key for key in matching_keys
                     if self._state_index[key] == normalized_filter_state_lower
                 ]
-                logger.info(f"State/province filter '{state_province_code}' (normalized: {normalized_filter_state}) "
-                            f"reduced matches to {len(matching_keys)}")
 
         # Filter by city if provided
         if city and matching_keys:
             city_lower = city.lower().strip()
             city_matches = self.get_fuzzy_city_matches(city_lower)
             matching_keys = [key for key in matching_keys if key in city_matches]
-            logger.info(f"City filter '{city}' reduced matches to {len(matching_keys)}")
+
+        # Calculate relevance scores and sort results
+        scored_results: List[Tuple[int, float]] = []
+        for key in matching_keys:
+            score = self._calculate_relevance_score(
+                key,
+                search_term,
+                name_matches,
+                state_matches,
+                city_matches,
+                self._raw_cache[key]
+            )
+            scored_results.append((key, score))
+
+        # Sort by relevance score in descending order
+        scored_results.sort(key=lambda x: x[1], reverse=True)
+        matching_keys = [key for key, _ in scored_results]
 
         # Convert matching properties
         results = []

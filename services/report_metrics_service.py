@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from models.ReportMetrics import ReportMetrics
 from auth_middleware import db
 from logger_config import LogConfig
+from config import Config
 import uuid
 
 # Initialize logging
@@ -25,9 +26,14 @@ class ReportMetricsService:
                        start_time: Optional[datetime] = None) -> None:
         """
         Record report generation metrics after completion
-        Only writes to Firestore once when the report is done
+        Only writes to Firestore once when the report is done and not in development
         """
         try:
+            # Skip recording metrics in development environment
+            if Config.ENV.lower() == 'development':
+                logger.debug("Skipping metrics recording in development environment")
+                return
+
             # Calculate generation time if start_time provided
             generation_time = None
             if start_time:

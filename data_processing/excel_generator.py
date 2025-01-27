@@ -240,7 +240,7 @@ class ExcelGeneratorService:
                 }
             )
 
-            logger.info("Successfully updated metrics and what-if table")  
+            logger.info("Successfully updated metrics and what-if table")
         except Exception as e:
             logger.error("Failed to update metrics", exc_info=True)
             raise
@@ -328,11 +328,9 @@ class ExcelGeneratorService:
             raise
 
 
-def generate_multi_property_report(
-        template_name: str,
-        properties: List[Property],
-        output_dir: Union[str, Path] = None
-) -> List[Path]:
+def generate_multi_property_report(template_name: str, properties: List[Property],
+                                   output_dir: Union[str, Path] = None
+                                   ) -> List[Path]:
     """
     Generate a single Excel report with multiple sheets for multiple properties.
     Each sheet maintains exact template formatting and formulas.
@@ -476,7 +474,6 @@ def generate_multi_property_report(
                 logger.info(f"Successfully processed {property_data.property_name}")
 
                 time.sleep(1)
-                
 
             except Exception as e:
                 logger.error(f"Failed to process {property_data.property_name}: {str(e)}", exc_info=True)

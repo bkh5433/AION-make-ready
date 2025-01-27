@@ -1,6 +1,8 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {Tooltip} from './ui/tooltip';
 import {AlertTriangle} from 'lucide-react';
+import WorkOrderTypeBreakdown from './WorkOrderTypeBreakdown';
+import {isFeatureEnabled} from '../lib/features';
 
 // Internal helper components
 const StatusBadge = ({value, threshold, type}) => {
@@ -26,28 +28,9 @@ const StatusBadge = ({value, threshold, type}) => {
     );
 };
 
-const ProgressBar = ({percentage}) => {
-    const getColorClass = () => {
-        if (percentage >= 90) return 'bg-green-500';
-        if (percentage >= 75) return 'bg-yellow-500';
-        return 'bg-red-500';
-    };
-
-    return (
-        <div className="w-24 bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-            <div
-                className={`h-2 rounded-full transition-transform duration-500 ease-out ${getColorClass()}`}
-                style={{
-                    width: `${percentage}%`,
-                    transform: 'scaleX(0)',
-                    animation: 'progress-scale 0.6s ease-out forwards'
-                }}
-            />
-        </div>
-    );
-};
-
 const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+
     const {
         PropertyName,
         PropertyKey,
@@ -58,12 +41,14 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
             completed_work_orders,
             cancelled_work_orders,
             percentage_completed,
-            average_days_to_complete
+            average_days_to_complete,
+            work_order_types
         }
     } = property;
 
     const workOrdersPerUnit = actual_open_work_orders / unitCount;
     const pendingPerUnit = pending_work_orders / unitCount;
+    const totalWorkOrders = actual_open_work_orders || 1;
 
     const handleClick = () => onSelect(PropertyKey);
     const handleCheckboxClick = (e) => {
@@ -75,17 +60,17 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
         <tr
             onClick={handleClick}
             className={`
-                group cursor-pointer transition-all duration-300
-                hover:bg-gray-50/90 dark:hover:bg-gray-800/50
+                group cursor-pointer
+                transition-colors duration-200
                 ${isSelected
-                ? 'bg-blue-50/90 dark:bg-blue-900/30 hover:bg-blue-100/90 dark:hover:bg-blue-900/40'
-                : 'hover:backdrop-blur-sm hover:backdrop-saturate-150'
+                ? 'bg-blue-50/90 dark:bg-blue-900/30 hover:!bg-blue-100/90 dark:hover:!bg-blue-900/40'
+                : 'hover:bg-gray-50/90 dark:hover:bg-gray-800/50'
             }
                 animate-table-stagger
             `}
             style={{
                 animationDelay: `${animationDelay * 2.5}ms`,
-                willChange: 'transform, opacity'
+                willChange: 'transform, opacity, background-color'
             }}
             role="row"
         >
@@ -111,14 +96,11 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
 
             {/* Property Info Column */}
             <td className="px-8 py-6">
-                <div className="flex flex-col group-hover:translate-x-1 transition-transform duration-200">
+                <div className="flex flex-col transition-transform duration-150 ease-out group-hover:translate-x-1">
                     <span className="font-medium text-gray-900 dark:text-gray-100">
                         {PropertyName}
                     </span>
                     <div className="flex items-center gap-2 mt-1">
-                        <span className="text-sm text-gray-500 dark:text-gray-400">
-                            ID: {PropertyKey}
-                        </span>
                         {average_days_to_complete > 5 && (
                             <Tooltip
                                 content={`Average completion time per work order: ${average_days_to_complete.toFixed(1)} days`}>
@@ -137,13 +119,9 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
 
             {/* Units Column */}
             <td className="px-8 py-6">
-                <div className="flex flex-col group-hover:translate-x-1 transition-transform duration-200">
+                <div className="flex flex-col transition-transform duration-150 ease-out group-hover:translate-x-1">
                     <span className="font-medium text-gray-900 dark:text-gray-100">{unitCount}</span>
-                    <Tooltip content={`${workOrdersPerUnit.toFixed(2)} work orders per unit`}>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {workOrdersPerUnit.toFixed(2)} WO/unit
-                        </span>
-                    </Tooltip>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Total Units</span>
                 </div>
             </td>
 
@@ -152,7 +130,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                 <Tooltip
                     content={`${percentage_completed >= 90 ? 'Excellent' : percentage_completed >= 75 ? 'Good' : 'Needs attention'}: ${percentage_completed}% completion rate`}>
                     <div
-                        className="flex items-center gap-2 group-hover:translate-x-1 transition-transform duration-200">
+                        className="flex items-center gap-2 transition-transform duration-150 ease-out group-hover:translate-x-1">
                         <div
                             className="w-24 bg-gray-200/80 dark:bg-gray-700/80 rounded-full h-2 overflow-hidden backdrop-blur-sm">
                             <div
@@ -180,11 +158,11 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                     </div>
                 </Tooltip>
                 <div
-                    className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mt-1 group-hover:translate-x-1 transition-transform duration-200">
+                    className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 mt-1 transition-transform duration-150 ease-out group-hover:translate-x-1">
                     <span>{completed_work_orders} completed</span>
                     {cancelled_work_orders > 0 && (
                         <Tooltip
-                            content={`${cancelled_work_orders} work orders cancelled (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)`}>
+                            content={`${cancelled_work_orders} work orders cancelled in the last 30 days (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of created work orders)`}>
                             <span className="text-red-500 dark:text-red-400">
                                 • {cancelled_work_orders} cancelled
                             </span>
@@ -195,78 +173,90 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
 
             {/* Work Orders Column */}
             <td className="hidden md:table-cell px-8 py-6">
-                <div className="flex flex-col gap-4 group-hover:translate-x-1 transition-transform duration-200">
+                <div
+                    className="flex flex-col gap-4 transition-transform duration-150 ease-out group-hover:translate-x-1">
                     {/* Open Work Orders Section */}
                     <div className="flex flex-col">
                         <Tooltip
-                            content={`Open Work Orders show active maintenance tasks for ${PropertyName}. This includes both new requests and ongoing work from the past 30 days that haven't been completed or cancelled.`}
+                            content={`Open Work Orders show all maintenance tasks created during the last 30 days for ${PropertyName} that are not canceled. These tasks are new to the reporting period and may include completed tasks.`}
                             side="left"
                             sideOffset={5}
                             wide>
                             <span
                                 className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1 cursor-help">
-                                Open WO
+                                Work Orders Created (Last 30 Days)
                                 <span className="ml-1 text-gray-400">ⓘ</span>
                             </span>
                         </Tooltip>
-                        <div className="flex items-center gap-2">
-                            <Tooltip
-                                content={`
-                                    Status Overview for ${PropertyName}:
-                                    • ${actual_open_work_orders} active work orders
-                                    • ${workOrdersPerUnit.toFixed(2)} work orders per unit
-                                    • ${completed_work_orders} completed this period
-                                    ${cancelled_work_orders > 0 ? `\n• ${cancelled_work_orders} cancelled (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)` : ''}
-                                    ${workOrdersPerUnit >= 0.5
-                                    ? '\nAlert: High volume of open work orders may indicate maintenance backlog.'
-                                    : '\nStatus: Work order volume is within normal operational ranges.'
-                                }
-                                    ${average_days_to_complete > 5
-                                    ? `\nNote: Average completion time is ${average_days_to_complete.toFixed(1)} days`
-                                    : ''
-                                }
-                                `}
-                                side="left"
-                                sideOffset={5}
-                                wide>
-                                <span className={`text-lg font-medium transition-colors duration-200 cursor-help ${
-                                    workOrdersPerUnit >= 0.5 ? 'text-red-600 dark:text-red-400' :
+                        <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                                <Tooltip
+                                    content={`Status Overview for ${PropertyName}:
+                                        • ${actual_open_work_orders} work orders created in last 30 days
+                                        • ${workOrdersPerUnit.toFixed(2)} new work orders per unit
+                                        • ${completed_work_orders} completed in current period
+                                        ${cancelled_work_orders > 0 ? `\n• ${cancelled_work_orders} cancelled in last 30 days (${((cancelled_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of created work orders)` : ''}
+                                        
+                                        ${workOrdersPerUnit >= 0.5
+                                        ? '\nAlert: High number of work orders relative to unit count.'
+                                        : '\nStatus: Work order volume is within expected range.'
+                                    }`}
+                                    side="left"
+                                    sideOffset={5}
+                                    wide>
+                                    <span className={`text-lg font-medium transition-colors duration-200 cursor-help ${
+                                        workOrdersPerUnit >= 0.5 ? 'text-red-600 dark:text-red-400' :
                                         workOrdersPerUnit >= 0.25 ? 'text-yellow-600 dark:text-yellow-400' :
                                             'text-green-600 dark:text-green-400'
-                                }`}>
-                                    {actual_open_work_orders}
-                                </span>
-                            </Tooltip>
-                            <StatusBadge
-                                value={workOrdersPerUnit}
-                                threshold={0.5}
-                                type="open"
-                            />
+                                    }`}>
+                                        {actual_open_work_orders}
+                                    </span>
+                                </Tooltip>
+                                <StatusBadge
+                                    value={workOrdersPerUnit}
+                                    threshold={0.5}
+                                    type="open"
+                                />
+                                <WorkOrderTypeBreakdown
+                                    isExpanded={isExpanded}
+                                    onToggle={() => setIsExpanded(!isExpanded)}
+                                    workOrderTypes={work_order_types}
+                                    propertyName={PropertyName}
+                                    totalWorkOrders={totalWorkOrders}
+                                    workOrdersPerUnit={workOrdersPerUnit}
+                                    actual_open_work_orders={actual_open_work_orders}
+                                    completed_work_orders={completed_work_orders}
+                                    cancelled_work_orders={cancelled_work_orders}
+                                />
+                            </div>
+
+                            <span className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                {workOrdersPerUnit.toFixed(2)} per unit
+                            </span>
                         </div>
-                        <span className="text-sm text-gray-500 dark:text-gray-400">
-                            {workOrdersPerUnit.toFixed(2)} per unit
-                        </span>
                     </div>
 
                     {/* Pending Work Orders Section */}
                     <div className="flex flex-col">
                         <Tooltip
-                            content={`Outstanding work orders at period end (Open + New - Cancelled - Completed = ${pending_work_orders})`}
+                            content={`Pending Work Orders represent all unresolved maintenance tasks for ${PropertyName} at the end of the reporting period. This includes both tasks carried over from prior periods and those created during the last 30 days that have not been completed or canceled.`}
                             side="left"
                             sideOffset={5}
                             wide>
                             <span
                                 className="text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1 cursor-help">
-                                Pending WO
+                                Unresolved Work Orders
                                 <span className="ml-1 text-gray-400">ⓘ</span>
                             </span>
                         </Tooltip>
                         <div className="flex items-center gap-2">
                             <Tooltip
                                 content={`
-                                    • ${pending_work_orders} outstanding tasks (${((pending_work_orders / actual_open_work_orders) * 100).toFixed(1)}% of total)
-                                    • ${completed_work_orders} completed, ${cancelled_work_orders} cancelled
-                                    • ${percentage_completed.toFixed(1)}% completion rate
+                                    Unresolved Work Order Details:
+                                    • ${pending_work_orders} unresolved tasks (includes tasks from prior periods)
+                                    • ${completed_work_orders} completed in current period
+                                    • ${cancelled_work_orders} cancelled in last 30 days
+                                    • ${percentage_completed.toFixed(1)}% completion rate for current period
                                 `}
                                 side="left"
                                 sideOffset={5}
