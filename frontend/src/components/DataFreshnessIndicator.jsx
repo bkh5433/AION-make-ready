@@ -27,12 +27,12 @@ const DataFreshnessIndicator = ({
     // Get appropriate messaging based on status
     const getMessage = () => {
         if (!isDataUpToDate) return {
-            title: 'Current Data is Out of Date',
-            description: 'Property data needs to be refreshed to ensure accuracy. Some information may not reflect recent changes.'
+            title: 'Property Data is Out of Date',
+            description: 'Some information may not reflect recent changes. Vista will automatically update when new data becomes available.'
         };
 
         return {
-            title: 'Current Data is Up to Date',
+            title: 'Property Data is Up to Date',
             description: 'All property data is current and validated through yesterday. Reports will reflect the most recent information.'
         };
     };
@@ -48,10 +48,10 @@ const DataFreshnessIndicator = ({
                 description: 'text-green-700 dark:text-green-300'
             },
             error: {
-                bg: 'before:bg-gradient-to-r before:from-red-50/90 before:to-rose-50/90 dark:before:from-red-900/30 dark:before:to-rose-900/20',
-                border: 'after:border-b-red-200/80 dark:after:border-b-red-700/50',
-                text: 'text-red-900 dark:text-red-100',
-                description: 'text-red-700 dark:text-red-300'
+                bg: 'before:bg-gradient-to-r before:from-amber-50/90 before:to-yellow-50/90 dark:before:from-amber-900/30 dark:before:to-yellow-900/20',
+                border: 'after:border-b-amber-200/80 dark:after:border-b-amber-700/50',
+                text: 'text-amber-900 dark:text-amber-100',
+                description: 'text-amber-700 dark:text-amber-300'
             }
         };
         return styles[status];
@@ -65,7 +65,7 @@ const DataFreshnessIndicator = ({
             case 'success':
                 return <CheckCircle className={`${iconProps} text-green-600 dark:text-green-400`}/>;
             case 'error':
-                return <AlertCircle className={`${iconProps} text-red-600 dark:text-red-400`}/>;
+                return <AlertTriangle className={`${iconProps} text-amber-600 dark:text-amber-400`}/>;
             default:
                 return null;
         }

@@ -1091,7 +1091,7 @@ const PropertyReportGenerator = () => {
                                         <Download
                                             className={`h-5 w-5 ${selectedProperties.length === 0 ? 'opacity-50' : ''}`}/>
                                         <span
-                                            className="font-medium">Generate Reports {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
+                                            className="font-medium">Generate Report{selectedProperties.length !== 1 && 's'} {selectedProperties.length > 0 && `(${selectedProperties.length})`}</span>
                                     </div>
                                 )}
                             </button>

@@ -53,7 +53,6 @@ const LoginPage = () => {
                     </div>
                 );
             case 'unhealthy':
-                const isSSLError = hasShownError.current;
                 return (
                     <div className="space-y-2 text-left">
                         <div className="font-semibold text-red-500">System Status: Error</div>
@@ -61,21 +60,11 @@ const LoginPage = () => {
                             <div>• API Endpoint: Unreachable</div>
                             <div>• Connection: Failed</div>
                             <div className="pl-4 text-xs text-red-400/90">
-                                {isSSLError ? (
-                                    <>
-                                        - SSL Certificate Error<br/>
-                                        - Certificate Not Trusted<br/>
-                                        - Click indicator for fix
-                                    </>
-                                ) : (
-                                    <>
-                                        - Network Unreachable<br/>
-                                        - API Server Down<br/>
-                                        - Check Connection
-                                    </>
-                                )}
+                                - API Server Unavailable<br/>
+                                - Check Network Connection<br/>
+                                - Service May Be Down
                             </div>
-                            <div>• Authentication: {isSSLError ? 'SSL Error' : 'Unavailable'}</div>
+                            <div>• Authentication: Unavailable</div>
                             <div>• Services: System Disruption</div>
                         </div>
                     </div>
@@ -112,8 +101,28 @@ const LoginPage = () => {
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     useEffect(() => {
-        // Single health check on component mount
-        checkApiHealth();
+        const validateAndRedirect = async () => {
+            // Check for existing auth token
+            const authToken = localStorage.getItem('authToken');
+            if (authToken) {
+                try {
+                    // Verify the token is valid by getting current user
+                    await api.getCurrentUser();
+                    // If we get here, token is valid
+                    navigate('/', {replace: true});
+                    return;
+                } catch (error) {
+                    // Token is invalid, remove it
+                    console.error('Invalid auth token:', error);
+                    localStorage.removeItem('authToken');
+                }
+            }
+
+            // Continue with normal login page initialization
+            checkApiHealth();
+        };
+
+        validateAndRedirect();
 
         // Handle Microsoft callback
         const params = new URLSearchParams(location.search);
@@ -139,42 +148,10 @@ const LoginPage = () => {
             setApiHealth(isHealthy ? 'healthy' : 'unhealthy');
             setLastChecked(new Date());
             setRetryCount(0);
-            hasShownError.current = false;
         } catch (error) {
             console.error('API Health Check Error:', error);
 
-            // If it's an SSL certificate error, don't retry
-            if (error.message === 'SSL_CERTIFICATE_ERROR') {
-                setApiHealth('unhealthy');
-                setLastChecked(new Date());
-                setRetryCount(0);
-
-                // Show SSL error notification if haven't shown yet
-                if (!hasShownError.current) {
-                    hasShownError.current = true;
-                    const healthEndpoint = api.getHealthEndpoint();
-                    console.log('Health endpoint URL:', healthEndpoint);
-
-                    addNotification('error',
-                        <div className="space-y-2">
-                            <div>SSL Certificate Error detected. To resolve this:</div>
-                            <ol className="list-decimal ml-4">
-                                <li>Click <a href={healthEndpoint} target="_blank"
-                                             className="text-blue-400 hover:text-blue-300 underline">here</a> to open
-                                    the API health endpoint
-                                </li>
-                                <li>Click "Advanced" in your browser</li>
-                                <li>Click "Proceed" or "Accept Risk and Continue"</li>
-                                <li>Return to this page and refresh</li>
-                            </ol>
-                        </div>,
-                        25000
-                    );
-                }
-                return;
-            }
-
-            // For other errors, handle retries
+            // Handle retries for any connection error
             const currentRetryCount = retryCount + 1;
 
             if (currentRetryCount < MAX_RETRIES) {
@@ -186,8 +163,22 @@ const LoginPage = () => {
                 return;
             }
 
+            // If max retries reached, show unhealthy state
             setApiHealth('unhealthy');
             setRetryCount(0);
+
+            // Add a notification about API being unreachable
+            addNotification('error',
+                <div className="space-y-2">
+                    <div>Unable to connect to the API server:</div>
+                    <ul className="list-disc ml-4">
+                        <li>The service may be temporarily down</li>
+                        <li>Check your network connection</li>
+                        <li>Try refreshing the page</li>
+                    </ul>
+                </div>,
+                10000
+            );
         }
     };
 

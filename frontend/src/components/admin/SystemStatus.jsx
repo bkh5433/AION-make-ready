@@ -9,13 +9,14 @@ import {api} from '../../lib/api';
 import {useImportWindow} from '../../lib/hooks/useImportWindow';
 import {Tooltip} from '../ui/tooltip';
 
-const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
+const MetricCard = ({title, value, icon: Icon, status, details, onClick, isLoading}) => (
     <div
         className="p-6 bg-gray-900 rounded-xl border border-gray-700 hover:border-gray-600 transition-all duration-200 shadow-lg relative overflow-hidden">
         <div className="relative z-10">
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                     <Icon className={`h-5 w-5 ${
+                        isLoading ? 'text-gray-600 animate-pulse' :
                         status === 'healthy' ? 'text-green-400' :
                             status === 'warning' ? 'text-yellow-400' :
                                 status === 'error' ? 'text-red-400' :
@@ -33,36 +34,49 @@ const MetricCard = ({title, value, icon: Icon, status, details, onClick}) => (
                 )}
             </div>
             <div className="space-y-3">
-                {status && (
-                    <div className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
-                        ${status === 'healthy' ? 'bg-green-900/50 text-green-400 ring-1 ring-green-400/50' :
-                        status === 'warning' ? 'bg-yellow-900/50 text-yellow-400 ring-1 ring-yellow-400/50' :
-                            status === 'error' ? 'bg-red-900/50 text-red-400 ring-1 ring-red-400/50' :
-                                'bg-gray-800 text-gray-400 ring-1 ring-gray-500/50'}`}>
-                        {status === 'healthy' ? <CheckCircle className="w-3 h-3 mr-1"/> :
-                            status === 'warning' ? <AlertTriangle className="w-3 h-3 mr-1"/> :
-                            status === 'error' ? <AlertTriangle className="w-3 h-3 mr-1"/> : null}
-                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                {isLoading ? (
+                    <div className="space-y-3">
+                        <div className="h-6 bg-gray-800 rounded-full w-24 animate-pulse"/>
+                        <div className="space-y-2">
+                            <div className="h-4 bg-gray-800 rounded-full w-3/4 animate-pulse"/>
+                            <div className="h-4 bg-gray-800 rounded-full w-1/2 animate-pulse"/>
+                        </div>
                     </div>
-                )}
-                {value && (
-                    <div className={`text-2xl font-bold ${
-                        status === 'healthy' ? 'text-green-400' :
-                            status === 'warning' ? 'text-yellow-400' :
-                                status === 'error' ? 'text-red-400' :
-                                    'text-gray-200'
-                    }`}>
-                        {value}
-                    </div>
-                )}
-                {details && (
-                    <div className="text-sm text-gray-400 whitespace-pre-line">
-                        {details}
-                    </div>
+                ) : (
+                    <>
+                        {status && (
+                            <div className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
+                                ${status === 'healthy' ? 'bg-green-900/50 text-green-400 ring-1 ring-green-400/50' :
+                                status === 'warning' ? 'bg-yellow-900/50 text-yellow-400 ring-1 ring-yellow-400/50' :
+                                    status === 'error' ? 'bg-red-900/50 text-red-400 ring-1 ring-red-400/50' :
+                                        'bg-gray-800 text-gray-400 ring-1 ring-gray-500/50'}`}>
+                                {status === 'healthy' ? <CheckCircle className="w-3 h-3 mr-1"/> :
+                                    status === 'warning' ? <AlertTriangle className="w-3 h-3 mr-1"/> :
+                                        status === 'error' ? <AlertTriangle className="w-3 h-3 mr-1"/> : null}
+                                {status.charAt(0).toUpperCase() + status.slice(1)}
+                            </div>
+                        )}
+                        {value && (
+                            <div className={`text-2xl font-bold ${
+                                status === 'healthy' ? 'text-green-400' :
+                                    status === 'warning' ? 'text-yellow-400' :
+                                        status === 'error' ? 'text-red-400' :
+                                            'text-gray-200'
+                            }`}>
+                                {value}
+                            </div>
+                        )}
+                        {details && (
+                            <div className="text-sm text-gray-400 whitespace-pre-line">
+                                {details}
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </div>
         <div className={`absolute inset-0 opacity-5 ${
+            isLoading ? 'bg-gray-500' :
             status === 'healthy' ? 'bg-green-500' :
                 status === 'warning' ? 'bg-yellow-500' :
                     status === 'error' ? 'bg-red-500' :
@@ -98,6 +112,7 @@ const SystemStatus = () => {
     const [systemStatus, setSystemStatus] = useState(null);
     const [cacheStatus, setCacheStatus] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
     const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
     const [autoRefresh, setAutoRefresh] = useState(true);
     const {isInImportWindow, lastImportWindow, error: importWindowError, checkStatus} = useImportWindow();
@@ -150,6 +165,7 @@ const SystemStatus = () => {
     }, [autoRefresh, refreshInterval]);
 
     const fetchStatus = async () => {
+        setIsRefreshing(true);
         try {
             const [sysStatus, cacheData] = await Promise.all([
                 api.getSystemStatus(),
@@ -159,6 +175,9 @@ const SystemStatus = () => {
             setCacheStatus(cacheData);
         } catch (error) {
             console.error('Error fetching status:', error);
+        } finally {
+            setIsRefreshing(false);
+            setIsLoading(false);
         }
     };
 
@@ -619,6 +638,7 @@ Factors affecting score:
                     icon={Server}
                     status={systemStatus?.healthy ? 'healthy' : 'error'}
                     details={systemStatus?.details}
+                    isLoading={isLoading || isRefreshing}
                 />
 
                 <MetricCard
@@ -628,6 +648,7 @@ Factors affecting score:
                     value={`${getCacheHitRate()}% Hit Rate`}
                     details={getCacheDetails()}
                     onClick={handleRefreshCache}
+                    isLoading={isLoading || isRefreshing}
                 />
 
                 <MetricCard
@@ -636,6 +657,7 @@ Factors affecting score:
                     value={systemStatus?.activeUsers || '0'}
                     status="healthy"
                     details="Currently active users in the system"
+                    isLoading={isLoading || isRefreshing}
                 />
             </div>
 
@@ -690,6 +712,7 @@ Factors affecting score:
                         value={`${systemStatus?.cpu?.usage || 0}%`}
                         status={getResourceStatus(systemStatus?.cpu?.usage)}
                         details={`${systemStatus?.cpu?.cores || 0} Cores`}
+                        isLoading={isLoading || isRefreshing}
                     />
 
                     <MetricCard
@@ -698,6 +721,7 @@ Factors affecting score:
                         value={`${systemStatus?.memory?.usage || 0}%`}
                         status={getResourceStatus(systemStatus?.memory?.usage)}
                         details={`${formatBytes(systemStatus?.memory?.used || 0)} / ${formatBytes(systemStatus?.memory?.total || 0)}`}
+                        isLoading={isLoading || isRefreshing}
                     />
 
                     <MetricCard
@@ -706,6 +730,7 @@ Factors affecting score:
                         value={`${systemStatus?.disk?.usage || 0}%`}
                         status={getResourceStatus(systemStatus?.disk?.usage)}
                         details={`${formatBytes(systemStatus?.disk?.used || 0)} / ${formatBytes(systemStatus?.disk?.total || 0)}`}
+                        isLoading={isLoading || isRefreshing}
                     />
 
                     <MetricCard
@@ -714,6 +739,7 @@ Factors affecting score:
                         value={formatBytes(systemStatus?.network?.bytesPerSec || 0) + '/s'}
                         status="healthy"
                         details={`↑${formatBytes(systemStatus?.network?.sent || 0)} ↓${formatBytes(systemStatus?.network?.received || 0)}`}
+                        isLoading={isLoading || isRefreshing}
                     />
                 </div>
             </div>
@@ -741,6 +767,7 @@ Factors affecting score:
                                     `Average response time for search operations` :
                                     'No search metrics available'
                         }
+                        isLoading={isLoading || isRefreshing}
                     />
 
                     {/* Report Generation */}
@@ -767,6 +794,7 @@ Factors affecting score:
                                     `Average response time for report generation` :
                                     'No generation metrics available'
                         }
+                        isLoading={isLoading || isRefreshing}
                     />
 
                     {/* Error Rate */}
@@ -786,6 +814,7 @@ Factors affecting score:
                                 `Recent Errors: ${systemStatus.performance.recentErrors}` :
                                 'Error rate in last hour'
                         }
+                        isLoading={isLoading || isRefreshing}
                     />
                 </div>
             </div>
