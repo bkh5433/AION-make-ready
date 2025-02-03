@@ -22,6 +22,7 @@ const LoginPage = () => {
         password: ''
     });
     const hasShownError = useRef(false);
+    const [showLegacyAuth, setShowLegacyAuth] = useState(false);
 
     // Get the status message based on current state
     const getStatusMessage = () => {
@@ -335,78 +336,84 @@ const LoginPage = () => {
                         <span className="text-lg">Sign in with Microsoft</span>
                     </button>
 
+                    {/* Legacy Auth Toggle */}
                     <div className="relative">
                         <div className="absolute inset-0 flex items-center">
                             <div className="w-full border-t border-border/50"></div>
                         </div>
                         <div className="relative flex justify-center text-xs uppercase">
-                            <span
-                                className="bg-card px-4 py-1 text-muted-foreground/70 rounded-full border border-border/50">Or</span>
+                            <button
+                                onClick={() => setShowLegacyAuth(prev => !prev)}
+                                className="bg-card px-4 py-1 text-muted-foreground/50 hover:text-muted-foreground/70 rounded-full border border-border/50 transition-colors duration-200">
+                                Legacy Sign In
+                            </button>
                         </div>
                     </div>
 
-                    {/* Traditional Login Form */}
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div className="space-y-4">
-                            <div className="relative group">
-                                <Mail
-                                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-hover:text-foreground/80 transition-colors duration-200"/>
-                                <input
-                                    type="text"
-                                    name="username"
-                                    placeholder="Username or email"
-                                    value={formData.username}
-                                    onChange={handleInputChange}
-                                    disabled={isLoading}
-                                    className="pl-10 pr-4 py-3 w-full rounded-lg bg-input/50 backdrop-blur-sm
-                                    border-border/50 text-foreground
-                                    placeholder-muted-foreground/70 focus:ring-2 
-                                    focus:ring-ring/50 focus:border-transparent transition-all duration-200
-                                    hover:bg-input/70"
-                                    required
-                                />
+                    {/* Traditional Login Form - Collapsible */}
+                    {showLegacyAuth && (
+                        <form onSubmit={handleSubmit} className="space-y-6 animate-in slide-in-from-top duration-300">
+                            <div className="space-y-4">
+                                <div className="relative group">
+                                    <Mail
+                                        className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-hover:text-foreground/80 transition-colors duration-200"/>
+                                    <input
+                                        type="text"
+                                        name="username"
+                                        placeholder="Username or email"
+                                        value={formData.username}
+                                        onChange={handleInputChange}
+                                        disabled={isLoading}
+                                        className="pl-10 pr-4 py-3 w-full rounded-lg bg-input/50 backdrop-blur-sm
+                                        border-border/50 text-foreground
+                                        placeholder-muted-foreground/70 focus:ring-2 
+                                        focus:ring-ring/50 focus:border-transparent transition-all duration-200
+                                        hover:bg-input/70"
+                                        required
+                                    />
+                                </div>
+
+                                <div className="relative group">
+                                    <Lock
+                                        className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-hover:text-foreground/80 transition-colors duration-200"/>
+                                    <input
+                                        type="password"
+                                        name="password"
+                                        placeholder="Password"
+                                        value={formData.password}
+                                        onChange={handleInputChange}
+                                        disabled={isLoading}
+                                        className="pl-10 pr-4 py-3 w-full rounded-lg bg-input/50 backdrop-blur-sm
+                                        border-border/50 text-foreground
+                                        placeholder-muted-foreground/70 focus:ring-2 
+                                        focus:ring-ring/50 focus:border-transparent transition-all duration-200
+                                        hover:bg-input/70"
+                                        required
+                                    />
+                                </div>
                             </div>
 
-                            <div className="relative group">
-                                <Lock
-                                    className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground/70 group-hover:text-foreground/80 transition-colors duration-200"/>
-                                <input
-                                    type="password"
-                                    name="password"
-                                    placeholder="Password"
-                                    value={formData.password}
-                                    onChange={handleInputChange}
-                                    disabled={isLoading}
-                                    className="pl-10 pr-4 py-3 w-full rounded-lg bg-input/50 backdrop-blur-sm
-                                    border-border/50 text-foreground
-                                    placeholder-muted-foreground/70 focus:ring-2 
-                                    focus:ring-ring/50 focus:border-transparent transition-all duration-200
-                                    hover:bg-input/70"
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                            className={`w-full flex items-center justify-center gap-2 px-6 py-4 rounded-lg
-                            transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
-                            bg-secondary/80 hover:bg-secondary text-secondary-foreground backdrop-blur-sm
-                            hover:shadow-lg
-                            ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                            {isLoading ? (
-                                <>
-                                    <div
-                                        className="animate-spin h-5 w-5 border-2 border-current border-t-transparent rounded-full"/>
-                                    <span className="text-lg">Signing in...</span>
-                                </>
-                            ) : (
-                                <span className="text-lg">Sign in with Email</span>
-                            )}
-                        </button>
-                    </form>
+                            <button
+                                type="submit"
+                                disabled={isLoading}
+                                className={`w-full flex items-center justify-center gap-2 px-6 py-4 rounded-lg
+                                transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] 
+                                bg-secondary/80 hover:bg-secondary text-secondary-foreground backdrop-blur-sm
+                                hover:shadow-lg
+                                ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                                {isLoading ? (
+                                    <>
+                                        <div
+                                            className="animate-spin h-5 w-5 border-2 border-current border-t-transparent rounded-full"/>
+                                        <span className="text-lg">Signing in...</span>
+                                    </>
+                                ) : (
+                                    <span className="text-lg">Sign in with Email</span>
+                                )}
+                            </button>
+                        </form>
+                    )}
 
                     {/* API Health Indicator */}
                     <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground/50">
