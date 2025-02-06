@@ -1,11 +1,23 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator, PrivateAttr
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from logger_config import LogConfig
 from typing import Union
 
 logger_config = LogConfig()
 logger = logger_config.get_logger('models')
+
+
+class WorkOrderType(BaseModel):
+    """Model for work order type breakdown"""
+    category: str
+    count: int = Field(ge=0)
+    percentage: float = Field(ge=0, le=100)
+
+    model_config = ConfigDict(
+        validate_assignment=True,
+        extra='allow'
+    )
 
 
 class WorkOrderMetrics(BaseModel):
@@ -19,6 +31,9 @@ class WorkOrderMetrics(BaseModel):
     pending_work_orders: int = Field(ge=0)
     percentage_completed: float = Field(ge=0, le=100)
     average_days_to_complete: float = Field(ge=0, default=0.0)
+
+    # Work order type breakdown
+    work_order_types: List[WorkOrderType] = Field(default_factory=list)
 
     # Period dates
     period_start_date: Optional[datetime] = None
@@ -149,6 +164,7 @@ class WorkOrderMetrics(BaseModel):
             'daily_rate': self.daily_rate,
             'monthly_rate': self.monthly_rate,
             'break_even_target': self.break_even_target,
-            'current_output': self.current_output
+            'current_output': self.current_output,
+            'work_order_types': [wo.model_dump() for wo in self.work_order_types]
         })
         return base_dict

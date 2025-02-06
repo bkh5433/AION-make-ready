@@ -40,21 +40,39 @@ class DatabaseConnection:
             )
         return self._engine
 
-    def fetch_data(self) -> pd.DataFrame:
-        """Fetch data with simple connection"""
-        engine = self._get_engine()
-        start_time = time.time()
-        logger.info("Starting make ready data refresh from database...")
+    def get_connection(self):
+        """Get a connection from the engine"""
+        return self._get_engine().connect()
 
+    def fetch_data(self) -> pd.DataFrame:
+        """Fetch all required data from the database"""
         try:
-            df = pd.read_sql(sql_queries.MAKE_READY_QUERY, engine)
-            execution_time = time.time() - start_time
-            logger.info(
-                f"Make ready data refresh completed in {execution_time:.2f} seconds. Retrieved {len(df)} records.")
-            return df
+            # Fetch main property data
+            property_data = self.fetch_property_data()
+
+            # Fetch work order type data
+            work_order_types = self.fetch_work_order_types()
+
+            # Convert work order types to a list of dictionaries per property
+            work_order_types_dict = {}
+            for _, row in work_order_types.iterrows():
+                property_key = row['PropertyKey']
+                if property_key not in work_order_types_dict:
+                    work_order_types_dict[property_key] = []
+                work_order_types_dict[property_key].append({
+                    'category': row['category'],
+                    'count': int(row['count'])
+                })
+
+            # Add work order types to property data
+            property_data['work_order_types'] = property_data['PropertyKey'].map(
+                lambda x: work_order_types_dict.get(x, [])
+            )
+
+            return property_data
+            
         except Exception as e:
-            execution_time = time.time() - start_time
-            logger.error(f"Make ready data refresh failed after {execution_time:.2f} seconds. Error: {str(e)}")
+            logger.error(f"Error in fetch_data: {str(e)}")
             raise
 
     async def fetch_version_info(self, query: str) -> Dict:
@@ -101,3 +119,39 @@ class DatabaseConnection:
         """Execute a SQL query and return results"""
         engine = self._get_engine()
         return pd.read_sql(query, engine)
+
+    def fetch_property_data(self) -> pd.DataFrame:
+        """Fetch main property data"""
+        try:
+            start_time = time.time()
+            logger.info("Starting make ready data refresh from database...")
+
+            with self.get_connection() as conn:
+                df = pd.read_sql(sql_queries.MAKE_READY_QUERY, conn)
+
+            execution_time = time.time() - start_time
+            logger.info(
+                f"Make ready data refresh completed in {execution_time:.2f} seconds. Retrieved {len(df)} records.")
+            return df
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(f"Make ready data refresh failed after {execution_time:.2f} seconds. Error: {str(e)}")
+            return pd.DataFrame()
+
+    def fetch_work_order_types(self) -> pd.DataFrame:
+        """Fetch work order type breakdown for each property"""
+        try:
+            start_time = time.time()
+            logger.info("Starting work order types refresh from database...")
+
+            with self.get_connection() as conn:
+                df = pd.read_sql(sql_queries.WORK_ORDER_TYPE_QUERY, conn)
+
+            execution_time = time.time() - start_time
+            logger.info(
+                f"Work order types refresh completed in {execution_time:.2f} seconds. Retrieved {len(df)} records.")
+            return df
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(f"Work order types refresh failed after {execution_time:.2f} seconds. Error: {str(e)}")
+            return pd.DataFrame()

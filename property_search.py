@@ -223,6 +223,19 @@ class PropertySearch:
                 'days_per_month': 21,
             }
 
+            # Add work order type data if available
+            if 'work_order_types' in property_data:
+                total_work_orders = sum(wo['count'] for wo in property_data['work_order_types'])
+                work_order_types = []
+                for wo_type in property_data['work_order_types']:
+                    percentage = (wo_type['count'] / total_work_orders * 100) if total_work_orders > 0 else 0
+                    work_order_types.append({
+                        'category': wo_type['category'],
+                        'count': wo_type['count'],
+                        'percentage': percentage
+                    })
+                metrics_data['work_order_types'] = work_order_types
+
             metrics = WorkOrderMetrics(**metrics_data)
 
             # Parse dates

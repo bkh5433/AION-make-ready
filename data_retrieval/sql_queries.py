@@ -216,3 +216,63 @@ VERSION_CHECK_QUERY = """
                 AND PropertyName NOT LIKE 'Historical%'
          )
 """
+
+WORK_ORDER_TYPE_QUERY = """
+        WITH LatestPost AS (
+            SELECT MAX(PostDate) as LatestPostDate
+            FROM dbo.FactOperationalKPI
+        ),
+
+        WorkOrderDates AS (
+            SELECT MAX(COALESCE(ActualCompletedDate, CreateDate)) as MaxWorkOrderDate
+            FROM dbo.DimWorkOrder
+            WHERE IsDeleted = 'N'
+                AND RowIsCurrent = 'Y'
+        ),
+
+        DateRanges AS (
+            SELECT 
+                CASE 
+                    WHEN CAST(w.MaxWorkOrderDate AS DATE) > lp.LatestPostDate
+                    THEN lp.LatestPostDate
+                    ELSE CAST(w.MaxWorkOrderDate AS DATE)
+                END AS CalendarDate,
+                DATEADD(DAY, -29, 
+                    CASE 
+                        WHEN CAST(w.MaxWorkOrderDate AS DATE) > lp.LatestPostDate
+                        THEN lp.LatestPostDate
+                        ELSE CAST(w.MaxWorkOrderDate AS DATE)
+                    END
+                ) AS StartDate
+            FROM WorkOrderDates w
+            CROSS JOIN LatestPost lp
+        )
+
+        SELECT 
+            DP.[PropertyKey],
+            DW.[ProblemCategory] as category,
+            COUNT(*) AS count
+        FROM [aionreporting].[dbo].[DimProperty] AS DP
+            JOIN [aionreporting].[dbo].[DimUnit] AS DU 
+                ON DU.[PropertyKey] = DP.[PropertyKey]
+            JOIN [aionreporting].[dbo].[DimWorkOrder] AS DW 
+                ON DW.[UnitKey] = DU.[UnitKey]
+            CROSS JOIN DateRanges d
+        WHERE
+            DP.[PropertyName] NOT LIKE 'Historical-%'
+            AND DP.[PropertyName] NOT LIKE 'Historical - %'
+            AND DW.[SRType] NOT LIKE 'MR'
+            AND DP.[PropertyStatus] = 'ACTIVE'
+            AND DP.[IsDeleted] = 'N'
+            AND DP.[RowIsCurrent] = 'Y'
+            AND DW.[IsDeleted] = 'N'
+            AND DW.[RowIsCurrent] = 'Y'
+            AND CAST(DW.[CreateDate] AS DATE) >= d.StartDate
+            AND DW.[StatusCode] NOT IN (3)  -- Not cancelled
+        GROUP BY
+            DP.[PropertyKey],
+            DW.[ProblemCategory]
+        ORDER BY
+            DP.[PropertyKey],
+            COUNT(*) DESC;
+        """
