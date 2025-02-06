@@ -215,7 +215,7 @@ const generateSearchExamples = (propertiesData) => {
 };
 
 // Update FeatureToggle to use feature flags and handle immediate updates
-const FeatureToggle = ({featureKey, icon: Icon, label}) => {
+const FeatureToggle = ({featureKey, icon: Icon, label, isBeta = false}) => {
     const [enabled, setEnabled] = useState(isFeatureEnabled(featureKey));
 
     // Update state when feature flag changes
@@ -243,14 +243,21 @@ const FeatureToggle = ({featureKey, icon: Icon, label}) => {
     return (
         <button
             onClick={handleToggle}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium 
+            className={`group flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium 
                 transition-all duration-200 border backdrop-blur-sm
                 ${enabled
                 ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-blue-200/50 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40'
                 : 'bg-gray-50 dark:bg-gray-800/30 text-gray-600 dark:text-gray-400 border-gray-200/50 dark:border-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-800/40'}`}
         >
             <Icon className="h-4 w-4"/>
-            <span>{label}</span>
+            <span className="flex items-center gap-1">
+                {label}
+                {isBeta && (
+                    <span className="text-[9px] font-medium text-amber-600/90 dark:text-amber-400/90">
+                        BETA
+                    </span>
+                )}
+            </span>
             <span className={`ml-1.5 px-1.5 py-0.5 text-xs rounded-md transition-colors duration-200
                 ${enabled
                 ? 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300'
@@ -977,6 +984,7 @@ const PropertyReportGenerator = () => {
                     featureKey="WORK_ORDER_TYPES"
                     icon={BarChart2}
                     label="Work Order Types"
+                    isBeta={true}
                 />
                 <button
                     onClick={() => setShowHelp(true)}
