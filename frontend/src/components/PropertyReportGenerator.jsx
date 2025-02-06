@@ -12,7 +12,8 @@ import {
     Sun,
     Info,
     AlertCircle,
-    HelpCircle
+    HelpCircle,
+    BarChart2
 } from 'lucide-react';
 import {motion, AnimatePresence} from 'framer-motion';
 import {useTheme} from "../lib/theme.jsx";
@@ -28,6 +29,7 @@ import DataFreshnessIndicator from './DataFreshnessIndicator';
 import {debounce} from '../lib/utils';
 import {searchCache} from '../lib/cache';
 import HelpOverlay from './ui/help-overlay';
+import {isFeatureEnabled, toggleFeature} from '../lib/features';
 
 // Add StatusBanner component
 const StatusBanner = ({status, message, icon: Icon}) => (
@@ -210,6 +212,53 @@ const generateSearchExamples = (propertiesData) => {
     console.log('From properties:', propertiesData.slice(0, 2));
 
     return examples;
+};
+
+// Update FeatureToggle to use feature flags and handle immediate updates
+const FeatureToggle = ({featureKey, icon: Icon, label}) => {
+    const [enabled, setEnabled] = useState(isFeatureEnabled(featureKey));
+
+    // Update state when feature flag changes
+    useEffect(() => {
+        const handleStorageChange = (e) => {
+            if (e.key === `feature_${featureKey}`) {
+                setEnabled(isFeatureEnabled(featureKey));
+            }
+        };
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, [featureKey]);
+
+    const handleToggle = () => {
+        toggleFeature(featureKey);
+        // Immediately update local state
+        setEnabled(!enabled);
+        // Dispatch a storage event to notify other components
+        window.dispatchEvent(new StorageEvent('storage', {
+            key: `feature_${featureKey}`,
+            newValue: (!enabled).toString()
+        }));
+    };
+
+    return (
+        <button
+            onClick={handleToggle}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium 
+                transition-all duration-200 border backdrop-blur-sm
+                ${enabled
+                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-blue-200/50 dark:border-blue-800/50 hover:bg-blue-100 dark:hover:bg-blue-900/40'
+                : 'bg-gray-50 dark:bg-gray-800/30 text-gray-600 dark:text-gray-400 border-gray-200/50 dark:border-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-800/40'}`}
+        >
+            <Icon className="h-4 w-4"/>
+            <span>{label}</span>
+            <span className={`ml-1.5 px-1.5 py-0.5 text-xs rounded-md transition-colors duration-200
+                ${enabled
+                ? 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}>
+                {enabled ? 'ON' : 'OFF'}
+            </span>
+        </button>
+    );
 };
 
 const PropertyReportGenerator = () => {
@@ -923,15 +972,22 @@ const PropertyReportGenerator = () => {
             <HelpOverlay isVisible={showHelp} onClose={() => setShowHelp(false)}/>
 
             {/* Add Help Button in the top-right corner */}
-            <button
-                onClick={() => setShowHelp(true)}
-                className="fixed top-4 right-4 z-40 p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg 
-                    hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200
-                    transform hover:scale-110"
-                aria-label="Show help"
-            >
-                <HelpCircle className="h-5 w-5 text-gray-600 dark:text-gray-400"/>
-            </button>
+            <div className="fixed top-4 right-4 z-40 flex items-center gap-3">
+                <FeatureToggle
+                    featureKey="WORK_ORDER_TYPES"
+                    icon={BarChart2}
+                    label="Work Order Types"
+                />
+                <button
+                    onClick={() => setShowHelp(true)}
+                    className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg 
+                        hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200
+                        transform hover:scale-110"
+                    aria-label="Show help"
+                >
+                    <HelpCircle className="h-5 w-5 text-gray-600 dark:text-gray-400"/>
+                </button>
+            </div>
 
             {/* Notifications Container */}
             <div className="fixed top-4 right-4 z-50 space-y-3">
