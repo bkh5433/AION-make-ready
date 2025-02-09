@@ -62,10 +62,10 @@ class Config:
     }
 
     # Cleanup
-    SESSION_CLEANUP_INTERVAL = config('SESSION_CLEANUP_INTERVAL', default=1800, cast=int)
+    SESSION_CLEANUP_INTERVAL = config('SESSION_CLEANUP_INTERVAL', default=3600, cast=int)
     SESSION_MAX_AGE = config('SESSION_MAX_AGE', default=86400, cast=int)
-    TASK_CLEANUP_INTERVAL = config('TASK_CLEANUP_INTERVAL', default=1800, cast=int)
-    TASK_MAX_AGE = config('TASK_MAX_AGE', default=3600, cast=int)
+    TASK_CLEANUP_INTERVAL = config('TASK_CLEANUP_INTERVAL', default=3600, cast=int)
+    TASK_MAX_AGE = config('TASK_MAX_AGE', default=1800, cast=int)
 
     # Logging
     LOG_LEVEL = config('LOG_LEVEL', default='INFO')
