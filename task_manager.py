@@ -340,7 +340,7 @@ class TaskManager:
                 "error": task["error"]
             }
 
-    def cleanup_old_tasks(self, max_age_minutes: int = 10):
+    def cleanup_old_tasks(self, max_age_minutes: int = Config.TASK_MAX_AGE):
         """Clean up tasks older than max_age_minutes"""
         logger.info(f"Starting cleanup of old tasks (max age: {max_age_minutes} minutes)")
         with self.lock:

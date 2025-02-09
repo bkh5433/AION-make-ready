@@ -1,8 +1,9 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import {Tooltip} from './ui/tooltip';
 import {AlertTriangle} from 'lucide-react';
 import WorkOrderTypeBreakdown from './WorkOrderTypeBreakdown';
 import {isFeatureEnabled} from '../lib/features';
+import {motion} from 'framer-motion';
 
 // Internal helper components
 const StatusBadge = ({value, threshold, type}) => {
@@ -28,8 +29,33 @@ const StatusBadge = ({value, threshold, type}) => {
     );
 };
 
-const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
+const PropertyRow = ({
+                         property,
+                         onSelect,
+                         isSelected,
+                         animationDelay = 0
+                     }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isWorkOrderTypesEnabled, setIsWorkOrderTypesEnabled] = useState(isFeatureEnabled('WORK_ORDER_TYPES'));
+
+    useEffect(() => {
+        const checkFeatureFlag = () => {
+            setIsWorkOrderTypesEnabled(isFeatureEnabled('WORK_ORDER_TYPES'));
+        };
+
+        checkFeatureFlag();
+
+        const handleStorageChange = (e) => {
+            if (e.key === 'feature_WORK_ORDER_TYPES') {
+                checkFeatureFlag();
+            }
+        };
+        window.addEventListener('storage', handleStorageChange);
+
+        return () => {
+            window.removeEventListener('storage', handleStorageChange);
+        };
+    }, []);
 
     const {
         PropertyName,
@@ -57,7 +83,7 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
     };
 
     return (
-        <tr
+        <motion.tr
             onClick={handleClick}
             className={`
                 group cursor-pointer
@@ -172,9 +198,8 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
             </td>
 
             {/* Work Orders Column */}
-            <td className="hidden md:table-cell px-8 py-6">
-                <div
-                    className="flex flex-col gap-4 transition-transform duration-150 ease-out group-hover:translate-x-1">
+            <td className="hidden md:table-cell px-8 py-8">
+                <div className="space-y-6">
                     {/* Open Work Orders Section */}
                     <div className="flex flex-col">
                         <Tooltip
@@ -206,8 +231,8 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                                     wide>
                                     <span className={`text-lg font-medium transition-colors duration-200 cursor-help ${
                                         workOrdersPerUnit >= 0.5 ? 'text-red-600 dark:text-red-400' :
-                                        workOrdersPerUnit >= 0.25 ? 'text-yellow-600 dark:text-yellow-400' :
-                                            'text-green-600 dark:text-green-400'
+                                            workOrdersPerUnit >= 0.25 ? 'text-yellow-600 dark:text-yellow-400' :
+                                                'text-green-600 dark:text-green-400'
                                     }`}>
                                         {actual_open_work_orders}
                                     </span>
@@ -217,17 +242,19 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                                     threshold={0.5}
                                     type="open"
                                 />
-                                <WorkOrderTypeBreakdown
-                                    isExpanded={isExpanded}
-                                    onToggle={() => setIsExpanded(!isExpanded)}
-                                    workOrderTypes={work_order_types}
-                                    propertyName={PropertyName}
-                                    totalWorkOrders={totalWorkOrders}
-                                    workOrdersPerUnit={workOrdersPerUnit}
-                                    actual_open_work_orders={actual_open_work_orders}
-                                    completed_work_orders={completed_work_orders}
-                                    cancelled_work_orders={cancelled_work_orders}
-                                />
+                                {isWorkOrderTypesEnabled && work_order_types && work_order_types.length > 0 && (
+                                    <WorkOrderTypeBreakdown
+                                        isExpanded={isExpanded}
+                                        onToggle={() => setIsExpanded(!isExpanded)}
+                                        workOrderTypes={work_order_types}
+                                        propertyName={PropertyName}
+                                        totalWorkOrders={totalWorkOrders}
+                                        workOrdersPerUnit={workOrdersPerUnit}
+                                        actual_open_work_orders={actual_open_work_orders}
+                                        completed_work_orders={completed_work_orders}
+                                        cancelled_work_orders={cancelled_work_orders}
+                                    />
+                                )}
                             </div>
 
                             <span className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -279,9 +306,11 @@ const PropertyRow = ({property, onSelect, isSelected, animationDelay}) => {
                             {pendingPerUnit.toFixed(2)} per unit
                         </span>
                     </div>
+
+
                 </div>
             </td>
-        </tr>
+        </motion.tr>
     );
 };
 

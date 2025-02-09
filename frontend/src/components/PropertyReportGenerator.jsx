@@ -12,7 +12,8 @@ import {
     Sun,
     Info,
     AlertCircle,
-    HelpCircle
+    HelpCircle,
+    BarChart2
 } from 'lucide-react';
 import {motion, AnimatePresence} from 'framer-motion';
 import {useTheme} from "../lib/theme.jsx";
@@ -28,6 +29,7 @@ import DataFreshnessIndicator from './DataFreshnessIndicator';
 import {debounce} from '../lib/utils';
 import {searchCache} from '../lib/cache';
 import HelpOverlay from './ui/help-overlay';
+import {isFeatureEnabled, toggleFeature} from '../lib/features';
 
 // Add StatusBanner component
 const StatusBanner = ({status, message, icon: Icon}) => (
@@ -210,6 +212,54 @@ const generateSearchExamples = (propertiesData) => {
     console.log('From properties:', propertiesData.slice(0, 2));
 
     return examples;
+};
+
+// Update FeatureToggle to be more compact
+const FeatureToggle = ({featureKey, icon: Icon, label, isBeta = false}) => {
+    const [enabled, setEnabled] = useState(isFeatureEnabled(featureKey));
+
+    useEffect(() => {
+        const handleStorageChange = (e) => {
+            if (e.key === `feature_${featureKey}`) {
+                setEnabled(isFeatureEnabled(featureKey));
+            }
+        };
+        window.addEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, [featureKey]);
+
+    const handleToggle = () => {
+        toggleFeature(featureKey);
+        setEnabled(!enabled);
+        window.dispatchEvent(new StorageEvent('storage', {
+            key: `feature_${featureKey}`,
+            newValue: (!enabled).toString()
+        }));
+    };
+
+    return (
+        <button
+            onClick={handleToggle}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium 
+                transition-all duration-200 border
+                ${enabled
+                ? 'bg-blue-50/80 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border-blue-200/50 dark:border-blue-800/50'
+                : 'bg-gray-50/80 dark:bg-gray-800/30 text-gray-500 dark:text-gray-400 border-gray-200/50 dark:border-gray-700/50'}`}
+        >
+            <Icon className="h-3.5 w-3.5"/>
+            <span className="hidden sm:inline">{label}</span>
+            {isBeta && (
+                <span
+                    className="text-[9px] font-medium text-amber-500/90 dark:text-amber-400/90 hidden sm:inline">beta</span>
+            )}
+            <span className={`px-1 py-0.5 text-[10px] rounded
+                ${enabled
+                ? 'bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}>
+                {enabled ? 'ON' : 'OFF'}
+            </span>
+        </button>
+    );
 };
 
 const PropertyReportGenerator = () => {
@@ -922,16 +972,18 @@ const PropertyReportGenerator = () => {
             {/* Add Help Overlay */}
             <HelpOverlay isVisible={showHelp} onClose={() => setShowHelp(false)}/>
 
-            {/* Add Help Button in the top-right corner */}
-            <button
-                onClick={() => setShowHelp(true)}
-                className="fixed top-4 right-4 z-40 p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg 
-                    hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200
-                    transform hover:scale-110"
-                aria-label="Show help"
-            >
-                <HelpCircle className="h-5 w-5 text-gray-600 dark:text-gray-400"/>
-            </button>
+            {/* Move help button to be alone in the corner */}
+            <div className="fixed top-4 right-4 z-40">
+                <button
+                    onClick={() => setShowHelp(true)}
+                    className="p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg 
+                        hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200
+                        transform hover:scale-110"
+                    aria-label="Show help"
+                >
+                    <HelpCircle className="h-5 w-5 text-gray-600 dark:text-gray-400"/>
+                </button>
+            </div>
 
             {/* Notifications Container */}
             <div className="fixed top-4 right-4 z-50 space-y-3">
@@ -997,69 +1049,66 @@ const PropertyReportGenerator = () => {
                     {/* Search and Generate Section */}
                     <div className="px-8 pb-8">
                         <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-6">
-                            <div className="relative flex-grow animate-slide-up">
-                                <div className={`relative transition-all duration-300
-                                    ${isSearchFocused ? 'ring-1 ring-blue-500/10 shadow-md' : 'shadow-sm hover:shadow-sm'}
-                                    rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm`}>
-                                    <div
-                                        className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        {isLoading ? (
+                            <div className="flex-grow animate-slide-up">
+                                <div className="relative flex items-center gap-3">
+                                    <div className="flex-grow">
+                                        <div className={`relative transition-all duration-300
+                                            ${isSearchFocused ? 'ring-1 ring-blue-500/10 shadow-md' : 'shadow-sm hover:shadow-sm'}
+                                            rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm`}>
                                             <div
-                                                className="animate-spin h-5 w-5 border-2 border-gray-500 border-t-transparent rounded-full"/>
-                                        ) : (
-                                            <Search className={`h-5 w-5 transition-colors duration-300
-                                                ${isSearchFocused ? 'text-blue-500' : 'text-gray-400'}`}/>
-                                        )}
-                                    </div>
-                                    <div className="relative">
-                                        <input
-                                            ref={searchInputRef}
-                                            type="text"
-                                            className={`pl-10 pr-10 py-3 w-full rounded-lg
-                                                bg-transparent
-                                                border border-gray-200/50 dark:border-gray-700/50
-                                                text-gray-900 dark:text-gray-100 
-                                                placeholder-gray-500 dark:placeholder-gray-400
-                                                focus:border-blue-500/10 focus:ring-0
-                                                transition-all duration-300
-                                                hover:border-gray-300/50 dark:hover:border-gray-600/50`}
-                                            value={searchTerm}
-                                            onChange={(e) => setSearchTerm(e.target.value)}
-                                            onFocus={() => setIsSearchFocused(true)}
-                                            onBlur={() => setIsSearchFocused(false)}
-                                            placeholder={currentPlaceholder}
-                                            aria-label="Search properties by name or location"
-                                        />
-                                        {/* Overlay for transition effect - only show when searchTerm is empty */}
-                                        {isTransitioning && !isSearchFocused && !searchTerm && (
+                                                className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                {isLoading ? (
+                                                    <div
+                                                        className="animate-spin h-5 w-5 border-2 border-gray-500 border-t-transparent rounded-full"/>
+                                                ) : (
+                                                    <Search className={`h-5 w-5 transition-colors duration-300
+                                                        ${isSearchFocused ? 'text-blue-500' : 'text-gray-400'}`}/>
+                                                )}
+                                            </div>
+                                            <input
+                                                ref={searchInputRef}
+                                                type="text"
+                                                className={`pl-10 pr-10 py-3 w-full rounded-lg
+                                                    bg-transparent
+                                                    border border-gray-200/50 dark:border-gray-700/50
+                                                    text-gray-900 dark:text-gray-100 
+                                                    placeholder-gray-500 dark:placeholder-gray-400
+                                                    focus:border-blue-500/10 focus:ring-0
+                                                    transition-all duration-300
+                                                    hover:border-gray-300/50 dark:hover:border-gray-600/50`}
+                                                value={searchTerm}
+                                                onChange={(e) => setSearchTerm(e.target.value)}
+                                                onFocus={() => setIsSearchFocused(true)}
+                                                onBlur={() => setIsSearchFocused(false)}
+                                                placeholder={currentPlaceholder}
+                                                aria-label="Search properties by name or location"
+                                            />
+                                            {searchTerm && (
+                                                <button
+                                                    onClick={() => setSearchTerm('')}
+                                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 
+                                                        hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-300"
+                                                >
+                                                    <X className="h-5 w-5"/>
+                                                </button>
+                                            )}
+                                        </div>
+                                        {/* Search Results Count */}
+                                        {searchTerm && !isLoading && (
                                             <div
-                                                className={`absolute inset-0 pointer-events-none
-                                                    flex items-center pl-10 pr-10 text-gray-500 dark:text-gray-400
-                                                    transition-opacity duration-300 ease-in-out
-                                                    animate-placeholder-show`}
-                                                aria-hidden="true"
-                                            >
-                                                {nextPlaceholder}
+                                                className="absolute -bottom-6 left-0 text-xs text-gray-400 dark:text-gray-500">
+                                                Found {properties.length} {properties.length === 1 ? 'match ' : 'matches '}
+                                                for "{searchTerm}"
                                             </div>
                                         )}
                                     </div>
-                                    {searchTerm && (
-                                        <button
-                                            onClick={() => setSearchTerm('')}
-                                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 
-                                                hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-300"
-                                        >
-                                            <X className="h-5 w-5"/>
-                                        </button>
-                                    )}
+                                    <FeatureToggle
+                                        featureKey="WORK_ORDER_TYPES"
+                                        icon={BarChart2}
+                                        label="Work Order Types"
+                                        isBeta={true}
+                                    />
                                 </div>
-                                {/* Search Results Count */}
-                                {searchTerm && !isLoading && (
-                                    <div className="absolute -bottom-6 left-0 text-xs text-gray-400 dark:text-gray-500">
-                                        Found {properties.length} {properties.length === 1 ? 'match ' : 'matches '}
-                                        for "{searchTerm}"
-                                    </div>
-                                )}
                             </div>
                             <button
                                 className={`flex flex-col items-center justify-center gap-1 px-6 py-3 rounded-lg
