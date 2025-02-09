@@ -1560,7 +1560,7 @@ def schedule_data_refresh():
         schedule_data_refresh._scheduler.add_job(
             task_manager.cleanup_old_tasks,
             'interval',
-            minutes=5,  # Run every 5 minutes
+            minutes=Config.TASK_CLEANUP_INTERVAL,
             id='task_cleanup'
         )
 
